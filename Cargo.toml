@@ -1,0 +1,60 @@
+[workspace]
+resolver = "2"
+members = [
+    "apps/wallspan-desktop",
+    "crates/wallspan-core",
+    "crates/wallspan-platform",
+    "crates/wallspan-providers",
+    "crates/wallspan-render",
+]
+default-members = [
+    "crates/wallspan-core",
+    "crates/wallspan-platform",
+    "crates/wallspan-providers",
+    "crates/wallspan-render",
+]
+
+[workspace.package]
+version = "0.1.0"
+edition = "2024"
+rust-version = "1.85"
+publish = false
+repository = "https://github.com/fritz-fritz/wallspan"
+
+[workspace.dependencies]
+async-trait = "0.1"
+cxx = "1.0.176"
+cxx-qt = "0.9.1"
+cxx-qt-build = "0.9.1"
+cxx-qt-lib = "0.9.1"
+image = { version = "0.25.8", default-features = false, features = [
+    "bmp",
+    "gif",
+    "jpeg",
+    "png",
+    "tiff",
+    "webp",
+] }
+reqwest = { version = "0.12", default-features = false, features = [
+    "json",
+    "rustls-tls",
+] }
+serde = { version = "1.0", features = ["derive"] }
+thiserror = "2.0"
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+tracing = "0.1"
+url = { version = "2.5", features = ["serde"] }
+uuid = { version = "1", features = ["serde", "v4"] }
+
+[workspace.lints.rust]
+missing_docs = "warn"
+
+[workspace.lints.clippy]
+all = { level = "warn", priority = -1 }
+pedantic = { level = "warn", priority = -1 }
+module_name_repetitions = "allow"
+must_use_candidate = "allow"
+doc_markdown = "allow"
+missing_errors_doc = "allow"
+missing_panics_doc = "allow"
+struct_excessive_bools = "allow"

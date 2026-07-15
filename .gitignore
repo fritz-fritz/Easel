@@ -1,0 +1,19 @@
+/target/
+/.idea/
+/.vscode/
+*.user
+*.swp
+*.tmp
+*.log
+.DS_Store
+Thumbs.db
+
+# Local credentials and generated configuration
+.env
+.env.*
+!.env.example
+/secrets/
+
+# Generated wallpaper and preview caches
+/artifacts/
+/cache/

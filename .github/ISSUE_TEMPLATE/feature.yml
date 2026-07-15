@@ -1,0 +1,19 @@
+name: Feature
+description: Propose a product capability
+title: "[Feature]: "
+body:
+  - type: textarea
+    id: outcome
+    attributes:
+      label: User outcome
+      description: What should become possible?
+    validations:
+      required: true
+  - type: textarea
+    id: platforms
+    attributes:
+      label: Platforms and display configuration
+  - type: textarea
+    id: constraints
+    attributes:
+      label: Provider, licensing, privacy, or compatibility constraints
