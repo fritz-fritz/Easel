@@ -1,11 +1,15 @@
 //! Compose-page presentation model and background preview rendering.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::pin::Pin;
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
+use std::thread;
 
-use cxx_qt::{CxxQtType, Threading};
+use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
+use url::Url;
 use wallspan_core::{FitMode, Profile};
 use wallspan_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 
@@ -56,6 +60,7 @@ pub struct ComposeControllerRust {
     focal_y: f64,
     source_path: QString,
     job_generation: AtomicU64,
+    job_tx: Sender<PreviewJob>,
 }
 
 impl Default for ComposeControllerRust {
@@ -70,14 +75,16 @@ impl Default for ComposeControllerRust {
             focal_y: 0.5,
             source_path: QString::default(),
             job_generation: AtomicU64::new(0),
+            job_tx: preview_job_sender(),
         }
     }
 }
 
 impl qobject::ComposeController {
     fn set_source_path_from_url(mut self: Pin<&mut Self>, url: QString) {
-        let path = strip_file_url(&url.to_string());
-        self.as_mut().set_source_path(QString::from(path.as_str()));
+        let path = path_from_file_url(&url.to_string());
+        self.as_mut()
+            .set_source_path(QString::from(path.to_string_lossy().as_ref()));
         self.as_mut()
             .set_preview_status(QString::from("Rendering preview…"));
         self.refresh_preview();
@@ -120,49 +127,86 @@ impl qobject::ComposeController {
             purpose: RenderPurpose::StaticWallpaper,
         };
         let output_dir = preview_cache_dir();
+        let qt_thread = self.qt_thread();
+        let job_tx = self.as_ref().rust().job_tx.clone();
 
         self.as_mut()
             .set_preview_status(QString::from("Rendering preview…"));
 
-        let qt_thread = self.qt_thread();
-        std::thread::spawn(move || {
-            let result = RasterJob {
-                request,
-                output_dir,
+        // Latest-wins: the worker drains queued jobs so drag updates do not spawn threads.
+        let _ = job_tx.send(PreviewJob {
+            generation,
+            request,
+            output_dir,
+            qt_thread,
+        });
+    }
+}
+
+struct PreviewJob {
+    generation: u64,
+    request: RenderRequest,
+    output_dir: PathBuf,
+    qt_thread: CxxQtThread<qobject::ComposeController>,
+}
+
+fn preview_job_sender() -> Sender<PreviewJob> {
+    static SENDER: OnceLock<Sender<PreviewJob>> = OnceLock::new();
+    SENDER
+        .get_or_init(|| {
+            let (tx, rx) = mpsc::channel();
+            thread::Builder::new()
+                .name("wallspan-compose-preview".into())
+                .spawn(move || preview_worker(rx))
+                .expect("compose preview worker thread");
+            tx
+        })
+        .clone()
+}
+
+fn preview_worker(rx: Receiver<PreviewJob>) {
+    while let Ok(mut job) = rx.recv() {
+        while let Ok(newer) = rx.try_recv() {
+            job = newer;
+        }
+
+        let generation = job.generation;
+        let result = RasterJob {
+            request: job.request,
+            output_dir: job.output_dir,
+        }
+        .execute();
+
+        let _ = job.qt_thread.queue(move |mut controller| {
+            let current = controller
+                .as_ref()
+                .rust()
+                .job_generation
+                .load(Ordering::SeqCst);
+            if current != generation {
+                return;
             }
-            .execute();
 
-            let _ = qt_thread.queue(move |mut controller| {
-                let current = controller
-                    .as_ref()
-                    .rust()
-                    .job_generation
-                    .load(Ordering::SeqCst);
-                if current != generation {
-                    return;
-                }
-
-                match result {
-                    Ok(outputs) => {
-                        let mut previews = QStringList::default();
-                        for output in outputs {
-                            let url = format!("file://{}", output.path.display());
-                            previews.append_clone(&QString::from(url.as_str()));
-                        }
-                        controller.as_mut().set_display_previews(previews);
-                        controller.as_mut().set_preview_ready(true);
-                        controller.as_mut().set_preview_status(QString::from(
-                            "Preview ready · Apply is not implemented yet",
-                        ));
+            match result {
+                Ok(outputs) => {
+                    let mut previews = QStringList::default();
+                    for output in outputs {
+                        let url = file_url_from_path(&output.path);
+                        previews.append_clone(&QString::from(url.as_str()));
                     }
-                    Err(error) => {
-                        controller.as_mut().set_preview_ready(false);
-                        controller.as_mut().set_preview_status(QString::from(
-                            format!("Preview failed: {error}").as_str(),
-                        ));
-                    }
+                    controller.as_mut().set_display_previews(previews);
+                    controller.as_mut().set_preview_ready(true);
+                    controller.as_mut().set_preview_status(QString::from(
+                        "Preview ready · Apply is not implemented yet",
+                    ));
                 }
-            });
+                Err(error) => {
+                    controller.as_mut().set_preview_ready(false);
+                    controller.as_mut().set_preview_status(QString::from(
+                        format!("Preview failed: {error}").as_str(),
+                    ));
+                }
+            }
         });
     }
 }
@@ -176,17 +220,52 @@ fn fit_mode_from_index(index: i32) -> FitMode {
     }
 }
 
-fn strip_file_url(raw: &str) -> String {
+/// Decodes a `file://` URL (or plain path) into a filesystem path.
+fn path_from_file_url(raw: &str) -> PathBuf {
     let trimmed = raw.trim();
-    if let Some(path) = trimmed.strip_prefix("file://") {
-        let path = path.strip_prefix("localhost").unwrap_or(path);
-        return path.replace("%20", " ");
+    if trimmed.is_empty() {
+        return PathBuf::new();
     }
-    trimmed.to_string()
+
+    if let Ok(url) = Url::parse(trimmed) {
+        if url.scheme() == "file" {
+            if let Ok(path) = url.to_file_path() {
+                return path;
+            }
+        }
+    }
+
+    PathBuf::from(trimmed)
+}
+
+/// Builds a `file://` URL suitable for QML `Image` sources on all platforms.
+fn file_url_from_path(path: &Path) -> String {
+    Url::from_file_path(path).map_or_else(|()| path.to_string_lossy().into_owned(), String::from)
 }
 
 fn preview_cache_dir() -> PathBuf {
     std::env::temp_dir()
         .join("wallspan")
         .join("compose-preview")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn path_from_file_url_percent_decodes() {
+        let path = path_from_file_url("file:///tmp/my%20wallpapers/a%2Bb.png");
+        assert_eq!(path, PathBuf::from("/tmp/my wallpapers/a+b.png"));
+    }
+
+    #[test]
+    fn file_url_from_path_round_trips_spaces() {
+        let original = PathBuf::from("/tmp/my wallpapers/preview.png");
+        let url = file_url_from_path(&original);
+        assert!(url.starts_with("file:"));
+        assert!(url.contains("%20") || url.contains(' '));
+        let restored = path_from_file_url(&url);
+        assert_eq!(restored, original);
+    }
 }

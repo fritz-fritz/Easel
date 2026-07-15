@@ -119,7 +119,7 @@ pub fn render_operation(
     Ok(canvas)
 }
 
-/// Writes PNG bytes through a temporary sibling path, then renames into place.
+/// Writes PNG bytes through a temporary sibling path, then replaces the destination.
 pub fn atomic_write_png(path: &Path, image: &RgbaImage) -> Result<(), RasterError> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
@@ -130,6 +130,9 @@ pub fn atomic_write_png(path: &Path, image: &RgbaImage) -> Result<(), RasterErro
         .and_then(|name| name.to_str())
         .ok_or_else(|| RasterError::InvalidOutputPath(path.to_path_buf()))?;
     let part_path = path.with_file_name(format!("{file_name}.part"));
+    let mut part_guard = PartFileGuard {
+        path: Some(part_path.clone()),
+    };
 
     {
         let mut file = fs::File::create(&part_path)?;
@@ -139,11 +142,36 @@ pub fn atomic_write_png(path: &Path, image: &RgbaImage) -> Result<(), RasterErro
         file.flush()?;
     }
 
-    fs::rename(&part_path, path)?;
-    if part_path.exists() {
-        let _ = fs::remove_file(&part_path);
-    }
+    replace_file(&part_path, path)?;
+    part_guard.defuse();
     Ok(())
+}
+
+/// Removes the destination on platforms where rename cannot overwrite, then renames.
+fn replace_file(from: &Path, to: &Path) -> Result<(), RasterError> {
+    if to.exists() {
+        fs::remove_file(to)?;
+    }
+    fs::rename(from, to)?;
+    Ok(())
+}
+
+struct PartFileGuard {
+    path: Option<PathBuf>,
+}
+
+impl PartFileGuard {
+    fn defuse(&mut self) {
+        self.path = None;
+    }
+}
+
+impl Drop for PartFileGuard {
+    fn drop(&mut self) {
+        if let Some(path) = self.path.take() {
+            let _ = fs::remove_file(path);
+        }
+    }
 }
 
 fn cache_file_name(
@@ -273,6 +301,21 @@ mod tests {
         assert!(path.is_file());
         assert!(!path.with_extension("png.part").exists());
         assert!(!dir.join("out.png.part").exists());
+    }
+
+    #[test]
+    fn atomic_write_overwrites_existing_destination() {
+        let dir = std::env::temp_dir().join("wallspan-raster-atomic-overwrite");
+        let _ = fs::create_dir_all(&dir);
+        let path = dir.join("out.png");
+        let first = RgbaImage::from_pixel(2, 2, Rgba([1, 2, 3, 255]));
+        let second = RgbaImage::from_pixel(2, 2, Rgba([9, 8, 7, 255]));
+        atomic_write_png(&path, &first).expect("first write");
+        atomic_write_png(&path, &second).expect("overwrite");
+        assert!(path.is_file());
+        assert!(!dir.join("out.png.part").exists());
+        let loaded = image::open(&path).expect("open").to_rgba8();
+        assert_eq!(*loaded.get_pixel(0, 0), Rgba([9, 8, 7, 255]));
     }
 
     #[test]

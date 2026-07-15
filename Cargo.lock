@@ -1062,6 +1062,7 @@ dependencies = [
  "cxx-qt",
  "cxx-qt-build",
  "cxx-qt-lib",
+ "url",
  "wallspan-core",
  "wallspan-render",
 ]

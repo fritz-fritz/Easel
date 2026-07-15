@@ -104,7 +104,10 @@ impl Default for LetterboxColor {
 pub struct CompositionSettings {
     /// Scaling behavior.
     pub fit_mode: FitMode,
-    /// Zoom multiplier; values below one are treated as one.
+    /// Zoom multiplier applied during planning.
+    ///
+    /// Non-finite values become `1.0`. Values below one are clamped to one when planning.
+    /// Persistent [`Profile`] values still reject zoom below one via [`Profile::validate`].
     pub zoom: f64,
     /// Horizontal focal point from zero through one.
     pub focal_x: f64,
@@ -121,6 +124,22 @@ impl CompositionSettings {
             zoom: profile.zoom,
             focal_x: profile.focal_x,
             focal_y: profile.focal_y,
+        }
+        .normalized()
+    }
+
+    /// Returns settings with finite zoom ≥ 1 and focal points clamped to `0..=1`.
+    #[must_use]
+    pub fn normalized(self) -> Self {
+        Self {
+            fit_mode: self.fit_mode,
+            zoom: if self.zoom.is_finite() {
+                self.zoom.max(1.0)
+            } else {
+                1.0
+            },
+            focal_x: self.focal_x.clamp(0.0, 1.0),
+            focal_y: self.focal_y.clamp(0.0, 1.0),
         }
     }
 }
@@ -220,14 +239,15 @@ impl RenderPlan {
         if source_size.width == 0 || source_size.height == 0 {
             return Err(RenderPlanError::EmptySourceSize);
         }
-        validate_composition(composition)?;
+        let composition = composition.normalized();
+        validate_composition(&composition)?;
 
         Ok(self
             .outputs
             .iter()
             .map(|output| {
                 let (source_crop, destination_rect) =
-                    plan_fit(source_size, output.native_size, composition);
+                    plan_fit(source_size, output.native_size, &composition);
                 OutputOperation {
                     display_id: output.display_id,
                     native_size: output.native_size,
@@ -242,14 +262,11 @@ impl RenderPlan {
 }
 
 fn validate_composition(composition: &CompositionSettings) -> Result<(), RenderPlanError> {
-    if !composition.zoom.is_finite() || composition.zoom < 1.0 {
+    // Planning clamps zoom and focals via [`CompositionSettings::normalized`]. Reject only
+    // values that cannot be repaired (non-finite zoom).
+    if !composition.zoom.is_finite() {
         return Err(RenderPlanError::InvalidComposition(
             ProfileValidationError::InvalidZoom,
-        ));
-    }
-    if !(0.0..=1.0).contains(&composition.focal_x) || !(0.0..=1.0).contains(&composition.focal_y) {
-        return Err(RenderPlanError::InvalidComposition(
-            ProfileValidationError::InvalidFocalPoint,
         ));
     }
     Ok(())
@@ -336,5 +353,29 @@ mod tests {
         assert_eq!(ops.len(), 2);
         assert_eq!(ops[0].canvas_size.width, 100);
         assert_eq!(ops[1].canvas_size.width, 200);
+    }
+
+    #[test]
+    fn operations_clamp_sub_one_zoom() {
+        let displays = vec![sample_display(100, 100)];
+        let plan = RenderPlan::for_displays(&displays).expect("plan");
+        let ops = plan
+            .operations(
+                NativePixelSize {
+                    width: 200,
+                    height: 200,
+                },
+                &CompositionSettings {
+                    fit_mode: FitMode::Cover,
+                    zoom: 0.25,
+                    focal_x: 1.5,
+                    focal_y: -0.5,
+                },
+            )
+            .expect("ops");
+        assert_eq!(ops.len(), 1);
+        // Clamped zoom of 1.0 with Cover on equal aspects uses the full source.
+        assert_eq!(ops[0].source_crop.width, 200);
+        assert_eq!(ops[0].source_crop.height, 200);
     }
 }
