@@ -9,6 +9,10 @@ repository.workspace = true
 [dependencies]
 thiserror.workspace = true
 wallspan-core = { path = "../wallspan-core" }
+url.workspace = true
+
+[target.'cfg(windows)'.dependencies]
+windows.workspace = true
 
 [lints]
 workspace = true

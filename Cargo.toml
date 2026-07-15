@@ -42,9 +42,17 @@ reqwest = { version = "0.12", default-features = false, features = [
 serde = { version = "1.0", features = ["derive"] }
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
+toml = "0.8"
 tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
+windows = { version = "0.58", features = [
+    "Win32_Foundation",
+    "Win32_Graphics_Gdi",
+    "Win32_System_Com",
+    "Win32_UI_Shell",
+    "Win32_UI_WindowsAndMessaging",
+] }
 
 [workspace.lints.rust]
 missing_docs = "warn"
