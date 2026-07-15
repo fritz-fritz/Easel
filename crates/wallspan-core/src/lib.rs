@@ -15,6 +15,6 @@ pub use display::{
     PhysicalPoint, PhysicalSize, ScaleFactor,
 };
 pub use profile::{
-    FitMode, LoopMode, PlaybackPolicy, PresentationMode, Profile, ProfileId,
-    ProfileValidationError, PROFILE_SCHEMA_VERSION,
+    FitMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode, Profile,
+    ProfileId, ProfileValidationError,
 };

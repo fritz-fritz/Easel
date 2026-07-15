@@ -1,4 +1,14 @@
+//! Wallspan Qt Quick desktop application.
+
+#![allow(
+    clippy::float_cmp,
+    clippy::needless_pass_by_value,
+    clippy::unnecessary_box_returns
+)]
+
 mod app_controller;
+mod compose_controller;
+mod fixtures;
 
 use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 

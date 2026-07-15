@@ -33,7 +33,7 @@ pub struct AppControllerRust {
 impl Default for AppControllerRust {
     fn default() -> Self {
         Self {
-            status_text: "Architecture scaffold".into(),
+            status_text: "Render foundation preview".into(),
             display_count: 3,
             online_sources_available: false,
         }

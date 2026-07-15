@@ -1,5 +1,6 @@
 import QtQuick
 import QtQuick.Controls
+import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
 
@@ -19,6 +20,17 @@ ApplicationWindow {
         id: controller
     }
 
+    ComposeController {
+        id: compose
+    }
+
+    FileDialog {
+        id: imageDialog
+        title: qsTr("Open local image")
+        nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif)"), qsTr("All files (*)")]
+        onAccepted: compose.setSourcePathFromUrl(selectedFile)
+    }
+
     header: ToolBar {
         RowLayout {
             anchors.fill: parent
@@ -33,9 +45,10 @@ ApplicationWindow {
             }
 
             Label {
-                text: controller.statusText
+                text: pageStack.currentIndex === 0 ? compose.previewStatus : controller.statusText
                 opacity: 0.65
                 Layout.fillWidth: true
+                elide: Text.ElideRight
             }
 
             ToolButton {
@@ -142,6 +155,12 @@ ApplicationWindow {
                             }
                         }
 
+                        Button {
+                            text: qsTr("Open image")
+                            Accessible.name: text
+                            onClicked: imageDialog.open()
+                        }
+
                         ComboBox {
                             model: [qsTr("Desk — all displays"), qsTr("Center display"), qsTr("Side displays")]
                             Layout.preferredWidth: 220
@@ -153,6 +172,8 @@ ApplicationWindow {
                         Layout.preferredHeight: 330
                         Layout.leftMargin: 24
                         Layout.rightMargin: 24
+                        previewUrls: compose.displayPreviews
+                        previewReady: compose.previewReady
                     }
 
                     GroupBox {
@@ -180,9 +201,52 @@ ApplicationWindow {
                             }
 
                             Label { text: qsTr("Fit") }
-                            ComboBox { model: [qsTr("Cover"), qsTr("Contain"), qsTr("Stretch"), qsTr("Native")] }
+                            ComboBox {
+                                id: fitMode
+                                model: [qsTr("Cover"), qsTr("Contain"), qsTr("Stretch"), qsTr("Native")]
+                                currentIndex: compose.fitModeIndex
+                                onActivated: {
+                                    compose.fitModeIndex = currentIndex
+                                    compose.refreshPreview()
+                                }
+                            }
                             Label { text: qsTr("Zoom") }
-                            Slider { from: 1.0; to: 3.0; value: 1.0; Layout.fillWidth: true }
+                            Slider {
+                                id: zoomSlider
+                                from: 1.0
+                                to: 3.0
+                                value: compose.zoom
+                                Layout.fillWidth: true
+                                onMoved: {
+                                    compose.zoom = value
+                                    compose.refreshPreview()
+                                }
+                            }
+
+                            Label { text: qsTr("Focal X") }
+                            Slider {
+                                id: focalXSlider
+                                from: 0.0
+                                to: 1.0
+                                value: compose.focalX
+                                Layout.fillWidth: true
+                                onMoved: {
+                                    compose.focalX = value
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Focal Y") }
+                            Slider {
+                                id: focalYSlider
+                                from: 0.0
+                                to: 1.0
+                                value: compose.focalY
+                                Layout.fillWidth: true
+                                onMoved: {
+                                    compose.focalY = value
+                                    compose.refreshPreview()
+                                }
+                            }
 
                             Label { text: qsTr("Correction") }
                             ComboBox { model: [qsTr("Physical + bezel"), qsTr("Digital only")] }
@@ -196,7 +260,13 @@ ApplicationWindow {
                         Layout.rightMargin: 24
                         Layout.bottomMargin: 20
                         Button { text: qsTr("Save profile") }
-                        Button { text: qsTr("Apply"); highlighted: true }
+                        Button {
+                            text: qsTr("Apply")
+                            highlighted: true
+                            enabled: false
+                            ToolTip.visible: hovered
+                            ToolTip.text: qsTr("Wallpaper apply backends are not implemented in this milestone.")
+                        }
                     }
                 }
             }

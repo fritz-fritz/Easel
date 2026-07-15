@@ -15,6 +15,18 @@ impl DisplayId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Creates a stable display identity from a UUID byte layout.
+    #[must_use]
+    pub fn from_u128(value: u128) -> Self {
+        Self(Uuid::from_u128(value))
+    }
+
+    /// Returns the canonical hyphenated UUID string.
+    #[must_use]
+    pub fn to_hyphenated_string(self) -> String {
+        self.0.hyphenated().to_string()
+    }
 }
 
 impl Default for DisplayId {

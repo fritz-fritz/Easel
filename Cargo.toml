@@ -27,7 +27,7 @@ cxx = "1.0.176"
 cxx-qt = "0.9.1"
 cxx-qt-build = "0.9.1"
 cxx-qt-lib = "0.9.1"
-image = { version = "0.25.8", default-features = false, features = [
+image = { version = "=0.25.8", default-features = false, features = [
     "bmp",
     "gif",
     "jpeg",

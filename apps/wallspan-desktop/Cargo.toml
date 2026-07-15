@@ -10,7 +10,9 @@ repository.workspace = true
 cxx.workspace = true
 cxx-qt.workspace = true
 cxx-qt-lib = { workspace = true, features = ["qt_full"] }
+url.workspace = true
 wallspan-core = { path = "../../crates/wallspan-core" }
+wallspan-render = { path = "../../crates/wallspan-render" }
 
 [build-dependencies]
 cxx-qt-build = { workspace = true, features = ["link_qt_object_files"] }

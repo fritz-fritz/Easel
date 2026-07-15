@@ -1,3 +1,5 @@
+//! CXX-Qt build wiring for the Wallspan QML module.
+
 use cxx_qt_build::{CxxQtBuilder, QmlModule};
 
 fn main() {
@@ -9,6 +11,6 @@ fn main() {
                 "qml/components/PhotoCard.qml",
             ]),
     )
-    .files(["src/app_controller.rs"])
+    .files(["src/app_controller.rs", "src/compose_controller.rs"])
     .build();
 }

@@ -7,8 +7,12 @@ publish.workspace = true
 repository.workspace = true
 
 [dependencies]
+image = { workspace = true }
 thiserror.workspace = true
 wallspan-core = { path = "../wallspan-core" }
+
+[dev-dependencies]
+crc32fast = "1.5"
 
 [lints]
 workspace = true
