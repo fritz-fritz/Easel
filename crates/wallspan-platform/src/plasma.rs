@@ -227,8 +227,11 @@ mod tests {
 
     #[test]
     fn script_contains_geometry_and_reload() {
+        let path = std::env::temp_dir().join("wallspan-plasma-wall.png");
+        let expected_url =
+            Url::from_file_path(&path).expect("temp path should convert to file URL");
         let wallpaper = sample_wallpaper(
-            "/tmp/wall.png",
+            path.to_str().expect("temp path is UTF-8"),
             LogicalRect {
                 x: 2560,
                 y: 0,
@@ -240,7 +243,7 @@ mod tests {
         assert!(script.contains("setForGeometry(2560, 0, 3840, 2160"));
         assert!(script.contains("org.kde.image"));
         assert!(script.contains("reloadConfig"));
-        assert!(script.contains("file:///tmp/wall.png"));
+        assert!(script.contains(expected_url.as_str()));
     }
 
     #[test]
