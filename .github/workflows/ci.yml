@@ -259,7 +259,6 @@ jobs:
             const path = require('path');
             const { owner, repo } = context.repo;
             const runId = context.runId;
-            const token = process.env.GITHUB_TOKEN;
 
             const artifacts = await github.paginate(
               github.rest.actions.listWorkflowRunArtifacts,
@@ -308,53 +307,11 @@ jobs:
               return `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}/artifacts/${artifact.id}`;
             }
 
-            // github.com/.../artifacts/{id} is session-auth only and returns 404 to
-            // GitHub's camo proxy, so markdown ![img](that-url) never renders.
-            // Resolve to the short-lived Azure signed download URL instead: it serves
-            // image/png anonymously so camo can fetch it. Warm camo immediately so
-            // the proxy keeps a cached copy after the SAS token expires (~10 min).
-            async function signedImageUrl(artifactId) {
-              const res = await fetch(
-                `https://api.github.com/repos/${owner}/${repo}/actions/artifacts/${artifactId}/zip`,
-                {
-                  headers: {
-                    Authorization: `Bearer ${token}`,
-                    Accept: 'application/vnd.github+json',
-                    'X-GitHub-Api-Version': '2022-11-28',
-                  },
-                  redirect: 'manual',
-                },
-              );
-              if (res.status !== 302 && res.status !== 301) {
-                throw new Error(
-                  `artifact ${artifactId}: expected redirect, got HTTP ${res.status}`,
-                );
-              }
-              const location = res.headers.get('location');
-              if (!location) {
-                throw new Error(`artifact ${artifactId}: missing Location header`);
-              }
-              return location;
-            }
-
-            async function warmCamo(imageUrl) {
-              const html = await github.rest.markdown.render({
-                text: `![warm](${imageUrl})`,
-                mode: 'gfm',
-                context: `${owner}/${repo}`,
-              });
-              const match = String(html.data).match(
-                /src="(https:\/\/camo\.githubusercontent\.com\/[^"]+)"/,
-              );
-              if (!match) {
-                core.warning(`camo URL not found while warming ${imageUrl.slice(0, 80)}…`);
-                return;
-              }
-              const camoRes = await fetch(match[1]);
-              if (!camoRes.ok) {
-                core.warning(`camo warm failed (${camoRes.status}) for ${match[1].slice(0, 80)}…`);
-              }
-            }
+            // GitHub Actions artifact page URLs are session-auth and cannot be
+            // embedded via markdown images (camo gets 404). GITHUB_TOKEN also
+            // cannot mint durable public image URLs. This comment links the
+            // unzipped artifacts for download; inline previews are posted
+            // separately via Cursor CDN.
 
             const visualDir = 'visuals';
             let files = [];
@@ -375,35 +332,21 @@ jobs:
               const meta = describe(name);
               const dims = pngDimensions(path.join(visualDir, name));
               const artifact = byName.get(name);
-              if (!artifact) {
-                rows.push(
-                  `| _missing_ | \`${name}\` | ${meta.kind} | ${meta.platform} | ${meta.meaning} | ${dims} |`,
-                );
-                continue;
-              }
-              const pageHref = artifactPageUrl(artifact);
-              let preview = `_unavailable_`;
-              try {
-                const imageHref = await signedImageUrl(artifact.id);
-                await warmCamo(imageHref);
-                preview = `![${name}](${imageHref})`;
-              } catch (error) {
-                core.warning(`preview URL for ${name}: ${error.message}`);
-              }
-              const link = `[\`${name}\`](${pageHref})`;
+              const href = artifact ? artifactPageUrl(artifact) : null;
+              const link = href ? `[\`${name}\`](${href})` : `\`${name}\``;
               rows.push(
-                `| ${preview} | ${link} | ${meta.kind} | ${meta.platform} | ${meta.meaning} | ${dims} |`,
+                `| ${link} | ${meta.kind} | ${meta.platform} | ${meta.meaning} | ${dims} |`,
               );
             }
 
             const body = [
               '<!-- wallspan-visual-review -->',
-              '## Visual review',
+              '## Visual artifacts',
               '',
               `From [CI run #${context.runNumber}](${runUrl}).`,
               '',
-              '| Preview | File | Kind | Platform | Meaning | Dimensions |',
-              '| --- | --- | --- | --- | --- | --- |',
+              '| File | Kind | Platform | Meaning | Dimensions |',
+              '| --- | --- | --- | --- | --- |',
               ...rows,
               '',
             ].join('\n');
