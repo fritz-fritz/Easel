@@ -17,3 +17,6 @@ Thumbs.db
 # Generated wallpaper and preview caches
 /artifacts/
 /cache/
+
+# Local QML language-server state
+**/.qmlls.ini

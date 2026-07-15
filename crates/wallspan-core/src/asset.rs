@@ -35,6 +35,7 @@ pub struct ProviderAssetId {
 /// Where media bytes originate.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
+#[allow(clippy::large_enum_variant)]
 pub enum AssetLocation {
     /// User-controlled local file.
     Local {
