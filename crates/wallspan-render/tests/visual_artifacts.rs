@@ -67,10 +67,14 @@ fn display(id: u128, connector: &str, width: u32, height: u32, x: i32, y: i32) -
 
 #[test]
 fn write_apply_payload_visual_artifacts() {
-    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");
-    let out_dir = env::var_os("WALLSPAN_VISUAL_OUTDIR")
-        .map_or_else(|| env::temp_dir().join("wallspan-visual"), PathBuf::from);
+    // CI sets WALLSPAN_VISUAL_OUTDIR. Skip locally so `cargo test` does not leave
+    // PNGs under a shared temp path or cross-contaminate runs.
+    let Some(out_dir) = env::var_os("WALLSPAN_VISUAL_OUTDIR").map(PathBuf::from) else {
+        eprintln!("skipping write_apply_payload_visual_artifacts: WALLSPAN_VISUAL_OUTDIR unset");
+        return;
+    };
 
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");
     std::fs::create_dir_all(&out_dir).expect("visual out dir");
 
     let displays = fixture_displays();

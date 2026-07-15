@@ -157,13 +157,21 @@ impl qobject::ComposeController {
         self.as_mut()
             .set_preview_status(QString::from("Rendering full-resolution wallpaper…"));
 
-        let _ = job_tx.send(WorkerJob::Apply(ApplyJob {
-            generation,
-            request,
-            displays,
-            output_dir,
-            qt_thread,
-        }));
+        if job_tx
+            .send(WorkerJob::Apply(ApplyJob {
+                generation,
+                request,
+                displays,
+                output_dir,
+                qt_thread,
+            }))
+            .is_err()
+        {
+            self.as_mut().set_apply_busy(false);
+            self.as_mut().set_preview_status(QString::from(
+                "Apply failed: background worker is unavailable",
+            ));
+        }
     }
 }
 
@@ -226,14 +234,28 @@ fn worker_sender() -> Sender<WorkerJob> {
 }
 
 fn worker_loop(rx: Receiver<WorkerJob>) {
-    while let Ok(mut job) = rx.recv() {
+    while let Ok(first) = rx.recv() {
+        // Coalesce queued work without letting Preview supersede Apply.
+        // Latest Preview and latest Apply are kept independently; Apply runs
+        // first so busy-state clearing cannot be skipped if Preview was newer.
+        let mut preview: Option<PreviewJob> = None;
+        let mut apply: Option<ApplyJob> = None;
+        match first {
+            WorkerJob::Preview(job) => preview = Some(job),
+            WorkerJob::Apply(job) => apply = Some(job),
+        }
         while let Ok(newer) = rx.try_recv() {
-            job = newer;
+            match newer {
+                WorkerJob::Preview(job) => preview = Some(job),
+                WorkerJob::Apply(job) => apply = Some(job),
+            }
         }
 
-        match job {
-            WorkerJob::Preview(preview) => run_preview(preview),
-            WorkerJob::Apply(apply) => run_apply(apply),
+        if let Some(job) = apply {
+            run_apply(job);
+        }
+        if let Some(job) = preview {
+            run_preview(job);
         }
     }
 }

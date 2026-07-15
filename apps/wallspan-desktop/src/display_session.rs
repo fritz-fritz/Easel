@@ -305,12 +305,36 @@ fn save_arrangement(arrangement: &DisplayArrangement) -> Result<(), String> {
     let text = toml::to_string_pretty(arrangement).map_err(|error| error.to_string())?;
     let path = arrangement_path();
     let temp = path.with_extension("toml.part");
+    let stash = path.with_extension("toml.bak");
     {
         let mut file = fs::File::create(&temp).map_err(|error| error.to_string())?;
         file.write_all(text.as_bytes())
             .map_err(|error| error.to_string())?;
         file.sync_all().map_err(|error| error.to_string())?;
     }
-    fs::rename(&temp, &path).map_err(|error| error.to_string())?;
-    Ok(())
+
+    // Windows cannot rename over an existing destination. Stash the previous
+    // file, move the new one into place, then remove the stash.
+    let had_existing = path.exists();
+    if had_existing {
+        let _ = fs::remove_file(&stash);
+        fs::rename(&path, &stash).map_err(|error| {
+            let _ = fs::remove_file(&temp);
+            error.to_string()
+        })?;
+    }
+
+    match fs::rename(&temp, &path) {
+        Ok(()) => {
+            let _ = fs::remove_file(&stash);
+            Ok(())
+        }
+        Err(error) => {
+            if had_existing {
+                let _ = fs::rename(&stash, &path);
+            }
+            let _ = fs::remove_file(&temp);
+            Err(error.to_string())
+        }
+    }
 }

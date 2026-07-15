@@ -118,7 +118,11 @@ pub fn escape_js_string(value: &str) -> String {
     escaped
 }
 
-/// Command line used to invoke Plasma scripting without mutating the session.
+/// Builds the `qdbus6` argv used to run `PlasmaShell.evaluateScript`.
+///
+/// This is the **mutating apply** path: the script may write wallpaper config.
+/// Session reachability probes must not use this; they go through
+/// `plasma_available`, which only introspects the D-Bus object.
 #[must_use]
 pub fn plasma_evaluate_command(script: &str) -> Vec<String> {
     vec![
