@@ -59,6 +59,11 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "use_fixture_displays"]
         fn useFixtureDisplays(self: Pin<&mut Self>);
+
+        /// Exits the process immediately after a smoke screenshot (skips Qt teardown).
+        #[qinvokable]
+        #[rust_name = "force_smoke_exit"]
+        fn forceSmokeExit(self: Pin<&mut Self>, code: i32);
     }
 }
 
@@ -164,6 +169,13 @@ impl qobject::AppController {
         self.as_mut()
             .set_status_text("Using fixture three-monitor layout".into());
         self.publish_layout();
+    }
+
+    fn force_smoke_exit(self: Pin<&mut Self>, code: i32) {
+        let _ = self;
+        // Immediate process exit avoids intermittent Qt teardown crashes on macOS
+        // after grabToImage (native Quick Controls style + ApplicationWindow shutdown).
+        std::process::exit(code);
     }
 
     fn publish_layout(mut self: Pin<&mut Self>) {

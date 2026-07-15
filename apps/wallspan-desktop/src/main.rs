@@ -19,11 +19,20 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
-    if let Some(outdir) = parse_smoke_outdir(&args) {
+    let smoke = parse_smoke_outdir(&args);
+    if let Some(outdir) = &smoke {
         let image_path = smoke_sample_image();
         if !image_path.is_file() {
             eprintln!("smoke sample image missing: {}", image_path.display());
             process::exit(2);
+        }
+        // macOS native Quick Controls crash during style customization / teardown
+        // in headless CI; Fusion is stable for smoke captures.
+        if env::var_os("QT_QUICK_CONTROLS_STYLE").is_none() {
+            // SAFETY: set before QGuiApplication is constructed.
+            unsafe {
+                env::set_var("QT_QUICK_CONTROLS_STYLE", "Fusion");
+            }
         }
         display_session::use_fixture_arrangement();
         display_session::configure_smoke(outdir.clone(), image_path);

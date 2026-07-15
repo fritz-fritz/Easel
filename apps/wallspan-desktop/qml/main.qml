@@ -51,7 +51,7 @@ ApplicationWindow {
         console.log("smokeOutDir=", controller.smoke_out_dir, "image=", controller.smoke_image_path)
         if (!controller.smoke_out_dir || controller.smoke_out_dir.length === 0) {
             console.error("Smoke mode requested but smokeOutDir is empty")
-            Qt.quit()
+            controller.forceSmokeExit(1)
             return
         }
         controller.useFixtureDisplays()
@@ -60,7 +60,7 @@ ApplicationWindow {
             compose.setSourcePathFromUrl(imagePath)
         } else {
             console.error("Smoke mode missing smokeImagePath")
-            Qt.quit()
+            controller.forceSmokeExit(1)
             return
         }
         smokeTimer.start()
@@ -83,7 +83,7 @@ ApplicationWindow {
                 monitorPreview.grabToImage(function(result) {
                     var ok = result.saveToFile(path)
                     console.log("Smoke grabToImage save", path, "ok=", ok, "size=", result.width, "x", result.height)
-                    Qt.quit()
+                    controller.forceSmokeExit(ok ? 0 : 1)
                 }, Qt.size(Math.max(2, monitorPreview.width), Math.max(2, monitorPreview.height)))
             }
         }

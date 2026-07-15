@@ -31,12 +31,41 @@ jobs:
         env:
           WALLSPAN_VISUAL_OUTDIR: ${{ runner.temp }}/wallspan-visual
         run: cargo test
-      - name: Upload raster visual artifacts
+      - name: Stage individual apply-payload PNGs
         if: always()
-        uses: actions/upload-artifact@v4
+        shell: bash
+        run: |
+          set -euo pipefail
+          src="${{ runner.temp }}/wallspan-visual"
+          out="${{ runner.temp }}/wallspan-visual-named"
+          mkdir -p "$out"
+          for i in 0 1 2; do
+            if [[ -f "$src/apply-display-$i.png" ]]; then
+              cp "$src/apply-display-$i.png" \
+                "$out/apply-payload-${{ matrix.os }}-display-$i.png"
+            fi
+          done
+          ls -la "$out" 2>/dev/null || true
+      - name: Upload apply-payload display 0
+        if: always()
+        uses: actions/upload-artifact@v7
         with:
-          name: apply-payload-${{ matrix.os }}
-          path: ${{ runner.temp }}/wallspan-visual/*.png
+          path: ${{ runner.temp }}/wallspan-visual-named/apply-payload-${{ matrix.os }}-display-0.png
+          archive: false
+          if-no-files-found: ignore
+      - name: Upload apply-payload display 1
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/wallspan-visual-named/apply-payload-${{ matrix.os }}-display-1.png
+          archive: false
+          if-no-files-found: ignore
+      - name: Upload apply-payload display 2
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          path: ${{ runner.temp }}/wallspan-visual-named/apply-payload-${{ matrix.os }}-display-2.png
+          archive: false
           if-no-files-found: ignore
       - name: Summarize visual artifacts
         if: always()
@@ -45,7 +74,7 @@ jobs:
           {
             echo "## Apply-payload rasters (${{ matrix.os }})"
             echo
-            ls -la "${{ runner.temp }}/wallspan-visual" 2>/dev/null || echo "_No visual files_"
+            ls -la "${{ runner.temp }}/wallspan-visual-named" 2>/dev/null || echo "_No visual files_"
           } >> "$GITHUB_STEP_SUMMARY"
       - run: cargo clippy --all-targets -- -D warnings
 
@@ -128,6 +157,7 @@ jobs:
         if: runner.os == 'Linux'
         env:
           QT_QPA_PLATFORM: xcb
+          QT_QUICK_CONTROLS_STYLE: Fusion
           CXX: g++
           CC: gcc
         run: |
@@ -137,22 +167,41 @@ jobs:
       - name: Smoke screenshot (Windows)
         if: runner.os == 'Windows'
         shell: pwsh
+        env:
+          QT_QUICK_CONTROLS_STYLE: Fusion
         run: |
           New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/wallspan-gui" | Out-Null
           cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
 
       - name: Smoke screenshot (macOS)
         if: runner.os == 'macOS'
+        env:
+          QT_QUICK_CONTROLS_STYLE: Fusion
         run: |
           mkdir -p "${{ runner.temp }}/wallspan-gui"
           cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
 
+      - name: Stage GUI smoke PNG
+        if: always()
+        shell: bash
+        run: |
+          set -euo pipefail
+          gui="${{ runner.temp }}/wallspan-gui"
+          shopt -s nullglob
+          files=("$gui"/gui-*.png)
+          if ((${#files[@]} == 0)); then
+            echo "No GUI smoke PNG found"
+            exit 0
+          fi
+          cp "${files[0]}" "$gui/gui-smoke-${{ matrix.os }}.png"
+          ls -la "$gui/gui-smoke-${{ matrix.os }}.png"
+
       - name: Upload GUI smoke screenshot
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
-          name: gui-smoke-${{ matrix.os }}
-          path: ${{ runner.temp }}/wallspan-gui/*.png
+          path: ${{ runner.temp }}/wallspan-gui/gui-smoke-${{ matrix.os }}.png
+          archive: false
           if-no-files-found: warn
 
       - name: Summarize GUI smoke
@@ -164,7 +213,7 @@ jobs:
             echo
             ls -la "${{ runner.temp }}/wallspan-gui" 2>/dev/null || echo "_No GUI smoke files_"
             echo
-            echo "Expected artifact name hint: \`${{ matrix.gui_name }}\` (actual filename uses Qt.platform.os)."
+            echo "Expected upload name: \`gui-smoke-${{ matrix.os }}.png\` (capture used Qt.platform.os)."
           } >> "$GITHUB_STEP_SUMMARY"
 
   visual-review:
@@ -176,6 +225,22 @@ jobs:
       actions: read
       pull-requests: write
     steps:
+      - name: Download apply-payload artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: apply-payload-*
+          path: visuals
+          merge-multiple: true
+
+      - name: Download GUI smoke artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v8
+        with:
+          pattern: gui-smoke-*
+          path: visuals
+          merge-multiple: true
+
       - name: Find previous visual review comment
         uses: peter-evans/find-comment@v3
         id: find-comment
@@ -190,49 +255,96 @@ jobs:
           EXISTING_COMMENT_ID: ${{ steps.find-comment.outputs.comment-id }}
         with:
           script: |
+            const fs = require('fs');
+            const path = require('path');
             const { owner, repo } = context.repo;
             const runId = context.runId;
+
             const artifacts = await github.paginate(
               github.rest.actions.listWorkflowRunArtifacts,
               { owner, repo, run_id: runId, per_page: 100 },
             );
 
-            const isVisual = (name) =>
-              name.startsWith('apply-payload-') || name.startsWith('gui-smoke-');
-            const visual = artifacts
-              .filter((a) => !a.expired && isVisual(a.name))
-              .sort((a, b) => a.name.localeCompare(b.name));
+            const byName = new Map(
+              artifacts.filter((a) => !a.expired).map((a) => [a.name, a]),
+            );
 
-            if (visual.length === 0) {
-              core.info('No visual artifacts to link');
+            function pngDimensions(filePath) {
+              const buf = fs.readFileSync(filePath);
+              if (buf.length < 24 || buf.toString('ascii', 1, 4) !== 'PNG') {
+                return 'unknown';
+              }
+              const width = buf.readUInt32BE(16);
+              const height = buf.readUInt32BE(20);
+              return `${width}×${height}`;
+            }
+
+            function describe(name) {
+              const apply = name.match(/^apply-payload-(.+)-display-(\d+)\.png$/);
+              if (apply) {
+                return {
+                  kind: 'Apply payload',
+                  platform: apply[1],
+                  meaning: `Per-display wallpaper raster for fixture display ${apply[2]} (what Apply hands to the wallpaper backend)`,
+                };
+              }
+              const gui = name.match(/^gui-smoke-(.+)\.png$/);
+              if (gui) {
+                return {
+                  kind: 'GUI smoke',
+                  platform: gui[1],
+                  meaning: 'Qt Compose monitor-preview capture after loading the smoke fixture',
+                };
+              }
+              return {
+                kind: 'Visual',
+                platform: '—',
+                meaning: name,
+              };
+            }
+
+            function artifactUrl(artifact) {
+              return `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}/artifacts/${artifact.id}`;
+            }
+
+            const visualDir = 'visuals';
+            let files = [];
+            if (fs.existsSync(visualDir)) {
+              files = fs.readdirSync(visualDir)
+                .filter((name) => name.endsWith('.png'))
+                .sort();
+            }
+
+            if (files.length === 0) {
+              core.info('No visual PNG artifacts downloaded');
               return;
             }
 
-            const artifactHref = (artifact) =>
-              `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}/artifacts/${artifact.id}`;
-
-            const section = (title, prefix) => {
-              const items = visual.filter((a) => a.name.startsWith(prefix));
-              if (items.length === 0) {
-                return '';
-              }
-              const lines = items.map((a) => {
-                const label = a.name.slice(prefix.length);
-                return `- [${label}](${artifactHref(a)})`;
-              });
-              return `### ${title}\n\n${lines.join('\n')}\n\n`;
-            };
-
             const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}`;
+            const rows = [];
+            for (const name of files) {
+              const meta = describe(name);
+              const dims = pngDimensions(path.join(visualDir, name));
+              const artifact = byName.get(name);
+              const href = artifact ? artifactUrl(artifact) : null;
+              const preview = href ? `![${name}](${href})` : '_missing_';
+              const link = href ? `[\`${name}\`](${href})` : `\`${name}\``;
+              rows.push(
+                `| ${preview} | ${link} | ${meta.kind} | ${meta.platform} | ${meta.meaning} | ${dims} |`,
+              );
+            }
+
             const body = [
               '<!-- wallspan-visual-review -->',
               '## Visual review',
               '',
               `From [CI run #${context.runNumber}](${runUrl}).`,
               '',
-              section('Apply-payload rasters', 'apply-payload-'),
-              section('Qt GUI smoke screenshots', 'gui-smoke-'),
-            ].join('\n').trimEnd() + '\n';
+              '| Preview | File | Kind | Platform | Meaning | Dimensions |',
+              '| --- | --- | --- | --- | --- | --- |',
+              ...rows,
+              '',
+            ].join('\n');
 
             const existingId = process.env.EXISTING_COMMENT_ID;
             if (existingId) {
