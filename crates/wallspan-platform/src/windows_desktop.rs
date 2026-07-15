@@ -148,9 +148,7 @@ fn enumerate_monitors(wallpaper: &IDesktopWallpaper) -> Result<Vec<MonitorInfo>,
         };
         let device_path = unsafe {
             path_hstring.to_string().map_err(|error| {
-                BackendError::Platform(format!(
-                    "monitor device path is not valid UTF-16: {error}"
-                ))
+                BackendError::Platform(format!("monitor device path is not valid UTF-16: {error}"))
             })?
         };
         let rect = unsafe {
