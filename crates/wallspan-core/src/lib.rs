@@ -2,10 +2,15 @@
 
 #![forbid(unsafe_code)]
 
+mod arrangement;
 mod asset;
 mod display;
 mod profile;
 
+pub use arrangement::{
+    ARRANGEMENT_SCHEMA_VERSION, ArrangementError, DisplayArrangement, DisplayEvidence,
+    ObservedDisplay, approximate_physical_origin, match_displays,
+};
 pub use asset::{
     AssetId, AssetLicense, AssetLocation, Attribution, FrameRate, MediaAsset, MediaDimensions,
     MediaMetadata, ProviderAssetId,

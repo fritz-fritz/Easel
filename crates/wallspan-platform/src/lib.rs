@@ -1,11 +1,21 @@
-//! Capability-reporting operating-system wallpaper backend contracts.
+//! Capability-reporting operating-system wallpaper backend contracts and adapters.
 
-#![forbid(unsafe_code)]
+#![cfg_attr(not(windows), forbid(unsafe_code))]
+
+mod plasma;
+mod probe;
+#[cfg(windows)]
+mod windows_desktop;
 
 use std::path::{Path, PathBuf};
 
 use thiserror::Error;
-use wallspan_core::{DisplayId, PlaybackPolicy};
+use wallspan_core::{DisplayId, LogicalRect, PlaybackPolicy};
+
+pub use plasma::{PlasmaBackend, build_plasma_wallpaper_script, escape_js_string};
+pub use probe::select_wallpaper_backend;
+#[cfg(windows)]
+pub use windows_desktop::WindowsDesktopBackend;
 
 /// Features exposed by the selected desktop backend.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -22,13 +32,24 @@ pub struct BackendCapabilities {
     pub lock_screen: bool,
 }
 
+/// One completed still image ready for a specific output.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DisplayWallpaper {
+    /// Stable Wallspan display identity.
+    pub display_id: DisplayId,
+    /// Absolute path to a completed PNG/JPEG wallpaper file.
+    pub path: PathBuf,
+    /// Logical compositor rectangle used to match the platform output.
+    pub logical_rect: LogicalRect,
+}
+
 /// Completed renderer output passed to a backend.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum WallpaperOutput {
     /// One combined image.
     VirtualDesktop(PathBuf),
     /// Native image for each display.
-    PerDisplay(Vec<(DisplayId, PathBuf)>),
+    PerDisplay(Vec<DisplayWallpaper>),
 }
 
 /// Runtime features exposed by a persistent live-wallpaper host.
@@ -123,6 +144,9 @@ pub enum BackendError {
     /// Requested output shape is not supported by the backend.
     #[error("backend does not support the requested output shape")]
     UnsupportedOutput,
+    /// No supported still-wallpaper backend is available in this session.
+    #[error("no supported wallpaper backend is available")]
+    NoBackend,
     /// Current desktop session has no safe live-surface integration.
     #[error("live wallpapers are unsupported in the current desktop session")]
     LiveWallpaperUnsupported,

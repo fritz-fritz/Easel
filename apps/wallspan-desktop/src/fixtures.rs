@@ -87,6 +87,7 @@ pub fn dev_displays() -> Vec<Display> {
 
 /// Preview-sized copies of [`dev_displays`] so Compose refreshes stay responsive.
 #[must_use]
+#[allow(dead_code)]
 pub fn preview_displays() -> Vec<Display> {
     const SCALE: u32 = 8;
     dev_displays()

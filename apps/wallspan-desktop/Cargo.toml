@@ -10,8 +10,12 @@ repository.workspace = true
 cxx.workspace = true
 cxx-qt.workspace = true
 cxx-qt-lib = { workspace = true, features = ["qt_full"] }
+directories = "6.0.0"
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
 url.workspace = true
 wallspan-core = { path = "../../crates/wallspan-core" }
+wallspan-platform = { path = "../../crates/wallspan-platform" }
 wallspan-render = { path = "../../crates/wallspan-render" }
 
 [build-dependencies]

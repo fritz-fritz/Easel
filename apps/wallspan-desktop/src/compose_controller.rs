@@ -1,4 +1,4 @@
-//! Compose-page presentation model and background preview rendering.
+//! Compose-page presentation model, background preview rendering, and wallpaper apply.
 
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -11,9 +11,10 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
 use url::Url;
 use wallspan_core::{FitMode, Profile};
+use wallspan_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use wallspan_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 
-use crate::fixtures::{dev_displays, preview_displays};
+use crate::display_session::{current_displays, current_preview_displays};
 
 #[cxx_qt::bridge]
 mod qobject {
@@ -35,6 +36,7 @@ mod qobject {
         #[qproperty(f64, focal_x)]
         #[qproperty(f64, focal_y)]
         #[qproperty(QString, source_path)]
+        #[qproperty(bool, apply_busy)]
         type ComposeController = super::ComposeControllerRust;
 
         #[qinvokable]
@@ -44,6 +46,10 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "refresh_preview"]
         fn refreshPreview(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[rust_name = "apply_wallpaper"]
+        fn applyWallpaper(self: Pin<&mut Self>);
     }
 
     impl cxx_qt::Threading for ComposeController {}
@@ -59,8 +65,10 @@ pub struct ComposeControllerRust {
     focal_x: f64,
     focal_y: f64,
     source_path: QString,
+    apply_busy: bool,
     job_generation: AtomicU64,
-    job_tx: Sender<PreviewJob>,
+    apply_generation: AtomicU64,
+    job_tx: Sender<WorkerJob>,
 }
 
 impl Default for ComposeControllerRust {
@@ -74,8 +82,10 @@ impl Default for ComposeControllerRust {
             focal_x: 0.5,
             focal_y: 0.5,
             source_path: QString::default(),
+            apply_busy: false,
             job_generation: AtomicU64::new(0),
-            job_tx: preview_job_sender(),
+            apply_generation: AtomicU64::new(0),
+            job_tx: worker_sender(),
         }
     }
 }
@@ -106,26 +116,7 @@ impl qobject::ComposeController {
             .fetch_add(1, Ordering::SeqCst)
             + 1;
 
-        let mut profile = Profile::new("Compose preview");
-        profile.fit_mode = fit_mode_from_index(*self.fit_mode_index());
-        profile.zoom = if self.zoom().is_finite() {
-            (*self.zoom()).max(1.0)
-        } else {
-            1.0
-        };
-        profile.focal_x = (*self.focal_x()).clamp(0.0, 1.0);
-        profile.focal_y = (*self.focal_y()).clamp(0.0, 1.0);
-        profile.displays = dev_displays()
-            .into_iter()
-            .map(|display| display.id)
-            .collect();
-
-        let request = RenderRequest {
-            source_path: PathBuf::from(source),
-            displays: preview_displays(),
-            composition: CompositionSettings::from_profile(&profile),
-            purpose: RenderPurpose::StaticWallpaper,
-        };
+        let request = build_request(&source, current_preview_displays(), self.as_ref());
         let output_dir = preview_cache_dir();
         let qt_thread = self.qt_thread();
         let job_tx = self.as_ref().rust().job_tx.clone();
@@ -133,14 +124,84 @@ impl qobject::ComposeController {
         self.as_mut()
             .set_preview_status(QString::from("Rendering preview…"));
 
-        // Latest-wins: the worker drains queued jobs so drag updates do not spawn threads.
-        let _ = job_tx.send(PreviewJob {
+        let _ = job_tx.send(WorkerJob::Preview(PreviewJob {
             generation,
             request,
             output_dir,
             qt_thread,
-        });
+        }));
     }
+
+    fn apply_wallpaper(mut self: Pin<&mut Self>) {
+        let source = self.source_path().to_string();
+        if source.trim().is_empty() {
+            self.as_mut()
+                .set_preview_status(QString::from("Open a local image before applying"));
+            return;
+        }
+
+        let generation = self
+            .as_mut()
+            .rust_mut()
+            .apply_generation
+            .fetch_add(1, Ordering::SeqCst)
+            + 1;
+
+        let displays = current_displays();
+        let request = build_request(&source, displays.clone(), self.as_ref());
+        let output_dir = apply_cache_dir();
+        let qt_thread = self.qt_thread();
+        let job_tx = self.as_ref().rust().job_tx.clone();
+
+        self.as_mut().set_apply_busy(true);
+        self.as_mut()
+            .set_preview_status(QString::from("Rendering full-resolution wallpaper…"));
+
+        if job_tx
+            .send(WorkerJob::Apply(ApplyJob {
+                generation,
+                request,
+                displays,
+                output_dir,
+                qt_thread,
+            }))
+            .is_err()
+        {
+            self.as_mut().set_apply_busy(false);
+            self.as_mut().set_preview_status(QString::from(
+                "Apply failed: background worker is unavailable",
+            ));
+        }
+    }
+}
+
+fn build_request(
+    source: &str,
+    displays: Vec<wallspan_core::Display>,
+    controller: Pin<&qobject::ComposeController>,
+) -> RenderRequest {
+    let mut profile = Profile::new("Compose");
+    profile.fit_mode = fit_mode_from_index(*controller.fit_mode_index());
+    profile.zoom = if controller.zoom().is_finite() {
+        (*controller.zoom()).max(1.0)
+    } else {
+        1.0
+    };
+    profile.focal_x = (*controller.focal_x()).clamp(0.0, 1.0);
+    profile.focal_y = (*controller.focal_y()).clamp(0.0, 1.0);
+    profile.displays = displays.iter().map(|display| display.id).collect();
+
+    RenderRequest {
+        source_path: PathBuf::from(source),
+        displays,
+        composition: CompositionSettings::from_profile(&profile),
+        purpose: RenderPurpose::StaticWallpaper,
+    }
+}
+
+enum WorkerJob {
+    Preview(PreviewJob),
+    Apply(ApplyJob),
 }
 
 struct PreviewJob {
@@ -150,65 +211,152 @@ struct PreviewJob {
     qt_thread: CxxQtThread<qobject::ComposeController>,
 }
 
-fn preview_job_sender() -> Sender<PreviewJob> {
-    static SENDER: OnceLock<Sender<PreviewJob>> = OnceLock::new();
+struct ApplyJob {
+    generation: u64,
+    request: RenderRequest,
+    displays: Vec<wallspan_core::Display>,
+    output_dir: PathBuf,
+    qt_thread: CxxQtThread<qobject::ComposeController>,
+}
+
+fn worker_sender() -> Sender<WorkerJob> {
+    static SENDER: OnceLock<Sender<WorkerJob>> = OnceLock::new();
     SENDER
         .get_or_init(|| {
             let (tx, rx) = mpsc::channel();
             thread::Builder::new()
-                .name("wallspan-compose-preview".into())
-                .spawn(move || preview_worker(rx))
-                .expect("compose preview worker thread");
+                .name("wallspan-compose-worker".into())
+                .spawn(move || worker_loop(rx))
+                .expect("compose worker thread");
             tx
         })
         .clone()
 }
 
-fn preview_worker(rx: Receiver<PreviewJob>) {
-    while let Ok(mut job) = rx.recv() {
+fn worker_loop(rx: Receiver<WorkerJob>) {
+    while let Ok(first) = rx.recv() {
+        // Coalesce queued work without letting Preview supersede Apply.
+        // Latest Preview and latest Apply are kept independently; Apply runs
+        // first so busy-state clearing cannot be skipped if Preview was newer.
+        let mut preview: Option<PreviewJob> = None;
+        let mut apply: Option<ApplyJob> = None;
+        match first {
+            WorkerJob::Preview(job) => preview = Some(job),
+            WorkerJob::Apply(job) => apply = Some(job),
+        }
         while let Ok(newer) = rx.try_recv() {
-            job = newer;
+            match newer {
+                WorkerJob::Preview(job) => preview = Some(job),
+                WorkerJob::Apply(job) => apply = Some(job),
+            }
         }
 
-        let generation = job.generation;
-        let result = RasterJob {
+        if let Some(job) = apply {
+            run_apply(job);
+        }
+        if let Some(job) = preview {
+            run_preview(job);
+        }
+    }
+}
+
+fn run_preview(job: PreviewJob) {
+    let generation = job.generation;
+    let result = RasterJob {
+        request: job.request,
+        output_dir: job.output_dir,
+    }
+    .execute();
+
+    let _ = job.qt_thread.queue(move |mut controller| {
+        let current = controller
+            .as_ref()
+            .rust()
+            .job_generation
+            .load(Ordering::SeqCst);
+        if current != generation {
+            return;
+        }
+
+        match result {
+            Ok(outputs) => {
+                let mut previews = QStringList::default();
+                for output in outputs {
+                    let url = file_url_from_path(&output.path);
+                    previews.append_clone(&QString::from(url.as_str()));
+                }
+                controller.as_mut().set_display_previews(previews);
+                controller.as_mut().set_preview_ready(true);
+                controller
+                    .as_mut()
+                    .set_preview_status(QString::from("Preview ready"));
+            }
+            Err(error) => {
+                controller.as_mut().set_preview_ready(false);
+                controller
+                    .as_mut()
+                    .set_preview_status(QString::from(format!("Preview failed: {error}").as_str()));
+            }
+        }
+    });
+}
+
+fn run_apply(job: ApplyJob) {
+    let generation = job.generation;
+    let apply_result: Result<(), String> = (|| {
+        let outputs = RasterJob {
             request: job.request,
             output_dir: job.output_dir,
         }
-        .execute();
+        .execute()
+        .map_err(|error| error.to_string())?;
 
-        let _ = job.qt_thread.queue(move |mut controller| {
-            let current = controller
-                .as_ref()
-                .rust()
-                .job_generation
-                .load(Ordering::SeqCst);
-            if current != generation {
-                return;
-            }
+        let mut wallpapers = Vec::with_capacity(outputs.len());
+        for output in outputs {
+            let logical_rect = job
+                .displays
+                .iter()
+                .find(|display| display.id == output.display_id)
+                .map(|display| display.logical_rect)
+                .ok_or_else(|| "display missing for raster output".to_owned())?;
+            wallpapers.push(DisplayWallpaper {
+                display_id: output.display_id,
+                path: output.path,
+                logical_rect,
+            });
+        }
 
-            match result {
-                Ok(outputs) => {
-                    let mut previews = QStringList::default();
-                    for output in outputs {
-                        let url = file_url_from_path(&output.path);
-                        previews.append_clone(&QString::from(url.as_str()));
-                    }
-                    controller.as_mut().set_display_previews(previews);
-                    controller.as_mut().set_preview_ready(true);
-                    controller.as_mut().set_preview_status(QString::from(
-                        "Preview ready · Apply is not implemented yet",
-                    ));
-                }
-                Err(error) => {
-                    controller.as_mut().set_preview_ready(false);
-                    controller.as_mut().set_preview_status(QString::from(
-                        format!("Preview failed: {error}").as_str(),
-                    ));
-                }
+        let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;
+        backend
+            .apply(&WallpaperOutput::PerDisplay(wallpapers))
+            .map_err(|error| error.to_string())?;
+        Ok(())
+    })();
+
+    let _ = job.qt_thread.queue(move |mut controller| {
+        let current = controller
+            .as_ref()
+            .rust()
+            .apply_generation
+            .load(Ordering::SeqCst);
+        if current != generation {
+            return;
+        }
+
+        controller.as_mut().set_apply_busy(false);
+        match apply_result {
+            Ok(()) => {
+                controller
+                    .as_mut()
+                    .set_preview_status(QString::from("Wallpaper applied"));
             }
-        });
-    }
+            Err(error) => {
+                controller
+                    .as_mut()
+                    .set_preview_status(QString::from(format!("Apply failed: {error}").as_str()));
+            }
+        }
+    });
 }
 
 fn fit_mode_from_index(index: i32) -> FitMode {
@@ -247,6 +395,10 @@ fn preview_cache_dir() -> PathBuf {
     std::env::temp_dir()
         .join("wallspan")
         .join("compose-preview")
+}
+
+fn apply_cache_dir() -> PathBuf {
+    std::env::temp_dir().join("wallspan").join("compose-apply")
 }
 
 #[cfg(test)]
