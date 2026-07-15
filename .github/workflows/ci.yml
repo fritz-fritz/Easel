@@ -173,125 +173,10 @@ jobs:
     if: always() && github.event_name == 'pull_request'
     runs-on: ubuntu-latest
     permissions:
-      contents: write
+      actions: read
       pull-requests: write
     steps:
-      - uses: actions/checkout@v7
-
-      - name: Download raster artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          pattern: apply-payload-*
-          path: visuals/raster
-          merge-multiple: false
-
-      - name: Download GUI smoke artifacts
-        continue-on-error: true
-        uses: actions/download-artifact@v4
-        with:
-          pattern: gui-smoke-*
-          path: visuals/gui
-          merge-multiple: false
-
-      - name: Stage publish tree
-        id: stage
-        shell: bash
-        run: |
-          set -euo pipefail
-          publish="publish/pr-${{ github.event.pull_request.number }}/${{ github.run_id }}"
-          mkdir -p "$publish/raster" "$publish/gui"
-          shopt -s nullglob
-          for dir in visuals/raster/apply-payload-*; do
-            os="$(basename "$dir" | sed 's/^apply-payload-//')"
-            mkdir -p "$publish/raster/$os"
-            cp -a "$dir"/*.png "$publish/raster/$os/" 2>/dev/null || true
-          done
-          for dir in visuals/gui/gui-smoke-*; do
-            os="$(basename "$dir" | sed 's/^gui-smoke-//')"
-            mkdir -p "$publish/gui/$os"
-            cp -a "$dir"/*.png "$publish/gui/$os/" 2>/dev/null || true
-          done
-          mapfile -t pngs < <(find "$publish" -name '*.png' | sort)
-          if ((${#pngs[@]} == 0)); then
-            echo "has_images=false" >> "$GITHUB_OUTPUT"
-            echo "No PNG visuals found to publish." >> "$GITHUB_STEP_SUMMARY"
-            exit 0
-          fi
-          echo "has_images=true" >> "$GITHUB_OUTPUT"
-          echo "publish_dir=$publish" >> "$GITHUB_OUTPUT"
-          echo "base_url=https://raw.githubusercontent.com/${{ github.repository }}/ci-visuals/pr-${{ github.event.pull_request.number }}/${{ github.run_id }}" >> "$GITHUB_OUTPUT"
-
-      - name: Publish visuals to ci-visuals branch
-        if: steps.stage.outputs.has_images == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          pr="${{ github.event.pull_request.number }}"
-          run_id="${{ github.run_id }}"
-          git config user.name "github-actions[bot]"
-          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
-          git fetch origin ci-visuals || true
-          worktree="$(mktemp -d)"
-          if git show-ref --verify --quiet refs/remotes/origin/ci-visuals; then
-            git worktree add -B ci-visuals "$worktree" origin/ci-visuals
-          else
-            git worktree add --detach "$worktree"
-            git -C "$worktree" checkout --orphan ci-visuals
-            git -C "$worktree" rm -rf . >/dev/null 2>&1 || true
-            git -C "$worktree" commit --allow-empty -m "Initialize ci-visuals branch"
-          fi
-          dest="$worktree/pr-$pr/$run_id"
-          rm -rf "$dest"
-          mkdir -p "$dest"
-          cp -a "${{ steps.stage.outputs.publish_dir }}/." "$dest/"
-          git -C "$worktree" add "pr-$pr/$run_id"
-          git -C "$worktree" commit -m "Visual artifacts for PR #$pr run $run_id"
-          git -C "$worktree" push origin HEAD:ci-visuals
-          git worktree remove --force "$worktree"
-
-      - name: Render comment body
-        if: steps.stage.outputs.has_images == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          base="${{ steps.stage.outputs.base_url }}"
-          {
-            echo "<!-- wallspan-visual-review -->"
-            echo "## Visual review (CI)"
-            echo
-            echo "Posted by \`github-actions[bot]\` from workflow run [#${{ github.run_number }}](${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }})."
-            echo
-            echo "Images are hosted on \`raw.githubusercontent.com\` from the \`ci-visuals\` branch."
-            echo
-            echo "### Apply-payload rasters"
-            for os_dir in publish/pr-${{ github.event.pull_request.number }}/${{ github.run_id }}/raster/*; do
-              [[ -d "$os_dir" ]] || continue
-              os="$(basename "$os_dir")"
-              echo "#### ${os}"
-              for img in "$os_dir"/*.png; do
-                [[ -f "$img" ]] || continue
-                name="$(basename "$img")"
-                echo "![${os}/${name}](${base}/raster/${os}/${name})"
-              done
-              echo
-            done
-            echo "### Qt GUI smoke screenshots"
-            for os_dir in publish/pr-${{ github.event.pull_request.number }}/${{ github.run_id }}/gui/*; do
-              [[ -d "$os_dir" ]] || continue
-              os="$(basename "$os_dir")"
-              echo "#### ${os}"
-              for img in "$os_dir"/*.png; do
-                [[ -f "$img" ]] || continue
-                name="$(basename "$img")"
-                echo "![${os}/${name}](${base}/gui/${os}/${name})"
-              done
-              echo
-            done
-          } > visuals/comment.md
-
       - name: Find previous visual review comment
-        if: steps.stage.outputs.has_images == 'true'
         uses: peter-evans/find-comment@v3
         id: find-comment
         with:
@@ -300,10 +185,68 @@ jobs:
           body-includes: <!-- wallspan-visual-review -->
 
       - name: Post or update visual review comment
-        if: steps.stage.outputs.has_images == 'true'
-        uses: peter-evans/create-or-update-comment@v4
+        uses: actions/github-script@v7
+        env:
+          EXISTING_COMMENT_ID: ${{ steps.find-comment.outputs.comment-id }}
         with:
-          issue-number: ${{ github.event.pull_request.number }}
-          comment-id: ${{ steps.find-comment.outputs.comment-id }}
-          edit-mode: replace
-          body-path: visuals/comment.md
+          script: |
+            const { owner, repo } = context.repo;
+            const runId = context.runId;
+            const artifacts = await github.paginate(
+              github.rest.actions.listWorkflowRunArtifacts,
+              { owner, repo, run_id: runId, per_page: 100 },
+            );
+
+            const isVisual = (name) =>
+              name.startsWith('apply-payload-') || name.startsWith('gui-smoke-');
+            const visual = artifacts
+              .filter((a) => !a.expired && isVisual(a.name))
+              .sort((a, b) => a.name.localeCompare(b.name));
+
+            if (visual.length === 0) {
+              core.info('No visual artifacts to link');
+              return;
+            }
+
+            const artifactHref = (artifact) =>
+              `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}/artifacts/${artifact.id}`;
+
+            const section = (title, prefix) => {
+              const items = visual.filter((a) => a.name.startsWith(prefix));
+              if (items.length === 0) {
+                return '';
+              }
+              const lines = items.map((a) => {
+                const label = a.name.slice(prefix.length);
+                return `- [${label}](${artifactHref(a)})`;
+              });
+              return `### ${title}\n\n${lines.join('\n')}\n\n`;
+            };
+
+            const runUrl = `${context.serverUrl}/${owner}/${repo}/actions/runs/${runId}`;
+            const body = [
+              '<!-- wallspan-visual-review -->',
+              '## Visual review',
+              '',
+              `From [CI run #${context.runNumber}](${runUrl}).`,
+              '',
+              section('Apply-payload rasters', 'apply-payload-'),
+              section('Qt GUI smoke screenshots', 'gui-smoke-'),
+            ].join('\n').trimEnd() + '\n';
+
+            const existingId = process.env.EXISTING_COMMENT_ID;
+            if (existingId) {
+              await github.rest.issues.updateComment({
+                owner,
+                repo,
+                comment_id: Number(existingId),
+                body,
+              });
+            } else {
+              await github.rest.issues.createComment({
+                owner,
+                repo,
+                issue_number: context.issue.number,
+                body,
+              });
+            }
