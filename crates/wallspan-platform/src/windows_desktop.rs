@@ -4,12 +4,12 @@
 
 use std::path::Path;
 
-use windows::Win32::Foundation::RECT;
+use windows::Win32::Foundation::CO_E_ALREADYINITIALIZED;
 use windows::Win32::System::Com::{
     CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
 use windows::Win32::UI::Shell::{DWPOS_FILL, DesktopWallpaper, IDesktopWallpaper};
-use windows::core::{Interface, PCWSTR};
+use windows::core::PCWSTR;
 
 use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
@@ -146,15 +146,20 @@ fn enumerate_monitors(wallpaper: &IDesktopWallpaper) -> Result<Vec<MonitorInfo>,
                 BackendError::Platform(format!("GetMonitorDevicePathAt failed: {error}"))
             })?
         };
-        let device_path = path_hstring.to_string();
-        let mut rect = RECT::default();
-        unsafe {
+        let device_path = unsafe {
+            path_hstring.to_string().map_err(|error| {
+                BackendError::Platform(format!(
+                    "monitor device path is not valid UTF-16: {error}"
+                ))
+            })?
+        };
+        let rect = unsafe {
             wallpaper
-                .GetMonitorRECT(PCWSTR(path_hstring.as_ptr()), &mut rect)
+                .GetMonitorRECT(PCWSTR(path_hstring.as_ptr()))
                 .map_err(|error| {
                     BackendError::Platform(format!("GetMonitorRECT failed: {error}"))
-                })?;
-        }
+                })?
+        };
         monitors.push(MonitorInfo {
             device_path,
             rect: wallspan_core::LogicalRect {
@@ -182,18 +187,18 @@ struct ComGuard {
 impl ComGuard {
     fn new() -> Result<Self, BackendError> {
         let result = unsafe { CoInitializeEx(None, COINIT_APARTMENTTHREADED) };
-        match result {
-            Ok(()) => Ok(Self {
+        if result.is_ok() {
+            Ok(Self {
                 should_uninit: true,
-            }),
-            Err(error) if error.code() == windows::Win32::Foundation::CO_E_ALREADYINITIALIZED => {
-                Ok(Self {
-                    should_uninit: false,
-                })
-            }
-            Err(error) => Err(BackendError::Platform(format!(
-                "CoInitializeEx failed: {error}"
-            ))),
+            })
+        } else if result == CO_E_ALREADYINITIALIZED {
+            Ok(Self {
+                should_uninit: false,
+            })
+        } else {
+            Err(BackendError::Platform(format!(
+                "CoInitializeEx failed: {result:?}"
+            )))
         }
     }
 }

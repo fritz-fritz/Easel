@@ -83,10 +83,6 @@ impl Default for AppControllerRust {
         let smoke_image = display_session::smoke_paths()
             .map(|paths| paths.image_path.to_string_lossy().into_owned())
             .unwrap_or_default();
-        if !smoke_out.is_empty() {
-            eprintln!("AppController smoke_out_dir={smoke_out}");
-            eprintln!("AppController smoke_image_path={smoke_image}");
-        }
         Self {
             status_text: "Ready".into(),
             display_count: count,

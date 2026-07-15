@@ -1,7 +1,9 @@
 //! Wallpaper backend probing and selection.
 
-use crate::plasma::{PlasmaBackend, plasma_available};
 use crate::{BackendError, WallpaperBackend};
+
+#[cfg(not(windows))]
+use crate::plasma::{PlasmaBackend, plasma_available};
 
 #[cfg(windows)]
 use crate::windows_desktop::WindowsDesktopBackend;
@@ -10,15 +12,16 @@ use crate::windows_desktop::WindowsDesktopBackend;
 pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendError> {
     #[cfg(windows)]
     {
-        return Ok(Box::new(WindowsDesktopBackend));
+        Ok(Box::new(WindowsDesktopBackend))
     }
 
     #[cfg(not(windows))]
     {
         if plasma_available() {
-            return Ok(Box::new(PlasmaBackend));
+            Ok(Box::new(PlasmaBackend))
+        } else {
+            Err(BackendError::NoBackend)
         }
-        Err(BackendError::NoBackend)
     }
 }
 

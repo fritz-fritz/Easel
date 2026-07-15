@@ -195,6 +195,7 @@ fn evaluate_plasma_script(script: &str) -> Result<(), BackendError> {
     }
 }
 
+#[cfg(not(windows))]
 /// Returns whether PlasmaShell is reachable on the session bus.
 pub(crate) fn plasma_available() -> bool {
     Command::new("qdbus6")
