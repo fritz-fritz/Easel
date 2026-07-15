@@ -24,6 +24,79 @@ ApplicationWindow {
         id: compose
     }
 
+    function probeScreens() {
+        controller.beginScreenProbe()
+        var screens = Qt.application.screens
+        for (var i = 0; i < screens.length; ++i) {
+            var screen = screens[i]
+            var physical = screen.physicalSize
+            controller.addScreenProbe(
+                        screen.name || "",
+                        screen.manufacturer || "",
+                        screen.model || "",
+                        screen.serialNumber || "",
+                        screen.virtualX,
+                        screen.virtualY,
+                        screen.width,
+                        screen.height,
+                        screen.devicePixelRatio,
+                        physical ? physical.width : 0,
+                        physical ? physical.height : 0)
+        }
+        controller.commitScreenProbe()
+        compose.refreshPreview()
+    }
+
+    function runSmokeScreenshot() {
+        console.log("smokeOutDir=", controller.smoke_out_dir, "image=", controller.smoke_image_path)
+        if (!controller.smoke_out_dir || controller.smoke_out_dir.length === 0) {
+            console.error("Smoke mode requested but smokeOutDir is empty")
+            Qt.quit()
+            return
+        }
+        controller.useFixtureDisplays()
+        var imagePath = controller.smoke_image_path
+        if (imagePath && imagePath.length > 0) {
+            compose.setSourcePathFromUrl(imagePath)
+        } else {
+            console.error("Smoke mode missing smokeImagePath")
+            Qt.quit()
+            return
+        }
+        smokeTimer.start()
+    }
+
+    Timer {
+        id: smokeTimer
+        interval: 250
+        repeat: true
+        property int ticks: 0
+        onTriggered: {
+            ticks += 1
+            var ready = compose.preview_ready
+            if (ready || ticks > 80) {
+                stop()
+                if (!ready)
+                    console.error("Smoke screenshot timed out waiting for preview; status=", compose.preview_status)
+                var os = Qt.platform.os
+                var path = controller.smoke_out_dir + "/gui-" + os + ".png"
+                monitorPreview.grabToImage(function(result) {
+                    var ok = result.saveToFile(path)
+                    console.log("Smoke grabToImage save", path, "ok=", ok, "size=", result.width, "x", result.height)
+                    Qt.quit()
+                }, Qt.size(Math.max(2, monitorPreview.width), Math.max(2, monitorPreview.height)))
+            }
+        }
+    }
+
+    Component.onCompleted: {
+        if (controller.smoke_out_dir && controller.smoke_out_dir.length > 0) {
+            runSmokeScreenshot()
+        } else {
+            probeScreens()
+        }
+    }
+
     FileDialog {
         id: imageDialog
         title: qsTr("Open local image")
@@ -45,7 +118,7 @@ ApplicationWindow {
             }
 
             Label {
-                text: pageStack.currentIndex === 0 ? compose.previewStatus : controller.statusText
+                text: pageStack.currentIndex === 0 ? compose.preview_status : controller.status_text
                 opacity: 0.65
                 Layout.fillWidth: true
                 elide: Text.ElideRight
@@ -54,7 +127,7 @@ ApplicationWindow {
             ToolButton {
                 text: qsTr("Refresh displays")
                 Accessible.name: text
-                onClicked: controller.refreshDisplays()
+                onClicked: probeScreens()
             }
 
             ToolButton {
@@ -107,7 +180,7 @@ ApplicationWindow {
                 Item { Layout.fillHeight: true }
 
                 Label {
-                    text: qsTr("%1 displays detected").arg(controller.displayCount)
+                    text: qsTr("%1 displays detected").arg(controller.display_count)
                     opacity: 0.65
                     leftPadding: 10
                 }
@@ -168,12 +241,14 @@ ApplicationWindow {
                     }
 
                     MonitorPreview {
+                        id: monitorPreview
                         Layout.fillWidth: true
                         Layout.preferredHeight: 330
                         Layout.leftMargin: 24
                         Layout.rightMargin: 24
-                        previewUrls: compose.displayPreviews
-                        previewReady: compose.previewReady
+                        previewUrls: compose.display_previews
+                        previewReady: compose.preview_ready
+                        layoutModel: controller.layout_model
                     }
 
                     GroupBox {
@@ -204,9 +279,9 @@ ApplicationWindow {
                             ComboBox {
                                 id: fitMode
                                 model: [qsTr("Cover"), qsTr("Contain"), qsTr("Stretch"), qsTr("Native")]
-                                currentIndex: compose.fitModeIndex
+                                currentIndex: compose.fit_mode_index
                                 onActivated: {
-                                    compose.fitModeIndex = currentIndex
+                                    compose.fit_mode_index = currentIndex
                                     compose.refreshPreview()
                                 }
                             }
@@ -228,10 +303,10 @@ ApplicationWindow {
                                 id: focalXSlider
                                 from: 0.0
                                 to: 1.0
-                                value: compose.focalX
+                                value: compose.focal_x
                                 Layout.fillWidth: true
                                 onMoved: {
-                                    compose.focalX = value
+                                    compose.focal_x = value
                                     compose.refreshPreview()
                                 }
                             }
@@ -240,10 +315,10 @@ ApplicationWindow {
                                 id: focalYSlider
                                 from: 0.0
                                 to: 1.0
-                                value: compose.focalY
+                                value: compose.focal_y
                                 Layout.fillWidth: true
                                 onMoved: {
-                                    compose.focalY = value
+                                    compose.focal_y = value
                                     compose.refreshPreview()
                                 }
                             }
@@ -263,9 +338,8 @@ ApplicationWindow {
                         Button {
                             text: qsTr("Apply")
                             highlighted: true
-                            enabled: false
-                            ToolTip.visible: hovered
-                            ToolTip.text: qsTr("Wallpaper apply backends are not implemented in this milestone.")
+                            enabled: compose.preview_ready && !compose.apply_busy
+                            onClicked: compose.applyWallpaper()
                         }
                     }
                 }
@@ -297,7 +371,7 @@ ApplicationWindow {
                     }
 
                     Label {
-                        visible: !controller.onlineSourcesAvailable
+                        visible: !controller.online_sources_available
                         text: qsTr("Online providers are represented in the architecture but are not connected in this scaffold.")
                         wrapMode: Text.WordWrap
                         opacity: 0.7

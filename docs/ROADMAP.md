@@ -25,6 +25,9 @@ Exit: non-Qt workspace crates build on Linux, Windows, and macOS; the QML shell 
 
 Exit: a local image can be previewed and applied without blocking the UI on Plasma 6 and Windows.
 
+**Status:** Implemented for still images (Compose preview + Apply via Plasma 6 / Windows
+backends, arrangement TOML persistence, CI GUI smoke screenshots). Live media remains Stage 6.
+
 ## Stage 2 — Physical composition
 
 - PPI normalization and user physical-size override.

@@ -4,12 +4,12 @@
 
 use std::path::Path;
 
-use windows::core::{Interface, PCWSTR};
 use windows::Win32::Foundation::RECT;
 use windows::Win32::System::Com::{
-    CoCreateInstance, CoInitializeEx, CoUninitialize, CLSCTX_ALL, COINIT_APARTMENTTHREADED,
+    CLSCTX_ALL, COINIT_APARTMENTTHREADED, CoCreateInstance, CoInitializeEx, CoUninitialize,
 };
-use windows::Win32::UI::Shell::{DesktopWallpaper, IDesktopWallpaper, DWPOS_FILL};
+use windows::Win32::UI::Shell::{DWPOS_FILL, DesktopWallpaper, IDesktopWallpaper};
+use windows::core::{Interface, PCWSTR};
 
 use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
@@ -100,7 +100,10 @@ fn set_wallpaper_for_monitor(
     monitor_id: &str,
     path: &Path,
 ) -> Result<(), BackendError> {
-    let monitor_wide: Vec<u16> = monitor_id.encode_utf16().chain(std::iter::once(0)).collect();
+    let monitor_wide: Vec<u16> = monitor_id
+        .encode_utf16()
+        .chain(std::iter::once(0))
+        .collect();
     let path_wide = wide_path(path)?;
     unsafe {
         wallpaper
@@ -183,9 +186,7 @@ impl ComGuard {
             Ok(()) => Ok(Self {
                 should_uninit: true,
             }),
-            Err(error)
-                if error.code() == windows::Win32::Foundation::CO_E_ALREADYINITIALIZED =>
-            {
+            Err(error) if error.code() == windows::Win32::Foundation::CO_E_ALREADYINITIALIZED => {
                 Ok(Self {
                     should_uninit: false,
                 })

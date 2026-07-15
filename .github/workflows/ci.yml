@@ -26,23 +26,132 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
       - run: cargo fmt --all --check
-      - run: cargo test
+      - name: Test with visual apply-payload artifacts
+        env:
+          WALLSPAN_VISUAL_OUTDIR: ${{ runner.temp }}/wallspan-visual
+        run: cargo test
+      - name: Upload raster visual artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: apply-payload-${{ matrix.os }}
+          path: ${{ runner.temp }}/wallspan-visual/*.png
+          if-no-files-found: ignore
+      - name: Summarize visual artifacts
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Apply-payload rasters (${{ matrix.os }})"
+            echo
+            ls -la "${{ runner.temp }}/wallspan-visual" 2>/dev/null || echo "_No visual files_"
+          } >> "$GITHUB_STEP_SUMMARY"
       - run: cargo clippy --all-targets -- -D warnings
 
-  desktop-linux:
-    name: Qt desktop (Linux)
-    runs-on: ubuntu-latest
+  desktop:
+    name: Qt desktop smoke (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - os: ubuntu-latest
+            gui_name: gui-linux.png
+          - os: windows-latest
+            gui_name: gui-windows.png
+          - os: macos-latest
+            gui_name: gui-osx.png
+    runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
       - uses: dtolnay/rust-toolchain@1.85
         with:
           components: clippy
-      - name: Install Qt build dependencies
+
+      - name: Install Qt (Linux)
+        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes \
-            build-essential clang cmake ninja-build pkg-config \
-            qt6-base-dev qt6-declarative-dev
+            build-essential clang cmake ninja-build pkg-config g++ \
+            qt6-base-dev qt6-declarative-dev xvfb \
+            qml6-module-qtquick qml6-module-qtquick-controls \
+            qml6-module-qtquick-layouts qml6-module-qtquick-window \
+            qml6-module-qtquick-dialogs qml6-module-qtqml \
+            qml6-module-qtqml-workerscript qml6-module-qtqml-models \
+            qml6-module-qtquick-templates
+        env:
+          CXX: g++
+          CC: gcc
+
+      - name: Install Qt (Windows)
+        if: runner.os == 'Windows'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          cache: true
+          modules: "qtdeclarative"
+
+      - name: Install Qt (macOS)
+        if: runner.os == 'macOS'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.7.3"
+          cache: true
+          modules: "qtdeclarative"
+
       - uses: Swatinem/rust-cache@v2
-      - run: cargo check -p wallspan-desktop
-      - run: cargo clippy -p wallspan-desktop --all-targets -- -D warnings
+
+      - name: Build desktop
+        env:
+          CXX: g++
+          CC: gcc
+        run: cargo build -p wallspan-desktop
+
+      - name: Clippy desktop
+        env:
+          CXX: g++
+          CC: gcc
+        run: cargo clippy -p wallspan-desktop --all-targets -- -D warnings
+
+      - name: Smoke screenshot (Linux)
+        if: runner.os == 'Linux'
+        env:
+          QT_QPA_PLATFORM: xcb
+          CXX: g++
+          CC: gcc
+        run: |
+          mkdir -p "${{ runner.temp }}/wallspan-gui"
+          xvfb-run -a cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
+
+      - name: Smoke screenshot (Windows)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: |
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/wallspan-gui" | Out-Null
+          cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
+
+      - name: Smoke screenshot (macOS)
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p "${{ runner.temp }}/wallspan-gui"
+          cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
+
+      - name: Upload GUI smoke screenshot
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gui-smoke-${{ matrix.os }}
+          path: ${{ runner.temp }}/wallspan-gui/*.png
+          if-no-files-found: warn
+
+      - name: Summarize GUI smoke
+        if: always()
+        shell: bash
+        run: |
+          {
+            echo "## Qt GUI smoke (${{ matrix.os }})"
+            echo
+            ls -la "${{ runner.temp }}/wallspan-gui" 2>/dev/null || echo "_No GUI smoke files_"
+            echo
+            echo "Expected artifact name hint: \`${{ matrix.gui_name }}\` (actual filename uses Qt.platform.os)."
+          } >> "$GITHUB_STEP_SUMMARY"

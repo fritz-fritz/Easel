@@ -1,6 +1,6 @@
 //! Wallpaper backend probing and selection.
 
-use crate::plasma::{plasma_available, PlasmaBackend};
+use crate::plasma::{PlasmaBackend, plasma_available};
 use crate::{BackendError, WallpaperBackend};
 
 #[cfg(windows)]

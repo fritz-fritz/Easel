@@ -152,9 +152,10 @@ fn take_best_match<'a>(
         return Some(remaining.remove(index));
     }
 
-    if let Some(index) = remaining.iter().position(|display| {
-        weak_identity_match(&DisplayEvidence::from_display(display), evidence)
-    }) {
+    if let Some(index) = remaining
+        .iter()
+        .position(|display| weak_identity_match(&DisplayEvidence::from_display(display), evidence))
+    {
         return Some(remaining.remove(index));
     }
 
@@ -271,10 +272,9 @@ mod tests {
 
     #[test]
     fn strong_match_preserves_id_when_connector_changes() {
-        let previous = DisplayArrangement::from_displays(vec![sample_display(
-            1, "DP-1", "SN-1", 1920,
-        )])
-        .expect("valid");
+        let previous =
+            DisplayArrangement::from_displays(vec![sample_display(1, "DP-1", "SN-1", 1920)])
+                .expect("valid");
         let mut observed = observation_from(&previous.displays[0]);
         observed.evidence.connector_name = Some("HDMI-A-1".into());
         observed.logical_rect.x = 100;
@@ -304,10 +304,9 @@ mod tests {
 
     #[test]
     fn unmatched_observation_gets_new_id() {
-        let previous = DisplayArrangement::from_displays(vec![sample_display(
-            3, "DP-1", "SN-OLD", 1920,
-        )])
-        .expect("valid");
+        let previous =
+            DisplayArrangement::from_displays(vec![sample_display(3, "DP-1", "SN-OLD", 1920)])
+                .expect("valid");
         let mut observed = observation_from(&previous.displays[0]);
         observed.evidence.serial = Some("SN-NEW".into());
         observed.evidence.connector_name = Some("DP-2".into());

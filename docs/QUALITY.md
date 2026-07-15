@@ -49,8 +49,11 @@ exempt a backend from the same measurements.
 ## CI policy
 
 The default workspace excludes the Qt application so core checks run on all hosted platforms.
-A dedicated Linux job installs Qt and checks the desktop crate. Windows and macOS Qt jobs are
-added with their packaging stages rather than being represented as passing prematurely.
+A dedicated multi-OS desktop job builds `wallspan-desktop`, runs `--smoke-screenshot`, and
+uploads Qt GUI PNGs as artifacts on Linux (Xvfb), Windows, and macOS. Core jobs also write
+per-display apply-payload raster PNGs for visual review. Full packaging and code signing remain
+separate later stages. Live wallpaper Apply against a real desktop session is still a manual
+matrix item; CI never mutates an operator wallpaper.
 
 Media CI adds only short, project-owned, silent fixtures. Codec assertions are capability-aware so
 the suite distinguishes an unavailable runtime decoder from an incorrect compositor result.

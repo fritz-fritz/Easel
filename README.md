@@ -5,10 +5,11 @@ desktops. It combines physically correct spanning with a modern Qt 6 interface a
 policy-aware catalog of high-quality, reusable images. Its architecture also distinguishes
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
-This repository currently contains the architectural scaffold plus a local still-image
-render foundation. Compose can decode a local image and show per-display previews.
-Live display enumeration, media playback, and operating-system wallpaper mutation remain
-deliberately unimplemented.
+This repository currently contains the Stage 1 local still vertical slice: decode/fit/raster,
+Compose previews, Qt display enumeration with arrangement persistence, and Plasma 6 / Windows
+still apply backends. Use Compose → Open image → Apply on a supported session. CI also captures
+apply-payload rasters and Qt GUI smoke screenshots for review. Animated/live media hosts and
+additional Linux desktops remain deliberately unimplemented.
 
 ## Product direction
 
