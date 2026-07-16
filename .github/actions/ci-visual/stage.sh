@@ -23,9 +23,14 @@ matches=("${source_dir}"/${pattern})
 shopt -u nullglob
 
 count=0
+max_files=12
 if ((${#matches[@]} > 0)); then
   for src in "${matches[@]}"; do
     [[ -f "$src" ]] || continue
+    if ((count >= max_files)); then
+      echo "::warning::ci-visual: more than ${max_files} files matched; extra files ignored"
+      break
+    fi
     base="$(basename "$src")"
     stem="${base%.*}"
     dest_name="$name_template"
@@ -41,7 +46,10 @@ if ((${#matches[@]} > 0)); then
         dest_name="${dest_name}-${stem}"
       fi
     fi
-    cp "$src" "${staged_dir}/${dest_name}"
+    dest_path="${staged_dir}/${dest_name}"
+    cp "$src" "$dest_path"
+    echo "file_${count}=${dest_path}" >> "$GITHUB_OUTPUT"
+    printf '%s\n' "$dest_path" >> "${staged_dir}/files.list"
     count=$((count + 1))
   done
 fi
