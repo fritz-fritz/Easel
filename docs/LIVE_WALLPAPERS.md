@@ -2,7 +2,7 @@
 
 ## Capability definitions
 
-Wallspan uses precise terms in its code, interface, and support matrix:
+Easel uses precise terms in its code, interface, and support matrix:
 
 | Capability | Behavior | Runtime requirement |
 | --- | --- | --- |
@@ -12,7 +12,7 @@ Wallspan uses precise terms in its code, interface, and support matrix:
 | Video | A silent local video plays continuously. | Video decoder, compositor, and persistent desktop surface. |
 
 Native vendor-specific “dynamic wallpaper” bundles are not the portable domain format. Importers
-may translate a supported bundle into a Wallspan time-of-day timeline, while original files and
+may translate a supported bundle into a Easel time-of-day timeline, while original files and
 metadata remain intact.
 
 ## Feasibility assessment

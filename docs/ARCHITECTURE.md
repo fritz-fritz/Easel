@@ -2,7 +2,7 @@
 
 ## Boundaries
 
-Wallspan is organized around a platform-independent domain and renderer. Qt and operating-
+Easel is organized around a platform-independent domain and renderer. Qt and operating-
 system APIs are adapters at the edge.
 
 ```mermaid
@@ -37,7 +37,7 @@ Connector names and geometry are fallbacks, never sole long-term identifiers.
 
 ## Core crate
 
-`wallspan-core` owns versioned serializable types:
+`easel-core` owns versioned serializable types:
 
 - displays and arrangements;
 - still, animated-image, and video assets with licenses and attribution;
@@ -50,7 +50,7 @@ It has no Qt, HTTP, image-decoder, or OS dependency.
 
 ## Renderer
 
-`wallspan-render` has two layers:
+`easel-render` has two layers:
 
 - a deterministic planner that converts a profile and arrangement into per-output operations;
 - a raster executor using the Rust `image` ecosystem.
@@ -93,7 +93,7 @@ portable guarantee.
 
 ## Image providers
 
-`wallspan-providers` normalizes approved still-image sources into a common result while preserving
+`easel-providers` normalizes approved still-image sources into a common result while preserving
 source-specific metadata. Provider adapters are not general plugins in the first release; they
 are compiled integrations reviewed against current terms. Local media can be still, animated, or
 video; online motion sources require a separate terms and licensing review before an adapter can

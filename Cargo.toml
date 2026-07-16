@@ -1,17 +1,17 @@
 [workspace]
 resolver = "2"
 members = [
-    "apps/wallspan-desktop",
-    "crates/wallspan-core",
-    "crates/wallspan-platform",
-    "crates/wallspan-providers",
-    "crates/wallspan-render",
+    "apps/easel-desktop",
+    "crates/easel-core",
+    "crates/easel-platform",
+    "crates/easel-providers",
+    "crates/easel-render",
 ]
 default-members = [
-    "crates/wallspan-core",
-    "crates/wallspan-platform",
-    "crates/wallspan-providers",
-    "crates/wallspan-render",
+    "crates/easel-core",
+    "crates/easel-platform",
+    "crates/easel-providers",
+    "crates/easel-render",
 ]
 
 [workspace.package]
@@ -19,7 +19,8 @@ version = "0.1.0"
 edition = "2024"
 rust-version = "1.85"
 publish = false
-repository = "https://github.com/fritz-fritz/wallspan"
+license = "MPL-2.0"
+repository = "https://github.com/fritz-fritz/easel"
 
 [workspace.dependencies]
 async-trait = "0.1"

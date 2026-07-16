@@ -2,13 +2,15 @@ name: CI
 
 on:
   push:
+    branches: [main]
   pull_request:
+    branches: [main]
 
 permissions:
   contents: read
 
 concurrency:
-  group: ci-${{ github.ref }}
+  group: ci-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: true
 
 jobs:
@@ -28,15 +30,15 @@ jobs:
       - run: cargo fmt --all --check
       - name: Test with visual apply-payload artifacts
         env:
-          WALLSPAN_VISUAL_OUTDIR: ${{ runner.temp }}/wallspan-visual
+          EASEL_VISUAL_OUTDIR: ${{ runner.temp }}/easel-visual
         run: cargo test
       - name: Stage individual apply-payload PNGs
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          src="${{ runner.temp }}/wallspan-visual"
-          out="${{ runner.temp }}/wallspan-visual-named"
+          src="${{ runner.temp }}/easel-visual"
+          out="${{ runner.temp }}/easel-visual-named"
           mkdir -p "$out"
           for i in 0 1 2; do
             if [[ -f "$src/apply-display-$i.png" ]]; then
@@ -45,26 +47,30 @@ jobs:
             fi
           done
           ls -la "$out" 2>/dev/null || true
+      # Public artifacts are deliberately non-installable synthetic review images.
       - name: Upload apply-payload display 0
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ runner.temp }}/wallspan-visual-named/apply-payload-${{ matrix.os }}-display-0.png
+          path: ${{ runner.temp }}/easel-visual-named/apply-payload-${{ matrix.os }}-display-0.png
           archive: false
+          retention-days: 7
           if-no-files-found: ignore
       - name: Upload apply-payload display 1
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ runner.temp }}/wallspan-visual-named/apply-payload-${{ matrix.os }}-display-1.png
+          path: ${{ runner.temp }}/easel-visual-named/apply-payload-${{ matrix.os }}-display-1.png
           archive: false
+          retention-days: 7
           if-no-files-found: ignore
       - name: Upload apply-payload display 2
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ runner.temp }}/wallspan-visual-named/apply-payload-${{ matrix.os }}-display-2.png
+          path: ${{ runner.temp }}/easel-visual-named/apply-payload-${{ matrix.os }}-display-2.png
           archive: false
+          retention-days: 7
           if-no-files-found: ignore
       - name: Summarize visual artifacts
         if: always()
@@ -73,7 +79,7 @@ jobs:
           {
             echo "## Apply-payload rasters (${{ matrix.os }})"
             echo
-            ls -la "${{ runner.temp }}/wallspan-visual-named" 2>/dev/null || echo "_No visual files_"
+            ls -la "${{ runner.temp }}/easel-visual-named" 2>/dev/null || echo "_No visual files_"
           } >> "$GITHUB_STEP_SUMMARY"
       - run: cargo clippy --all-targets -- -D warnings
 
@@ -135,22 +141,22 @@ jobs:
         env:
           CXX: g++
           CC: gcc
-        run: cargo build -p wallspan-desktop
+        run: cargo build -p easel-desktop
 
       - name: Build desktop (Windows/macOS)
         if: runner.os != 'Linux'
-        run: cargo build -p wallspan-desktop
+        run: cargo build -p easel-desktop
 
       - name: Clippy desktop (Linux)
         if: runner.os == 'Linux'
         env:
           CXX: g++
           CC: gcc
-        run: cargo clippy -p wallspan-desktop --all-targets -- -D warnings
+        run: cargo clippy -p easel-desktop --all-targets -- -D warnings
 
       - name: Clippy desktop (Windows/macOS)
         if: runner.os != 'Linux'
-        run: cargo clippy -p wallspan-desktop --all-targets -- -D warnings
+        run: cargo clippy -p easel-desktop --all-targets -- -D warnings
 
       - name: Smoke screenshot (Linux)
         if: runner.os == 'Linux'
@@ -160,8 +166,8 @@ jobs:
           CXX: g++
           CC: gcc
         run: |
-          mkdir -p "${{ runner.temp }}/wallspan-gui"
-          xvfb-run -a cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
+          mkdir -p "${{ runner.temp }}/easel-gui"
+          xvfb-run -a cargo run -p easel-desktop -- --smoke-screenshot "${{ runner.temp }}/easel-gui"
 
       - name: Smoke screenshot (Windows)
         if: runner.os == 'Windows'
@@ -169,23 +175,23 @@ jobs:
         env:
           QT_QUICK_CONTROLS_STYLE: Fusion
         run: |
-          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/wallspan-gui" | Out-Null
-          cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
+          New-Item -ItemType Directory -Force -Path "${{ runner.temp }}/easel-gui" | Out-Null
+          cargo run -p easel-desktop -- --smoke-screenshot "${{ runner.temp }}/easel-gui"
 
       - name: Smoke screenshot (macOS)
         if: runner.os == 'macOS'
         env:
           QT_QUICK_CONTROLS_STYLE: Fusion
         run: |
-          mkdir -p "${{ runner.temp }}/wallspan-gui"
-          cargo run -p wallspan-desktop -- --smoke-screenshot "${{ runner.temp }}/wallspan-gui"
+          mkdir -p "${{ runner.temp }}/easel-gui"
+          cargo run -p easel-desktop -- --smoke-screenshot "${{ runner.temp }}/easel-gui"
 
       - name: Stage GUI smoke PNG
         if: always()
         shell: bash
         run: |
           set -euo pipefail
-          gui="${{ runner.temp }}/wallspan-gui"
+          gui="${{ runner.temp }}/easel-gui"
           shopt -s nullglob
           files=("$gui"/gui-*.png)
           if ((${#files[@]} == 0)); then
@@ -199,8 +205,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          path: ${{ runner.temp }}/wallspan-gui/gui-smoke-${{ matrix.os }}.png
+          path: ${{ runner.temp }}/easel-gui/gui-smoke-${{ matrix.os }}.png
           archive: false
+          retention-days: 7
           if-no-files-found: warn
 
       - name: Summarize GUI smoke
@@ -210,7 +217,7 @@ jobs:
           {
             echo "## Qt GUI smoke (${{ matrix.os }})"
             echo
-            ls -la "${{ runner.temp }}/wallspan-gui" 2>/dev/null || echo "_No GUI smoke files_"
+            ls -la "${{ runner.temp }}/easel-gui" 2>/dev/null || echo "_No GUI smoke files_"
             echo
             echo "Expected upload name: \`gui-smoke-${{ matrix.os }}.png\` (capture used Qt.platform.os)."
           } >> "$GITHUB_STEP_SUMMARY"

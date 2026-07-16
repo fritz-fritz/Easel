@@ -20,6 +20,6 @@ provider-required use-reporting action.
 ## Consequences
 
 - Openverse is the initial discovery candidate.
-- Unsplash remains disabled until written authorization is obtained for Wallspan.
+- Unsplash remains disabled until written authorization is obtained for Easel.
 - Pexels is not implemented under its currently published API rules.
 - Terms review becomes part of release readiness.

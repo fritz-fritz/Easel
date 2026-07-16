@@ -2,7 +2,7 @@
 
 ## Vision
 
-Wallspan should make sophisticated multi-monitor wallpaper layouts feel as approachable as
+Easel should make sophisticated multi-monitor wallpaper layouts feel as approachable as
 choosing a single desktop background. Advanced correction remains available without forcing
 every user through a calibration workflow.
 
