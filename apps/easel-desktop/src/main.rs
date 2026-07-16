@@ -47,9 +47,7 @@ fn main() {
     let mut engine = QQmlApplicationEngine::new();
 
     if let Some(engine) = engine.as_mut() {
-        engine.load(&QUrl::from(
-            "qrc:/qt/qml/net/fritztech/easel/qml/main.qml",
-        ));
+        engine.load(&QUrl::from("qrc:/qt/qml/net/fritztech/easel/qml/main.qml"));
     }
 
     if let Some(app) = app.as_mut() {

@@ -13,10 +13,10 @@ use std::thread;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use url::Url;
 use easel_core::{FitMode, Profile};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
+use url::Url;
 
 use crate::display_session::{current_displays, current_preview_displays};
 
@@ -396,9 +396,7 @@ fn file_url_from_path(path: &Path) -> String {
 }
 
 fn preview_cache_dir() -> PathBuf {
-    std::env::temp_dir()
-        .join("easel")
-        .join("compose-preview")
+    std::env::temp_dir().join("easel").join("compose-preview")
 }
 
 fn apply_cache_dir() -> PathBuf {

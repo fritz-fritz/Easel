@@ -1,0 +1,68 @@
+name: Archive merged branch
+
+on:
+  pull_request:
+    types: [closed]
+    branches: [main]
+
+permissions:
+  contents: write
+
+jobs:
+  archive:
+    if: >-
+      github.event.pull_request.merged == true &&
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      github.event.pull_request.head.ref != github.event.repository.default_branch &&
+      !startsWith(github.event.pull_request.head.ref, 'archive/')
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Rename merged branch into archive namespace
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          slug="$({
+            printf '%s' "$HEAD_REF" |
+              tr '[:upper:]' '[:lower:]' |
+              sed -E 's#[^a-z0-9._-]+#-#g; s/^-+//; s/-+$//' |
+              cut -c1-70
+          })"
+          archive="archive/pr-${PR_NUMBER}-${slug:-branch}"
+          encoded_head="$(jq -rn --arg value "$HEAD_REF" '$value | @uri')"
+          encoded_archive="$(jq -rn --arg value "$archive" '$value | @uri')"
+
+          if existing_sha="$(
+            gh api "/repos/$REPOSITORY/branches/$encoded_archive" \
+              --jq '.commit.sha' 2>/dev/null
+          )"; then
+            if [[ "$existing_sha" == "$HEAD_SHA" ]]; then
+              echo "Archive already exists at the expected commit: $archive"
+              exit 0
+            fi
+
+            echo "Archive branch already exists at a different commit: $archive" >&2
+            exit 1
+          fi
+
+          echo "Renaming $HEAD_REF to $archive"
+          gh api \
+            --method POST \
+            "/repos/$REPOSITORY/branches/$encoded_head/rename" \
+            -f "new_name=$archive" \
+            --silent
+
+          {
+            echo "### Archived merged branch"
+            echo
+            echo "- Source: \`$HEAD_REF\`"
+            echo "- Archive: \`$archive\`"
+            echo "- Commit: \`$HEAD_SHA\`"
+          } >> "$GITHUB_STEP_SUMMARY"

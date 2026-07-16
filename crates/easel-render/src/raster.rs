@@ -8,10 +8,10 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use easel_core::DisplayId;
 use image::imageops::{self, FilterType};
 use image::{Rgba, RgbaImage};
 use thiserror::Error;
-use easel_core::DisplayId;
 
 use crate::decode::{DecodeError, DecodedImage, decode_still};
 use crate::plan::{
@@ -251,11 +251,11 @@ pub enum RasterError {
 mod tests {
     use super::*;
     use crate::plan::{LetterboxColor, PixelRect};
-    use image::{Rgb, RgbImage};
     use easel_core::{
         Display, DisplayId, FitMode, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint,
         PhysicalSize, ScaleFactor,
     };
+    use image::{Rgb, RgbImage};
 
     fn gradient_2x1() -> RgbaImage {
         let mut image = RgbaImage::new(2, 1);

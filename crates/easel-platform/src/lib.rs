@@ -13,8 +13,8 @@ mod windows_desktop;
 
 use std::path::{Path, PathBuf};
 
-use thiserror::Error;
 use easel_core::{DisplayId, LogicalRect, PlaybackPolicy};
+use thiserror::Error;
 
 pub use plasma::{PlasmaBackend, build_plasma_wallpaper_script, escape_js_string};
 pub use probe::select_wallpaper_backend;

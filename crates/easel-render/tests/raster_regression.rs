@@ -7,7 +7,6 @@
 use std::fs;
 use std::path::PathBuf;
 
-use image::{Rgba, RgbaImage};
 use easel_core::{
     Display, DisplayId, FitMode, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint,
     PhysicalSize, ScaleFactor,
@@ -15,6 +14,7 @@ use easel_core::{
 use easel_render::{
     CompositionSettings, MAX_EDGE_PIXELS, RasterJob, RenderPurpose, RenderRequest, decode_still,
 };
+use image::{Rgba, RgbaImage};
 
 fn fixture_path(name: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR"))

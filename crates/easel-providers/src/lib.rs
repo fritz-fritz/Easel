@@ -7,8 +7,8 @@
 #![forbid(unsafe_code)]
 
 use async_trait::async_trait;
-use thiserror::Error;
 use easel_core::MediaAsset;
+use thiserror::Error;
 
 /// Whether current published terms allow an adapter to be enabled.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

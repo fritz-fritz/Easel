@@ -235,8 +235,8 @@ pub fn plan_monitor_assignments(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use easel_core::{DisplayId, LogicalRect};
+    use std::path::PathBuf;
 
     #[test]
     fn assignment_plan_matches_geometry() {

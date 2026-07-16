@@ -6,9 +6,9 @@
 
 use std::path::Path;
 
+use easel_core::NativePixelSize;
 use image::{DynamicImage, ImageDecoder, ImageError, ImageReader, RgbaImage};
 use thiserror::Error;
-use easel_core::NativePixelSize;
 
 /// Maximum accepted edge length in pixels.
 pub const MAX_EDGE_PIXELS: u32 = 16_384;
