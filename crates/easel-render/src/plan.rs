@@ -6,11 +6,11 @@
 
 use std::path::PathBuf;
 
-use thiserror::Error;
 use easel_core::{
     Display, DisplayId, DisplayValidationError, FitMode, NativePixelSize, Profile,
     ProfileValidationError,
 };
+use thiserror::Error;
 
 use crate::fit::plan_fit;
 

@@ -222,8 +222,8 @@ pub(crate) fn plasma_available() -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use std::path::PathBuf;
     use easel_core::{DisplayId, LogicalRect};
+    use std::path::PathBuf;
 
     fn sample_wallpaper(path: &str, rect: LogicalRect) -> DisplayWallpaper {
         DisplayWallpaper {
