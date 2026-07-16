@@ -56,7 +56,12 @@ jobs:
             core.setOutput('pages_base', pagesBase);
             core.info(`PR #${prNumber} sha=${run.head_sha}`);
 
-      - uses: actions/checkout@v7
+      - name: Check out triggering commit
+        uses: actions/checkout@v7
+        with:
+          # Match the CI run that produced the artifacts so gallery tooling
+          # and manifest schema stay in sync with that commit.
+          ref: ${{ steps.meta.outputs.sha }}
 
       - name: Download CI visual artifacts
         continue-on-error: true

@@ -10,11 +10,13 @@ Reads downloaded Actions artifacts (manifests + PNGs) and writes:
 from __future__ import annotations
 
 import argparse
+import html
 import json
 import re
 import shutil
 from collections import defaultdict
 from pathlib import Path
+from urllib.parse import quote
 
 
 MARKER = "<!-- easel-ci-visual -->"
@@ -129,17 +131,20 @@ def collect_images(
     images: list[dict] = []
     for manifest in manifests:
         for image in manifest.get("images", []):
-            filename = image["filename"]
+            try:
+                filename = safe_filename(image["filename"])
+            except ValueError:
+                continue
             src = png_index.get(filename)
             if src is None:
                 continue
             images.append(
                 {
-                    "stage": manifest["stage"],
-                    "os": manifest["os"],
+                    "stage": str(manifest["stage"]),
+                    "os": str(manifest["os"]),
                     "filename": filename,
-                    "stem": image.get("stem", Path(filename).stem),
-                    "artifact_url": image.get("artifact_url", ""),
+                    "stem": str(image.get("stem", Path(filename).stem)),
+                    "artifact_url": str(image.get("artifact_url", "")),
                     "src_path": src,
                 }
             )
@@ -148,12 +153,16 @@ def collect_images(
     for name, src in sorted(png_index.items()):
         if name in known or name.startswith("ci-visual-manifest-"):
             continue
-        stage, os_name, stem = infer_from_filename(name)
+        try:
+            filename = safe_filename(name)
+        except ValueError:
+            continue
+        stage, os_name, stem = infer_from_filename(filename)
         images.append(
             {
                 "stage": stage,
                 "os": os_name,
-                "filename": name,
+                "filename": filename,
                 "stem": stem,
                 "artifact_url": "",
                 "src_path": src,
@@ -174,9 +183,27 @@ def infer_from_filename(name: str) -> tuple[str, str, str]:
     return "unknown", "unknown", stem
 
 
+def safe_filename(filename: str) -> str:
+    """Return a basename-only filename, rejecting path traversal."""
+    name = Path(filename).name
+    if not name or name in {".", ".."} or name != filename:
+        raise ValueError(f"unsafe artifact filename: {filename!r}")
+    return name
+
+
 def pages_url(pages_base: str, pr_number: str, filename: str) -> str:
     base = pages_base.rstrip("/")
-    return f"{base}/pr/{pr_number}/{filename}"
+    encoded_name = quote(safe_filename(filename), safe="._-")
+    encoded_pr = quote(str(pr_number), safe="")
+    return f"{base}/pr/{encoded_pr}/{encoded_name}"
+
+
+def attr(value: str) -> str:
+    return html.escape(value, quote=True)
+
+
+def text(value: str) -> str:
+    return html.escape(value, quote=False)
 
 
 def write_site(
@@ -194,44 +221,45 @@ def write_site(
 
     by_stage: dict[str, list[dict]] = defaultdict(list)
     for image in images:
-        dest = out_dir / image["filename"]
+        filename = safe_filename(image["filename"])
+        dest = out_dir / filename
         shutil.copy2(image["src_path"], dest)
-        by_stage[image["stage"]].append(image)
+        by_stage[image["stage"]].append({**image, "filename": filename})
 
     sections: list[str] = []
     for stage in sorted(by_stage):
         cards: list[str] = []
         for image in sorted(by_stage[stage], key=lambda i: (i["os"], i["stem"])):
-            href = image["filename"]
+            href = quote(image["filename"], safe="._-")
             caption = f"{image['os']} · {image['stem']}"
             cards.append(
                 f"""<figure>
-  <a href="{href}" data-lightbox data-caption="{caption}">
-    <img src="{href}" alt="{caption}" loading="lazy" />
+  <a href="{attr(href)}" data-lightbox data-caption="{attr(caption)}">
+    <img src="{attr(href)}" alt="{attr(caption)}" loading="lazy" />
   </a>
-  <figcaption><strong>{image['os']}</strong><br />{image['stem']}</figcaption>
+  <figcaption><strong>{text(image['os'])}</strong><br />{text(image['stem'])}</figcaption>
 </figure>"""
             )
         sections.append(
-            f"<section>\n  <h2>{stage}</h2>\n  <div class=\"grid\">\n    "
+            f"<section>\n  <h2>{text(stage)}</h2>\n  <div class=\"grid\">\n    "
             + "\n    ".join(cards)
             + "\n  </div>\n</section>"
         )
 
     short_sha = sha[:7] if sha else "unknown"
-    html = f"""<!DOCTYPE html>
+    page = f"""<!DOCTYPE html>
 <html lang="en">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1" />
-  <title>Easel visual harness · PR #{pr_number}</title>
+  <title>{text(f"Easel visual harness · PR #{pr_number}")}</title>
   <link rel="stylesheet" href="styles.css" />
 </head>
 <body>
   <header>
     <h1>Easel visual harness</h1>
-    <p>Pull request <strong>#{pr_number}</strong> · commit <code>{short_sha}</code></p>
-    <p><a href="{run_url}">Workflow run</a> · gallery host <code>{pages_base.rstrip('/')}</code></p>
+    <p>Pull request <strong>#{text(str(pr_number))}</strong> · commit <code>{text(short_sha)}</code></p>
+    <p><a href="{attr(run_url)}">Workflow run</a> · gallery host <code>{text(pages_base.rstrip('/'))}</code></p>
   </header>
   <main>
     {"".join(sections) if sections else "<p>No visual artifacts were found for this run.</p>"}
@@ -244,7 +272,7 @@ def write_site(
 </body>
 </html>
 """
-    (out_dir / "index.html").write_text(html, encoding="utf8")
+    (out_dir / "index.html").write_text(page, encoding="utf8")
 
 
 def write_comment(
