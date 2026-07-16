@@ -1,5 +1,6 @@
 #!/usr/bin/env bash
 # Build ci-visual-manifest-*.json from staged PNGs + upload-artifact outputs.
+# Compatible with macOS Bash 3.2 (no mapfile).
 set -euo pipefail
 
 staged_dir="${STAGED_DIR:?}"
@@ -10,20 +11,30 @@ count="${FILE_COUNT:?}"
 manifest_name="ci-visual-manifest-${stage}-${runner_os}.json"
 manifest_path="${staged_dir}/${manifest_name}"
 
-mapfile -t pngs < <(if [[ -f "${staged_dir}/files.list" ]]; then cat "${staged_dir}/files.list"; else find "$staged_dir" -maxdepth 1 -type f -name '*.png' | LC_ALL=C sort; fi)
-if ((${#pngs[@]} != count)); then
-  echo "::warning::ci-visual: staged PNG count ${#pngs[@]} != reported count ${count}"
+list_file="${staged_dir}/files.list"
+if [[ ! -f "$list_file" ]]; then
+  # Fallback if an older stage step omitted files.list
+  find "$staged_dir" -maxdepth 1 -type f -name '*.png' | LC_ALL=C sort >"$list_file"
 fi
 
 export STAGED_DIR INPUT_STAGE INPUT_RUNNER_OS FILE_COUNT
-for i in "${!pngs[@]}"; do
-  export "STAGED_FILE_${i}=${pngs[$i]}"
-done
-for i in $(seq 0 11); do
+i=0
+while IFS= read -r path || [[ -n "${path:-}" ]]; do
+  [[ -n "$path" ]] || continue
+  export "STAGED_FILE_${i}=${path}"
+  i=$((i + 1))
+done <"$list_file"
+
+if [[ "$i" -ne "$count" ]]; then
+  echo "::warning::ci-visual: staged PNG count ${i} != reported count ${count}"
+fi
+
+for i in 0 1 2 3 4 5 6 7 8 9 10 11; do
   id_var="UP${i}_ID"
   url_var="UP${i}_URL"
-  export "${id_var}=${!id_var-}"
-  export "${url_var}=${!url_var-}"
+  # Bash 3.2-safe indirect expansion
+  eval "export ${id_var}=\"\${${id_var}-}\""
+  eval "export ${url_var}=\"\${${url_var}-}\""
 done
 
 python3 - <<'PY' >"$manifest_path"
@@ -40,15 +51,16 @@ attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
 
 images = []
 for index in range(count):
-    file_path = os.environ.get(f"STAGED_FILE_{index}", "")
+    file_path = os.environ.get("STAGED_FILE_%d" % index, "")
     if not file_path:
         continue
     path = Path(file_path)
-    artifact_id = os.environ.get(f"UP{index}_ID", "") or None
-    artifact_url = os.environ.get(f"UP{index}_URL", "") or ""
+    artifact_id = os.environ.get("UP%d_ID" % index, "") or None
+    artifact_url = os.environ.get("UP%d_URL" % index, "") or ""
     if artifact_id and not artifact_url and repo and run_id:
         artifact_url = (
-            f"{server}/{repo}/actions/runs/{run_id}/artifacts/{artifact_id}"
+            "%s/%s/actions/runs/%s/artifacts/%s"
+            % (server, repo, run_id, artifact_id)
         )
     images.append(
         {
