@@ -63,13 +63,30 @@ the suite distinguishes an unavailable runtime decoder from an incorrect composi
 
 Producers write stage-local PNGs under a temp directory. The composite action
 [`.github/actions/ci-visual`](../.github/actions/ci-visual) renames, uploads (`archive: false`),
-and summarizes them. New stages only need a producer plus one `uses: ./.github/actions/ci-visual`
-block with a distinct `stage` / `pattern`.
+emits a JSON manifest, and summarizes them. New stages only need a producer plus one
+`uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
 
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
 | `apply-payload` | [`crates/easel-render/tests/visual_artifacts.rs`](../crates/easel-render/tests/visual_artifacts.rs) | `EASEL_VISUAL_OUTDIR` set (CI only) | `apply-display-*.png` | `ci-visual` |
 | `gui-smoke` | `easel-desktop --smoke-screenshot <dir>` | smoke flag / out dir | `gui-*.png` | `ci-visual` |
+
+### PR gallery (dual surface)
+
+After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](../.github/workflows/ci-visual-gallery.yml):
+
+1. Downloads visual artifacts + manifests
+2. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
+3. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
+   `EASEL_CI_VISUAL_TOKEN` is configured)
+4. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery and a
+   link to the hosted HTML gallery
+
+CI visual PNGs/HTML must not be committed to branches of this source repository. Setup details:
+[ci-visual-assets-repo.md](ci-visual-assets-repo.md).
+
+Cursor Cloud Agent **Demo** artifacts are complementary and agent-scoped; Actions cannot write
+into Demo. Prefer CI galleries for every PR.
 
 Public workflow artifacts remain non-installable synthetic review images. See
 [distribution policy](DISTRIBUTION.md).

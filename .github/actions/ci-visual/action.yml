@@ -56,6 +56,8 @@ runs:
       env:
         STAGED_DIR: ${{ steps.stage.outputs.staged-dir }}
         RETENTION_DAYS: ${{ inputs.retention-days }}
+        INPUT_STAGE: ${{ inputs.stage }}
+        INPUT_RUNNER_OS: ${{ inputs.runner-os }}
       run: |
         set -euo pipefail
         cd "${{ github.action_path }}"

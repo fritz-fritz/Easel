@@ -1,0 +1,165 @@
+name: CI Visual Gallery
+
+on:
+  workflow_run:
+    workflows: [CI]
+    types: [completed]
+  pull_request:
+    types: [closed]
+
+permissions:
+  actions: read
+  contents: read
+  pull-requests: write
+
+concurrency:
+  group: ci-visual-gallery-${{ github.event.workflow_run.id || github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  publish:
+    name: Publish PR gallery
+    if: >-
+      github.event_name == 'workflow_run' &&
+      github.event.workflow_run.event == 'pull_request' &&
+      contains(fromJSON('["success", "failure"]'), github.event.workflow_run.conclusion)
+    runs-on: ubuntu-latest
+    steps:
+      - name: Resolve pull request metadata
+        id: meta
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const run = context.payload.workflow_run;
+            let prNumber = 0;
+            if (run.pull_requests && run.pull_requests.length > 0) {
+              prNumber = run.pull_requests[0].number;
+            } else {
+              const { data: prs } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                commit_sha: run.head_sha,
+              });
+              const openPr = prs.find((pr) => pr.state === 'open') || prs[0];
+              if (openPr) prNumber = openPr.number;
+            }
+            if (!prNumber) {
+              core.setFailed('Unable to resolve PR number for visual gallery publish');
+              return;
+            }
+            const pagesBase = 'https://fritz-fritz.github.io/easel-ci-visual';
+            const runUrl = `${run.html_url}`;
+            core.setOutput('pr_number', String(prNumber));
+            core.setOutput('sha', run.head_sha);
+            core.setOutput('run_id', String(run.id));
+            core.setOutput('run_url', runUrl);
+            core.setOutput('pages_base', pagesBase);
+            core.info(`PR #${prNumber} sha=${run.head_sha}`);
+
+      - uses: actions/checkout@v7
+
+      - name: Download CI visual artifacts
+        continue-on-error: true
+        uses: actions/download-artifact@v7
+        with:
+          run-id: ${{ steps.meta.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ci-visual-artifacts
+          merge-multiple: true
+
+      - name: Detect deploy credentials
+        id: deploy
+        env:
+          EASEL_CI_VISUAL_TOKEN: ${{ secrets.EASEL_CI_VISUAL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${EASEL_CI_VISUAL_TOKEN}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "::warning::EASEL_CI_VISUAL_TOKEN is not configured; posting comment without Pages image embeds"
+          fi
+
+      - name: Build HTML gallery and PR comment
+        run: |
+          set -euo pipefail
+          mkdir -p "${{ runner.temp }}/ci-visual-artifacts"
+          python3 .github/ci-visual/build_gallery.py \
+            --artifacts "${{ runner.temp }}/ci-visual-artifacts" \
+            --out "${{ runner.temp }}/ci-visual-gallery" \
+            --pr-number "${{ steps.meta.outputs.pr_number }}" \
+            --sha "${{ steps.meta.outputs.sha }}" \
+            --run-url "${{ steps.meta.outputs.run_url }}" \
+            --pages-base "${{ steps.meta.outputs.pages_base }}" \
+            $([[ "${{ steps.deploy.outputs.enabled }}" == "true" ]] && echo --deployed || echo --no-deployed)
+
+      - name: Publish gallery to easel-ci-visual Pages repo
+        if: steps.deploy.outputs.enabled == 'true'
+        uses: peaceiris/actions-gh-pages@v4
+        with:
+          personal_token: ${{ secrets.EASEL_CI_VISUAL_TOKEN }}
+          external_repository: fritz-fritz/easel-ci-visual
+          publish_branch: gh-pages
+          publish_dir: ${{ runner.temp }}/ci-visual-gallery/site
+          destination_dir: pr/${{ steps.meta.outputs.pr_number }}
+          keep_files: true
+          allow_empty_commit: true
+          user_name: github-actions[bot]
+          user_email: 41898282+github-actions[bot]@users.noreply.github.com
+          commit_message: "gallery: update PR #${{ steps.meta.outputs.pr_number }} (${{ steps.meta.outputs.sha }})"
+
+      - name: Upsert sticky PR comment
+        uses: marocchino/sticky-pull-request-comment@v2
+        with:
+          number: ${{ steps.meta.outputs.pr_number }}
+          header: easel-ci-visual
+          path: ${{ runner.temp }}/ci-visual-gallery/comment.md
+
+      - name: Upload built gallery from this job
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: ci-visual-gallery-pr-${{ steps.meta.outputs.pr_number }}
+          path: ${{ runner.temp }}/ci-visual-gallery
+          retention-days: 7
+
+  cleanup:
+    name: Remove closed PR gallery
+    if: github.event_name == 'pull_request' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Detect deploy credentials
+        id: deploy
+        env:
+          EASEL_CI_VISUAL_TOKEN: ${{ secrets.EASEL_CI_VISUAL_TOKEN }}
+        run: |
+          set -euo pipefail
+          if [[ -n "${EASEL_CI_VISUAL_TOKEN}" ]]; then
+            echo "enabled=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "enabled=false" >> "$GITHUB_OUTPUT"
+            echo "No EASEL_CI_VISUAL_TOKEN; nothing to clean up"
+          fi
+
+      - name: Delete pr/${{ github.event.pull_request.number }} from assets repo
+        if: steps.deploy.outputs.enabled == 'true'
+        env:
+          EASEL_CI_VISUAL_TOKEN: ${{ secrets.EASEL_CI_VISUAL_TOKEN }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          work="$(mktemp -d)"
+          git clone --depth 1 --branch gh-pages \
+            "https://x-access-token:${EASEL_CI_VISUAL_TOKEN}@github.com/fritz-fritz/easel-ci-visual.git" \
+            "$work"
+          cd "$work"
+          if [[ ! -d "pr/${PR_NUMBER}" ]]; then
+            echo "No gallery directory for PR #${PR_NUMBER}"
+            exit 0
+          fi
+          rm -rf "pr/${PR_NUMBER}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -A
+          git commit -m "gallery: remove PR #${PR_NUMBER}" || exit 0
+          git push

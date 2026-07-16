@@ -27,3 +27,4 @@ Thumbs.db
 
 # Local QML language-server state
 **/.qmlls.ini
+__pycache__/
