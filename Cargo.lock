@@ -1153,7 +1153,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "wallspan-core"
+name = "easel-core"
 version = "0.1.0"
 dependencies = [
  "serde",
@@ -1163,7 +1163,7 @@ dependencies = [
 ]
 
 [[package]]
-name = "wallspan-desktop"
+name = "easel-desktop"
 version = "0.1.0"
 dependencies = [
  "cxx",
@@ -1174,38 +1174,38 @@ dependencies = [
  "serde",
  "toml",
  "url",
- "wallspan-core",
- "wallspan-platform",
- "wallspan-render",
+ "easel-core",
+ "easel-platform",
+ "easel-render",
 ]
 
 [[package]]
-name = "wallspan-platform"
+name = "easel-platform"
 version = "0.1.0"
 dependencies = [
  "thiserror 2.0.18",
  "url",
- "wallspan-core",
+ "easel-core",
  "windows",
 ]
 
 [[package]]
-name = "wallspan-providers"
+name = "easel-providers"
 version = "0.1.0"
 dependencies = [
  "async-trait",
  "thiserror 2.0.18",
- "wallspan-core",
+ "easel-core",
 ]
 
 [[package]]
-name = "wallspan-render"
+name = "easel-render"
 version = "0.1.0"
 dependencies = [
  "crc32fast",
  "image",
  "thiserror 2.0.18",
- "wallspan-core",
+ "easel-core",
 ]
 
 [[package]]

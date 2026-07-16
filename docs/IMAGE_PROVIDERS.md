@@ -43,7 +43,7 @@ Official references:
 
 ## Unsplash decision gate
 
-Do not implement or ship an Unsplash adapter without written authorization for Wallspan's exact
+Do not implement or ship an Unsplash adapter without written authorization for Easel's exact
 use case. If authorization is obtained, the adapter must also:
 
 - use returned hotlinked image URLs for display;
@@ -79,7 +79,7 @@ media kind (still for the initial provider contract)
 ```
 
 Unknown license or attribution fields prevent automatic rotation. The user may inspect the
-source, but Wallspan does not infer permission.
+source, but Easel does not infer permission.
 
 ## Credentials
 

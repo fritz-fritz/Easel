@@ -13,6 +13,13 @@ Thumbs.db
 .env.*
 !.env.example
 /secrets/
+**/secrets/
+*.p12
+*.pfx
+*.jks
+*.keystore
+*.mobileprovision
+*.provisionprofile
 
 # Generated wallpaper and preview caches
 /artifacts/

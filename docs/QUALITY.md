@@ -49,7 +49,7 @@ exempt a backend from the same measurements.
 ## CI policy
 
 The default workspace excludes the Qt application so core checks run on all hosted platforms.
-A dedicated multi-OS desktop job builds `wallspan-desktop`, runs `--smoke-screenshot`, and
+A dedicated multi-OS desktop job builds `easel-desktop`, runs `--smoke-screenshot`, and
 uploads Qt GUI PNGs as artifacts on Linux (Xvfb), Windows, and macOS. Core jobs also write
 per-display apply-payload raster PNGs for visual review. Full packaging and code signing remain
 separate later stages. Live wallpaper Apply against a real desktop session is still a manual

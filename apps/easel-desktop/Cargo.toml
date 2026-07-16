@@ -1,0 +1,26 @@
+[package]
+name = "easel-desktop"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+cxx.workspace = true
+cxx-qt.workspace = true
+cxx-qt-lib = { workspace = true, features = ["qt_full"] }
+directories = "6.0.0"
+serde = { workspace = true, features = ["derive"] }
+toml.workspace = true
+url.workspace = true
+easel-core = { path = "../../crates/easel-core" }
+easel-platform = { path = "../../crates/easel-platform" }
+easel-render = { path = "../../crates/easel-render" }
+
+[build-dependencies]
+cxx-qt-build = { workspace = true, features = ["link_qt_object_files"] }
+
+[lints]
+workspace = true

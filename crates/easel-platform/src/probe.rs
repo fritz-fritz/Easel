@@ -1,0 +1,47 @@
+// This Source Code Form is subject to the terms of the Mozilla Public
+// License, v. 2.0. If a copy of the MPL was not distributed with this
+// file, You can obtain one at https://mozilla.org/MPL/2.0/.
+
+//! Wallpaper backend probing and selection.
+
+use crate::{BackendError, WallpaperBackend};
+
+#[cfg(not(windows))]
+use crate::plasma::{PlasmaBackend, plasma_available};
+
+#[cfg(windows)]
+use crate::windows_desktop::WindowsDesktopBackend;
+
+/// Probes the current session and returns the preferred still-wallpaper backend.
+pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendError> {
+    #[cfg(windows)]
+    {
+        Ok(Box::new(WindowsDesktopBackend))
+    }
+
+    #[cfg(not(windows))]
+    {
+        if plasma_available() {
+            Ok(Box::new(PlasmaBackend))
+        } else {
+            Err(BackendError::NoBackend)
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn probe_returns_concrete_backend_or_no_backend() {
+        match select_wallpaper_backend() {
+            Ok(backend) => {
+                assert!(!backend.id().is_empty());
+                assert!(backend.capabilities().per_display_images);
+            }
+            Err(BackendError::NoBackend) => {}
+            Err(other) => panic!("unexpected probe error: {other}"),
+        }
+    }
+}

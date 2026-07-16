@@ -5,7 +5,7 @@
 
 ## Context
 
-Wallspan needs a modern cross-platform interface, strong native desktop integration, and a safe
+Easel needs a modern cross-platform interface, strong native desktop integration, and a safe
 concurrent image-processing core. Direct Qt Widgets bindings expose a pointer-heavy API to Rust,
 while QML is designed to consume QObject presentation models.
 

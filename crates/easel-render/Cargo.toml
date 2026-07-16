@@ -1,0 +1,19 @@
+[package]
+name = "easel-render"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[dependencies]
+image = { workspace = true }
+thiserror.workspace = true
+easel-core = { path = "../easel-core" }
+
+[dev-dependencies]
+crc32fast = "1.5"
+
+[lints]
+workspace = true
