@@ -9,7 +9,7 @@ on:
       pr_number:
         description: Merged pull request number to archive
         required: true
-        type: string
+        type: number
 
 permissions:
   contents: write
@@ -49,12 +49,27 @@ jobs:
           set -euo pipefail
 
           if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
-            pr_json="$(gh api "/repos/$REPOSITORY/pulls/$INPUT_PR_NUMBER")"
+            if [[ ! "$INPUT_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "pr_number must be a positive integer, got: $INPUT_PR_NUMBER" >&2
+              exit 1
+            fi
+
+            pr_number="$INPUT_PR_NUMBER"
+            pr_json="$(gh api "/repos/$REPOSITORY/pulls/$pr_number")"
             merged="$(jq -r '.merged' <<<"$pr_json")"
             head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
-            head_sha="$(jq -r '.head.sha' <<<"$pr_json")"
             head_repo="$(jq -r '.head.repo.full_name // empty' <<<"$pr_json")"
-            pr_number="$INPUT_PR_NUMBER"
+
+            # Prefer the PR commit list tip over .head.sha, which can move if the
+            # branch receives pushes after merge and before archival.
+            head_sha="$(
+              gh api --paginate "/repos/$REPOSITORY/pulls/$pr_number/commits" \
+                --jq '.[].sha' | tail -n 1
+            )"
+            if [[ -z "$head_sha" || ! "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Unable to resolve merged tip SHA for PR #$pr_number" >&2
+              exit 1
+            fi
 
             if [[ "$merged" != "true" ]]; then
               echo "PR #$pr_number is not merged; refusing to archive" >&2
