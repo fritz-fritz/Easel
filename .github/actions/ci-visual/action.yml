@@ -1,0 +1,82 @@
+name: ci-visual
+description: >
+  Stage, rename, and upload harness visual PNGs as non-archived artifacts,
+  then append a step-summary section. Adapts to any harness stage via inputs.
+
+inputs:
+  stage:
+    description: Logical harness stage id (e.g. apply-payload, gui-smoke)
+    required: true
+  source-dir:
+    description: Directory where producers wrote visual files
+    required: true
+  pattern:
+    description: Glob of files to publish relative to source-dir (e.g. apply-display-*.png)
+    required: true
+  name-template:
+    description: >
+      Rename pattern with placeholders {stage}, {os}, {stem}
+      (stem is the source filename without extension)
+    required: true
+  runner-os:
+    description: Matrix OS label for stable artifact names
+    required: true
+  retention-days:
+    description: Artifact retention in days
+    required: false
+    default: "7"
+  if-no-files-found:
+    description: ignore | warn | error when no files match
+    required: false
+    default: ignore
+  summary-title:
+    description: Heading for the GitHub step summary section
+    required: false
+    default: ""
+
+runs:
+  using: composite
+  steps:
+    - name: Stage visual artifacts
+      id: stage
+      shell: bash
+      env:
+        INPUT_STAGE: ${{ inputs.stage }}
+        INPUT_SOURCE_DIR: ${{ inputs.source-dir }}
+        INPUT_PATTERN: ${{ inputs.pattern }}
+        INPUT_NAME_TEMPLATE: ${{ inputs.name-template }}
+        INPUT_RUNNER_OS: ${{ inputs.runner-os }}
+        INPUT_IF_NO_FILES: ${{ inputs.if-no-files-found }}
+        INPUT_SUMMARY_TITLE: ${{ inputs.summary-title }}
+      run: bash "${{ github.action_path }}/stage.sh"
+
+    - name: Upload visual artifacts
+      if: steps.stage.outputs.count != '0'
+      shell: bash
+      env:
+        STAGED_DIR: ${{ steps.stage.outputs.staged-dir }}
+        RETENTION_DAYS: ${{ inputs.retention-days }}
+      run: |
+        set -euo pipefail
+        cd "${{ github.action_path }}"
+        npm ci --omit=dev --no-fund --no-audit --silent
+        node ./upload.mjs
+
+    - name: Summarize visual artifacts
+      if: always()
+      shell: bash
+      env:
+        STAGED_DIR: ${{ steps.stage.outputs.staged-dir }}
+        SUMMARY_TITLE: ${{ steps.stage.outputs.summary-title }}
+        FILE_COUNT: ${{ steps.stage.outputs.count }}
+      run: |
+        set -euo pipefail
+        {
+          echo "## ${SUMMARY_TITLE}"
+          echo
+          if [[ "${FILE_COUNT:-0}" == "0" || ! -d "${STAGED_DIR:-}" ]]; then
+            echo "_No visual files_"
+          else
+            ls -la "$STAGED_DIR"
+          fi
+        } >> "$GITHUB_STEP_SUMMARY"

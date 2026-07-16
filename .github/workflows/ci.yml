@@ -27,60 +27,25 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
-      - run: cargo fmt --all --check
+      - name: Check formatting
+        if: matrix.os == 'ubuntu-latest'
+        run: cargo fmt --all --check
       - name: Test with visual apply-payload artifacts
         env:
           EASEL_VISUAL_OUTDIR: ${{ runner.temp }}/easel-visual
         run: cargo test
-      - name: Stage individual apply-payload PNGs
-        if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          src="${{ runner.temp }}/easel-visual"
-          out="${{ runner.temp }}/easel-visual-named"
-          mkdir -p "$out"
-          for i in 0 1 2; do
-            if [[ -f "$src/apply-display-$i.png" ]]; then
-              cp "$src/apply-display-$i.png" \
-                "$out/apply-payload-${{ matrix.os }}-display-$i.png"
-            fi
-          done
-          ls -la "$out" 2>/dev/null || true
       # Public artifacts are deliberately non-installable synthetic review images.
-      - name: Upload apply-payload display 0
+      - name: Publish apply-payload visuals
         if: always()
-        uses: actions/upload-artifact@v7
+        uses: ./.github/actions/ci-visual
         with:
-          path: ${{ runner.temp }}/easel-visual-named/apply-payload-${{ matrix.os }}-display-0.png
-          archive: false
-          retention-days: 7
+          stage: apply-payload
+          source-dir: ${{ runner.temp }}/easel-visual
+          pattern: "apply-display-*.png"
+          name-template: "{stage}-{os}-{stem}.png"
+          runner-os: ${{ matrix.os }}
           if-no-files-found: ignore
-      - name: Upload apply-payload display 1
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ runner.temp }}/easel-visual-named/apply-payload-${{ matrix.os }}-display-1.png
-          archive: false
-          retention-days: 7
-          if-no-files-found: ignore
-      - name: Upload apply-payload display 2
-        if: always()
-        uses: actions/upload-artifact@v7
-        with:
-          path: ${{ runner.temp }}/easel-visual-named/apply-payload-${{ matrix.os }}-display-2.png
-          archive: false
-          retention-days: 7
-          if-no-files-found: ignore
-      - name: Summarize visual artifacts
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "## Apply-payload rasters (${{ matrix.os }})"
-            echo
-            ls -la "${{ runner.temp }}/easel-visual-named" 2>/dev/null || echo "_No visual files_"
-          } >> "$GITHUB_STEP_SUMMARY"
+          summary-title: Apply-payload rasters (${{ matrix.os }})
       - run: cargo clippy --all-targets -- -D warnings
 
   desktop:
@@ -88,13 +53,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        include:
-          - os: ubuntu-latest
-            gui_name: gui-linux.png
-          - os: windows-latest
-            gui_name: gui-windows.png
-          - os: macos-latest
-            gui_name: gui-osx.png
+        os: [ubuntu-latest, windows-latest, macos-latest]
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
@@ -186,39 +145,14 @@ jobs:
           mkdir -p "${{ runner.temp }}/easel-gui"
           cargo run -p easel-desktop -- --smoke-screenshot "${{ runner.temp }}/easel-gui"
 
-      - name: Stage GUI smoke PNG
+      - name: Publish GUI smoke visuals
         if: always()
-        shell: bash
-        run: |
-          set -euo pipefail
-          gui="${{ runner.temp }}/easel-gui"
-          shopt -s nullglob
-          files=("$gui"/gui-*.png)
-          if ((${#files[@]} == 0)); then
-            echo "No GUI smoke PNG found"
-            exit 0
-          fi
-          cp "${files[0]}" "$gui/gui-smoke-${{ matrix.os }}.png"
-          ls -la "$gui/gui-smoke-${{ matrix.os }}.png"
-
-      - name: Upload GUI smoke screenshot
-        if: always()
-        uses: actions/upload-artifact@v7
+        uses: ./.github/actions/ci-visual
         with:
-          path: ${{ runner.temp }}/easel-gui/gui-smoke-${{ matrix.os }}.png
-          archive: false
-          retention-days: 7
+          stage: gui-smoke
+          source-dir: ${{ runner.temp }}/easel-gui
+          pattern: "gui-*.png"
+          name-template: "{stage}-{os}.png"
+          runner-os: ${{ matrix.os }}
           if-no-files-found: warn
-
-      - name: Summarize GUI smoke
-        if: always()
-        shell: bash
-        run: |
-          {
-            echo "## Qt GUI smoke (${{ matrix.os }})"
-            echo
-            ls -la "${{ runner.temp }}/easel-gui" 2>/dev/null || echo "_No GUI smoke files_"
-            echo
-            echo "Expected upload name: \`gui-smoke-${{ matrix.os }}.png\` (capture used Qt.platform.os)."
-          } >> "$GITHUB_STEP_SUMMARY"
-
+          summary-title: Qt GUI smoke (${{ matrix.os }})
