@@ -4,31 +4,111 @@ on:
   pull_request:
     types: [closed]
     branches: [main]
+  workflow_dispatch:
+    inputs:
+      pr_number:
+        description: Merged pull request number to archive
+        required: true
+        type: number
 
 permissions:
   contents: write
+  pull-requests: read
 
 concurrency:
-  group: archive-merged-branch-${{ github.event.pull_request.number }}
+  group: archive-merged-branch-${{ github.event.pull_request.number || inputs.pr_number }}
   cancel-in-progress: false
 
 jobs:
   archive:
     if: >-
-      github.event.pull_request.merged == true &&
-      github.event.pull_request.head.repo.full_name == github.repository &&
-      github.event.pull_request.head.ref != github.event.repository.default_branch &&
-      !startsWith(github.event.pull_request.head.ref, 'archive/')
+      github.event_name == 'workflow_dispatch' ||
+      (
+        github.event.pull_request.merged == true &&
+        github.event.pull_request.head.repo.full_name == github.repository &&
+        github.event.pull_request.head.ref != github.event.repository.default_branch &&
+        !startsWith(github.event.pull_request.head.ref, 'archive/')
+      )
     runs-on: ubuntu-latest
 
     steps:
-      - name: Rename merged branch into archive namespace
+      - name: Resolve pull request metadata
+        id: pr
         env:
           GH_TOKEN: ${{ github.token }}
           REPOSITORY: ${{ github.repository }}
-          PR_NUMBER: ${{ github.event.pull_request.number }}
-          HEAD_REF: ${{ github.event.pull_request.head.ref }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_NAME: ${{ github.event_name }}
+          EVENT_PR_NUMBER: ${{ github.event.pull_request.number }}
+          EVENT_HEAD_REF: ${{ github.event.pull_request.head.ref }}
+          EVENT_HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          EVENT_HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
+          INPUT_PR_NUMBER: ${{ inputs.pr_number }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            if [[ ! "$INPUT_PR_NUMBER" =~ ^[1-9][0-9]*$ ]]; then
+              echo "pr_number must be a positive integer, got: $INPUT_PR_NUMBER" >&2
+              exit 1
+            fi
+
+            pr_number="$INPUT_PR_NUMBER"
+            pr_json="$(gh api "/repos/$REPOSITORY/pulls/$pr_number")"
+            merged="$(jq -r '.merged' <<<"$pr_json")"
+            head_ref="$(jq -r '.head.ref' <<<"$pr_json")"
+            head_repo="$(jq -r '.head.repo.full_name // empty' <<<"$pr_json")"
+
+            # Prefer the PR commit list tip over .head.sha, which can move if the
+            # branch receives pushes after merge and before archival.
+            head_sha="$(
+              gh api --paginate "/repos/$REPOSITORY/pulls/$pr_number/commits" \
+                --jq '.[].sha' | tail -n 1
+            )"
+            if [[ -z "$head_sha" || ! "$head_sha" =~ ^[0-9a-f]{40}$ ]]; then
+              echo "Unable to resolve merged tip SHA for PR #$pr_number" >&2
+              exit 1
+            fi
+
+            if [[ "$merged" != "true" ]]; then
+              echo "PR #$pr_number is not merged; refusing to archive" >&2
+              exit 1
+            fi
+            if [[ "$head_repo" != "$REPOSITORY" ]]; then
+              echo "PR #$pr_number head is from a fork ($head_repo); refusing to archive" >&2
+              exit 1
+            fi
+            if [[ "$head_ref" == "$DEFAULT_BRANCH" ]]; then
+              echo "PR #$pr_number head is the default branch; refusing to archive" >&2
+              exit 1
+            fi
+            if [[ "$head_ref" == archive/* ]]; then
+              echo "PR #$pr_number head is already under archive/; nothing to do"
+              echo "skip=true" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+          else
+            pr_number="$EVENT_PR_NUMBER"
+            head_ref="$EVENT_HEAD_REF"
+            head_sha="$EVENT_HEAD_SHA"
+          fi
+
+          {
+            echo "skip=false"
+            echo "pr_number=$pr_number"
+            echo "head_ref=$head_ref"
+            echo "head_sha=$head_sha"
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Rename or create archive branch at merged head SHA
+        if: steps.pr.outputs.skip != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPOSITORY: ${{ github.repository }}
+          PR_NUMBER: ${{ steps.pr.outputs.pr_number }}
+          HEAD_REF: ${{ steps.pr.outputs.head_ref }}
+          HEAD_SHA: ${{ steps.pr.outputs.head_sha }}
         shell: bash
         run: |
           set -euo pipefail
@@ -63,9 +143,44 @@ jobs:
             exit 1
           }
 
+          # Branches API can lag briefly after renames/ref creation.
+          api_sha_retry() {
+            local encoded_ref="$1"
+            local delay=1
+            local attempt
+            for attempt in 1 2 3 4 5 6; do
+              if api_sha "$encoded_ref"; then
+                return 0
+              fi
+              sleep "$delay"
+              delay=$((delay * 2))
+            done
+            return 1
+          }
+
+          ensure_archive_at_sha() {
+            local archived_sha="$1"
+            if [[ "$archived_sha" != "$HEAD_SHA" ]]; then
+              echo "Archive tip does not match the merged PR head commit" >&2
+              echo "expected=$HEAD_SHA actual=$archived_sha" >&2
+              exit 1
+            fi
+          }
+
+          write_summary() {
+            {
+              echo "### Archived merged branch"
+              echo
+              echo "- Source: \`$HEAD_REF\`"
+              echo "- Archive: \`$archive\`"
+              echo "- Commit: \`$HEAD_SHA\`"
+            } >> "$GITHUB_STEP_SUMMARY"
+          }
+
           if existing_sha="$(api_sha "$encoded_archive")"; then
             if [[ "$existing_sha" == "$HEAD_SHA" ]]; then
               echo "Archive already exists at the expected commit: $archive"
+              write_summary
               exit 0
             fi
 
@@ -74,40 +189,51 @@ jobs:
             exit 1
           fi
 
-          if ! current_sha="$(api_sha "$encoded_head")"; then
-            echo "Merged head branch no longer exists: $HEAD_REF" >&2
-            echo "Cannot archive commit $HEAD_SHA" >&2
-            exit 1
+          if current_sha="$(api_sha "$encoded_head")"; then
+            if [[ "$current_sha" != "$HEAD_SHA" ]]; then
+              echo "Refusing to archive $HEAD_REF: tip moved after merge" >&2
+              echo "expected=$HEAD_SHA actual=$current_sha" >&2
+              exit 1
+            fi
+
+            echo "Renaming $HEAD_REF to $archive"
+            rename_json="$(
+              gh api \
+                --method POST \
+                "/repos/$REPOSITORY/branches/$encoded_head/rename" \
+                -f "new_name=$archive"
+            )"
+
+            archived_sha="$(jq -r '.commit.sha // empty' <<<"$rename_json")"
+            if [[ -z "$archived_sha" ]]; then
+              echo "Rename response omitted commit SHA; polling Branches API" >&2
+              if ! archived_sha="$(api_sha_retry "$encoded_archive")"; then
+                echo "Rename reported success but archive branch is missing: $archive" >&2
+                exit 1
+              fi
+            fi
+
+            ensure_archive_at_sha "$archived_sha"
+            write_summary
+            exit 0
           fi
 
-          if [[ "$current_sha" != "$HEAD_SHA" ]]; then
-            echo "Refusing to archive $HEAD_REF: tip moved after merge" >&2
-            echo "expected=$HEAD_SHA actual=$current_sha" >&2
-            exit 1
-          fi
-
-          echo "Renaming $HEAD_REF to $archive"
+          echo "Merged head branch no longer exists: $HEAD_REF"
+          echo "Creating archive ref $archive at $HEAD_SHA"
           gh api \
             --method POST \
-            "/repos/$REPOSITORY/branches/$encoded_head/rename" \
-            -f "new_name=$archive" \
+            "/repos/$REPOSITORY/git/refs" \
+            -f "ref=refs/heads/$archive" \
+            -f "sha=$HEAD_SHA" \
             --silent
 
-          if ! archived_sha="$(api_sha "$encoded_archive")"; then
-            echo "Rename reported success but archive branch is missing: $archive" >&2
-            exit 1
+          if ! archived_sha="$(api_sha_retry "$encoded_archive")"; then
+            # Prefer the git ref endpoint if Branches API is still lagging.
+            archived_sha="$(
+              gh api "/repos/$REPOSITORY/git/ref/heads/$encoded_archive" \
+                --jq '.object.sha'
+            )"
           fi
 
-          if [[ "$archived_sha" != "$HEAD_SHA" ]]; then
-            echo "Archive tip does not match the merged PR head commit" >&2
-            echo "expected=$HEAD_SHA actual=$archived_sha" >&2
-            exit 1
-          fi
-
-          {
-            echo "### Archived merged branch"
-            echo
-            echo "- Source: \`$HEAD_REF\`"
-            echo "- Archive: \`$archive\`"
-            echo "- Commit: \`$HEAD_SHA\`"
-          } >> "$GITHUB_STEP_SUMMARY"
+          ensure_archive_at_sha "$archived_sha"
+          write_summary
