@@ -36,6 +36,8 @@ impl WallpaperBackend for WindowsDesktopBackend {
             workspaces: false,
             lock_screen: false,
             cross_fade: false,
+            // Windows has no public dynamic-HEIC wallpaper API.
+            native_dynamic_bundle: false,
         }
     }
 

@@ -36,9 +36,10 @@ pub use display::{
 };
 pub use display_group::{DisplayGroup, DisplayGroupError, DisplayGroupId};
 pub use dynamic_still::{
-    AppliedDynamicFrame, DYNAMIC_STILL_SET_SCHEMA_VERSION, DynamicStillError, DynamicStillFrame,
-    DynamicStillKey, DynamicStillSet, DynamicStillSetId, FrameSelection, TransitionDecision,
-    active_frame_at, decide_transition, next_transition_after,
+    AppearanceMode, AppliedDynamicFrame, DYNAMIC_STILL_SET_SCHEMA_VERSION, DynamicEvalContext,
+    DynamicScheduleKind, DynamicStillError, DynamicStillFrame, DynamicStillKey, DynamicStillSet,
+    DynamicStillSetId, FrameSelection, TransitionDecision, active_frame_at,
+    active_frame_with_context, decide_transition, next_transition_after, solar_sample_distance,
 };
 pub use history::{HistoryAction, HistoryEvent, HistoryEventId};
 pub use hotplug::{
@@ -65,6 +66,6 @@ pub use rotation::{
 pub use schedule::{
     InstantSeconds, LocalCivilTime, LocalTimeOfDay, SCHEDULE_SCHEMA_VERSION, Schedule,
     ScheduleError, ScheduleId, ScheduleRule, SolarEvent, explain_fire, instant_at_local,
-    next_fire_after, solar_event_local_minutes,
+    next_fire_after, solar_event_local_minutes, solar_position_deg,
 };
 pub use suitability::{PixelBudget, SuitabilityAssessment, assess_suitability};

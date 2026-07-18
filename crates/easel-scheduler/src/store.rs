@@ -159,10 +159,14 @@ impl AutomationStore {
         }
         self.still_sets = read_document::<StillSetDocument>(&self.still_sets_path())?
             .unwrap_or_default()
-            .still_sets;
-        for still_set in &self.still_sets {
-            still_set.validate()?;
-        }
+            .still_sets
+            .into_iter()
+            .map(|still_set| {
+                let migrated = still_set.migrate()?;
+                migrated.validate()?;
+                Ok(migrated)
+            })
+            .collect::<Result<Vec<_>, AutomationStoreError>>()?;
         self.hotplug = read_document::<HotplugPolicy>(&self.hotplug_path())?.unwrap_or_default();
         self.hotplug.validate()?;
         Ok(())
@@ -306,6 +310,7 @@ impl AutomationStore {
         &mut self,
         still_set: DynamicStillSet,
     ) -> Result<(), AutomationStoreError> {
+        let still_set = still_set.migrate()?;
         still_set.validate()?;
         if let Some(existing) = self
             .still_sets

@@ -34,6 +34,11 @@ enum Commands {
     Schedules,
     /// List dynamic still sets.
     Stills,
+    /// Inspect Apple/Plasma dynamic HEIC metadata without importing frames into the library.
+    InspectHeic {
+        /// Path to a `.heic` dynamic wallpaper.
+        path: PathBuf,
+    },
     /// Show automation status (pause, next fire, last apply).
     Status,
     /// Pause all rotation queues.
@@ -77,6 +82,7 @@ fn run() -> Result<(), String> {
             list_stills(&store);
             Ok(())
         }
+        Commands::InspectHeic { path } => inspect_heic(&path),
         Commands::Status => show_status(&store, cli.utc_offset_minutes),
         Commands::Pause => {
             store
@@ -131,12 +137,14 @@ fn list_stills(store: &AutomationStore) {
     }
     for still_set in store.still_sets() {
         println!(
-            "{}\t{}\tframes={}\tfallback={}\tcross_fade={}",
+            "{}\t{}\tkind={:?}\tframes={}\tfallback={}\tcross_fade={}\tsource={}",
             still_set.id.to_hyphenated_string(),
             still_set.name,
+            still_set.schedule_kind,
             still_set.frames.len(),
             still_set.fallback_asset_id.to_hyphenated_string(),
-            still_set.request_cross_fade
+            still_set.request_cross_fade,
+            still_set.source_package_path.as_deref().unwrap_or("-"),
         );
         for frame in &still_set.frames {
             println!(
@@ -146,6 +154,42 @@ fn list_stills(store: &AutomationStore) {
             );
         }
     }
+}
+
+fn inspect_heic(path: &std::path::Path) -> Result<(), String> {
+    use easel_core::all_layout_fixtures;
+    use easel_dynamic::{NativeDynamicFormat, import_dynamic_heic, plan_per_display_bundles};
+
+    let imported = import_dynamic_heic(path).map_err(|error| error.to_string())?;
+    println!("path:\t{}", imported.source_path.display());
+    println!("flavor:\t{:?}", imported.flavor);
+    println!("schedule_kind:\t{:?}", imported.schedule_kind);
+    println!("frames:\t{}", imported.frames.len());
+    for frame in &imported.frames {
+        println!(
+            "\t#{}\t{}\t{}x{}",
+            frame.index,
+            frame.key.label(),
+            frame.image.width(),
+            frame.image.height()
+        );
+    }
+    // Illustrate per-display native package planning against the standard fixture layout.
+    let profile_id = ProfileId::new();
+    let asset_ids: Vec<_> = (0..imported.frames.len()).map(|_| AssetId::new()).collect();
+    let set = imported
+        .into_still_set_template("inspect", profile_id, &asset_ids)
+        .map_err(|error| error.to_string())?;
+    let displays = all_layout_fixtures()[0].1.displays.clone();
+    let plan = plan_per_display_bundles(&set, &displays, NativeDynamicFormat::AppleHeic)
+        .map_err(|error| error.to_string())?;
+    println!(
+        "native_bundle_plan:\t{} targets × {} frames ({:?})",
+        plan.targets.len(),
+        plan.frame_count,
+        NativeDynamicFormat::AppleHeic
+    );
+    Ok(())
 }
 
 fn list_schedules(store: &AutomationStore, utc_offset_minutes: i32) -> Result<(), String> {

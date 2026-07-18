@@ -11,26 +11,24 @@ Easel uses precise terms in its code, interface, and support matrix:
 | Animated image | A GIF, animated WebP, or similar local container plays continuously. | Decoder, compositor, and persistent desktop surface. |
 | Video | A silent local video plays continuously. | Video decoder, compositor, and persistent desktop surface. |
 
-Native vendor-specific “dynamic wallpaper” bundles are not the portable domain format. Importers
-may translate a supported bundle into a Easel time-of-day timeline, while original files and
-metadata remain intact.
+Native vendor dynamic wallpaper packages (Apple Dynamic Desktop HEIC, Plasma dynamic
+HEIC/AVIF) are the preferred **interchange** format. Easel imports their schedule metadata
+(`apple_desktop:solar` altitude/azimuth samples, `apr` appearance, `h24` time) into a portable
+`DynamicStillSet`, retains the original package for provenance, and plans per-display native
+re-encodes so each output can be cropped for physical spanning. See ADR 0006.
 
 ## Feasibility assessment
 
-Dynamic stills are feasible on any backend that can already apply a still image. They reuse the
-renderer and scheduler, can be prepared ahead of a transition, and have straightforward failure
-behavior.
-
-Animated images and video are also feasible, but not through one uniform OS wallpaper call. Qt
-Multimedia supplies playback state and `VideoOutput`; a live-wallpaper implementation still needs
-a platform adapter that owns persistent surfaces at the desktop background layer.
+Dynamic stills are feasible on any backend that can already apply a still image, and stronger
+on platforms that can host a native dynamic package. Animated images and video remain a separate
+live-host problem (Stage 6).
 
 | Platform/session | Dynamic stills | Animated/video host | Initial position |
 | --- | --- | --- | --- |
-| KDE Plasma 6 | Static backend applies each frame. | Documented QML wallpaper plugin model. | First supported live target. |
+| KDE Plasma 6 | Still-frame apply today; native dynamic HEIC/AVIF host planned (`native_dynamic_bundle`). | Documented QML wallpaper plugin model. | First supported live target. |
 | Other Linux desktops | Static settings backend applies each frame. | Desktop/compositor-specific; no universal Wayland attachment. | Probe individually; poster fallback. |
-| Windows | `IDesktopWallpaper` applies still files. | Public wallpaper API does not expose video playback. | Feasibility spike; experimental if safe. |
-| macOS | AppKit applies a still image per screen. | Public `setDesktopImageURL` contract is still-image oriented. | Feasibility spike; experimental if safe. |
+| Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | Public wallpaper API does not expose video playback. | Feasibility spike; experimental if safe. |
+| macOS | Native Dynamic Desktop HEIC host planned; AppKit still apply as fallback. | Public `setDesktopImageURL` contract is still-image oriented. | Feasibility spike; experimental if safe. |
 
 The application must never advertise a live capability based only on the operating-system name.
 It probes the current session and decoder, reports evidence in diagnostics, and falls back to the

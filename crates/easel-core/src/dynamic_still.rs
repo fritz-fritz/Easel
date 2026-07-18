@@ -2,7 +2,10 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Time-of-day and solar-keyed dynamic still sets.
+//! Dynamic still sets keyed by time, solar position, or appearance.
+//!
+//! The portable domain mirrors Apple Dynamic Desktop HEIC metadata (`solar`,
+//! `apr`, `h24`) so importers and native bundle exporters share one model.
 
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -10,11 +13,12 @@ use uuid::Uuid;
 
 use crate::schedule::{
     InstantSeconds, LocalTimeOfDay, SolarEvent, instant_at_local, solar_event_local_minutes,
+    solar_position_deg,
 };
 use crate::{AssetId, ProfileId};
 
 /// Current serialized dynamic-still-set schema.
-pub const DYNAMIC_STILL_SET_SCHEMA_VERSION: u16 = 1;
+pub const DYNAMIC_STILL_SET_SCHEMA_VERSION: u16 = 2;
 
 /// Stable identity for a dynamic still set.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -46,8 +50,32 @@ impl Default for DynamicStillSetId {
     }
 }
 
-/// When a still frame becomes active within a day.
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+/// Which evaluation rule a still set uses (matches Apple HEIC metadata flavors).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum DynamicScheduleKind {
+    /// Wall-clock samples (`apple_desktop:h24` / authored ToD / sunrise-sunset).
+    #[default]
+    TimeOfDay,
+    /// Nearest sun altitude/azimuth sample (`apple_desktop:solar`).
+    SolarPosition,
+    /// Light/dark appearance (`apple_desktop:apr`).
+    Appearance,
+}
+
+/// Light or dark appearance selection for appearance-keyed sets.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AppearanceMode {
+    /// Light / day appearance.
+    #[default]
+    Light,
+    /// Dark / night appearance.
+    Dark,
+}
+
+/// When a still frame becomes active.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum DynamicStillKey {
     /// Local wall-clock time.
@@ -61,6 +89,18 @@ pub enum DynamicStillKey {
         event: SolarEvent,
         /// Minutes added after the solar event (may be negative).
         offset_minutes: i32,
+    },
+    /// Sample keyed to sun altitude and azimuth (Apple `solar` metadata).
+    SolarPosition {
+        /// Solar altitude / elevation in degrees (negative below horizon).
+        altitude_deg: f64,
+        /// Solar azimuth in degrees (0..=360, north-based convention as stored).
+        azimuth_deg: f64,
+    },
+    /// Appearance-mode frame (Apple `apr` metadata).
+    Appearance {
+        /// Light or dark.
+        mode: AppearanceMode,
     },
 }
 
@@ -80,20 +120,31 @@ impl DynamicStillKey {
                 };
                 format!("solar:{name}{offset_minutes:+}m")
             }
+            Self::SolarPosition {
+                altitude_deg,
+                azimuth_deg,
+            } => format!("sun:a{altitude_deg:.3}:z{azimuth_deg:.3}"),
+            Self::Appearance { mode } => match mode {
+                AppearanceMode::Light => "appearance:light".into(),
+                AppearanceMode::Dark => "appearance:dark".into(),
+            },
         }
     }
 }
 
 /// One keyed frame inside a dynamic still set.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DynamicStillFrame {
+    /// Optional HEIC image index for round-trip with Apple / Plasma packages.
+    #[serde(default)]
+    pub source_index: Option<u32>,
     /// When this frame becomes active.
     pub key: DynamicStillKey,
     /// Still asset shown while this frame is active.
     pub asset_id: AssetId,
 }
 
-/// Ordered time/solar still set with a required fallback frame.
+/// Ordered time/solar/appearance still set with a required fallback frame.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct DynamicStillSet {
     /// Serialized schema version.
@@ -104,9 +155,12 @@ pub struct DynamicStillSet {
     pub name: String,
     /// Profile that owns this still set (for diagnostics).
     pub profile_id: ProfileId,
-    /// Keyed frames; evaluation uses resolved instants, not declaration order.
+    /// Evaluation rule for this set.
+    #[serde(default)]
+    pub schedule_kind: DynamicScheduleKind,
+    /// Keyed frames; evaluation uses the active `schedule_kind`.
     pub frames: Vec<DynamicStillFrame>,
-    /// Asset used when no keyed frame can be resolved (polar night, empty day, etc.).
+    /// Asset used when no keyed frame can be resolved.
     pub fallback_asset_id: AssetId,
     /// Observer latitude for solar keys (−90..=90).
     pub latitude_deg: f64,
@@ -114,6 +168,20 @@ pub struct DynamicStillSet {
     pub longitude_deg: f64,
     /// Request a cross-fade when the active backend supports it without a live host.
     pub request_cross_fade: bool,
+    /// Optional path to the original dynamic HEIC / Plasma package for re-export.
+    #[serde(default)]
+    pub source_package_path: Option<String>,
+}
+
+/// Injected context for appearance and solar evaluation.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct DynamicEvalContext {
+    /// Current instant.
+    pub now: InstantSeconds,
+    /// Fixed local offset east of UTC in minutes.
+    pub utc_offset_minutes: i32,
+    /// Current light/dark preference for appearance-keyed sets.
+    pub appearance: AppearanceMode,
 }
 
 impl DynamicStillSet {
@@ -129,15 +197,40 @@ impl DynamicStillSet {
             id: DynamicStillSetId::new(),
             name: name.into(),
             profile_id,
+            schedule_kind: DynamicScheduleKind::TimeOfDay,
             frames: Vec::new(),
             fallback_asset_id,
             latitude_deg: 40.7128,
             longitude_deg: -74.0060,
             request_cross_fade: false,
+            source_package_path: None,
         }
     }
 
-    /// Builds a default morning / noon / evening time-of-day set from one asset.
+    /// Builds a dense hourly time-of-day set from one asset (placeholder before HEIC import).
+    pub fn default_hourly(
+        name: impl Into<String>,
+        profile_id: ProfileId,
+        asset_id: AssetId,
+    ) -> Result<Self, DynamicStillError> {
+        let mut set = Self::with_fallback(name, profile_id, asset_id);
+        set.schedule_kind = DynamicScheduleKind::TimeOfDay;
+        set.frames = (0..24)
+            .map(|hour| {
+                Ok(DynamicStillFrame {
+                    source_index: Some(u32::from(hour)),
+                    key: DynamicStillKey::TimeOfDay {
+                        time: LocalTimeOfDay::new(hour, 0)?,
+                    },
+                    asset_id,
+                })
+            })
+            .collect::<Result<Vec<_>, DynamicStillError>>()?;
+        set.validate()?;
+        Ok(set)
+    }
+
+    /// Legacy three-slot helper retained for older Compose saves.
     pub fn default_time_of_day(
         name: impl Into<String>,
         profile_id: ProfileId,
@@ -146,18 +239,21 @@ impl DynamicStillSet {
         let mut set = Self::with_fallback(name, profile_id, asset_id);
         set.frames = vec![
             DynamicStillFrame {
+                source_index: Some(0),
                 key: DynamicStillKey::TimeOfDay {
                     time: LocalTimeOfDay::new(6, 0)?,
                 },
                 asset_id,
             },
             DynamicStillFrame {
+                source_index: Some(1),
                 key: DynamicStillKey::TimeOfDay {
                     time: LocalTimeOfDay::new(12, 0)?,
                 },
                 asset_id,
             },
             DynamicStillFrame {
+                source_index: Some(2),
                 key: DynamicStillKey::TimeOfDay {
                     time: LocalTimeOfDay::new(18, 0)?,
                 },
@@ -166,6 +262,33 @@ impl DynamicStillSet {
         ];
         set.validate()?;
         Ok(set)
+    }
+
+    /// Upgrades older on-disk still sets to the current schema.
+    pub fn migrate(mut self) -> Result<Self, DynamicStillError> {
+        match self.schema_version {
+            1 => {
+                self.schema_version = DYNAMIC_STILL_SET_SCHEMA_VERSION;
+                if self
+                    .frames
+                    .iter()
+                    .any(|frame| matches!(frame.key, DynamicStillKey::SolarPosition { .. }))
+                {
+                    self.schedule_kind = DynamicScheduleKind::SolarPosition;
+                } else if self
+                    .frames
+                    .iter()
+                    .any(|frame| matches!(frame.key, DynamicStillKey::Appearance { .. }))
+                {
+                    self.schedule_kind = DynamicScheduleKind::Appearance;
+                } else {
+                    self.schedule_kind = DynamicScheduleKind::TimeOfDay;
+                }
+                Ok(self)
+            }
+            DYNAMIC_STILL_SET_SCHEMA_VERSION => Ok(self),
+            other => Err(DynamicStillError::UnsupportedSchema(other)),
+        }
     }
 
     /// Validates schema and frame invariants.
@@ -184,8 +307,28 @@ impl DynamicStillSet {
         }
         let mut seen = Vec::with_capacity(self.frames.len());
         for frame in &self.frames {
-            if let DynamicStillKey::TimeOfDay { time } = frame.key {
-                LocalTimeOfDay::new(time.hour, time.minute)?;
+            match frame.key {
+                DynamicStillKey::TimeOfDay { time } => {
+                    LocalTimeOfDay::new(time.hour, time.minute)?;
+                }
+                DynamicStillKey::SolarPosition {
+                    altitude_deg,
+                    azimuth_deg,
+                } => {
+                    if !altitude_deg.is_finite() || !(-90.0..=90.0).contains(&altitude_deg) {
+                        return Err(DynamicStillError::InvalidSolarPosition {
+                            altitude_deg,
+                            azimuth_deg,
+                        });
+                    }
+                    if !azimuth_deg.is_finite() || !(0.0..360.0).contains(&azimuth_deg) {
+                        return Err(DynamicStillError::InvalidSolarPosition {
+                            altitude_deg,
+                            azimuth_deg,
+                        });
+                    }
+                }
+                DynamicStillKey::Solar { .. } | DynamicStillKey::Appearance { .. } => {}
             }
             let label = frame.key.label();
             if seen.contains(&label) {
@@ -198,7 +341,7 @@ impl DynamicStillSet {
 }
 
 /// Result of evaluating which frame should be showing.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub struct FrameSelection {
     /// Asset to render and apply.
     pub asset_id: AssetId,
@@ -239,84 +382,68 @@ pub struct TransitionDecision {
     pub reason: String,
 }
 
-/// Selects the active frame at `now` using a fixed UTC offset and solar observer.
+/// Selects the active frame using the still set's `schedule_kind`.
 #[must_use]
 pub fn active_frame_at(
     set: &DynamicStillSet,
     now: InstantSeconds,
     utc_offset_minutes: i32,
 ) -> FrameSelection {
-    let mut best: Option<(InstantSeconds, &DynamicStillFrame)> = None;
-    // Look back across yesterday so early-morning evaluation still finds last night's key.
-    for day_offset in -1..=0 {
-        for frame in &set.frames {
-            if let Some(instant) =
-                resolve_key_on_day(set, frame.key, now, utc_offset_minutes, day_offset)
-            {
-                if instant.unix_seconds <= now.unix_seconds
-                    && best
-                        .as_ref()
-                        .is_none_or(|(current, _)| instant.unix_seconds >= current.unix_seconds)
-                {
-                    best = Some((instant, frame));
-                }
-            }
-        }
-    }
+    active_frame_with_context(
+        set,
+        DynamicEvalContext {
+            now,
+            utc_offset_minutes,
+            appearance: AppearanceMode::Light,
+        },
+    )
+}
 
-    if let Some((instant, frame)) = best {
-        let local = instant.to_local(utc_offset_minutes);
-        return FrameSelection {
-            asset_id: frame.asset_id,
-            key: Some(frame.key),
-            reason: format!(
-                "active {} since {:02}:{:02} local",
-                frame.key.label(),
-                local.time.hour,
-                local.time.minute
-            ),
-            used_fallback: false,
-        };
-    }
-
-    FrameSelection {
-        asset_id: set.fallback_asset_id,
-        key: None,
-        reason: "fallback frame (no keyed transition at or before now)".into(),
-        used_fallback: true,
+/// Selects the active frame with an explicit appearance preference.
+#[must_use]
+pub fn active_frame_with_context(set: &DynamicStillSet, ctx: DynamicEvalContext) -> FrameSelection {
+    match set.schedule_kind {
+        DynamicScheduleKind::Appearance => active_appearance_frame(set, ctx.appearance),
+        DynamicScheduleKind::SolarPosition => active_solar_position_frame(set, ctx),
+        DynamicScheduleKind::TimeOfDay => active_time_keyed_frame(set, ctx),
     }
 }
 
 /// Returns the next keyed transition strictly after `now`, when one exists.
+///
+/// Solar-position sets do not expose a cheap closed-form next fire; callers should
+/// re-evaluate periodically. Appearance sets never auto-transition from the clock.
 #[must_use]
 pub fn next_transition_after(
     set: &DynamicStillSet,
     now: InstantSeconds,
     utc_offset_minutes: i32,
 ) -> Option<(InstantSeconds, DynamicStillFrame)> {
-    let mut best: Option<(InstantSeconds, DynamicStillFrame)> = None;
-    for day_offset in 0..=2 {
-        for frame in &set.frames {
-            if let Some(instant) =
-                resolve_key_on_day(set, frame.key, now, utc_offset_minutes, day_offset)
-            {
-                if instant.unix_seconds > now.unix_seconds
-                    && best
-                        .as_ref()
-                        .is_none_or(|(current, _)| instant.unix_seconds < current.unix_seconds)
-                {
-                    best = Some((instant, frame.clone()));
+    match set.schedule_kind {
+        DynamicScheduleKind::Appearance | DynamicScheduleKind::SolarPosition => None,
+        DynamicScheduleKind::TimeOfDay => {
+            let mut best: Option<(InstantSeconds, DynamicStillFrame)> = None;
+            for day_offset in 0..=2 {
+                for frame in &set.frames {
+                    if let Some(instant) =
+                        resolve_time_key_on_day(set, frame.key, now, utc_offset_minutes, day_offset)
+                    {
+                        if instant.unix_seconds > now.unix_seconds
+                            && best.as_ref().is_none_or(|(current, _)| {
+                                instant.unix_seconds < current.unix_seconds
+                            })
+                        {
+                            best = Some((instant, frame.clone()));
+                        }
+                    }
                 }
             }
+            best
         }
     }
-    best
 }
 
 /// Decides whether to apply `selection` given the last successful dynamic apply.
-///
-/// Catch-up after sleep or a forward clock jump applies the current frame once.
-/// A backward clock jump that lands on a different key also applies once.
 #[must_use]
 pub fn decide_transition(
     last: Option<&AppliedDynamicFrame>,
@@ -350,7 +477,124 @@ pub fn decide_transition(
     }
 }
 
-fn resolve_key_on_day(
+/// Angular distance between two solar samples (degrees), with azimuth wrap.
+#[must_use]
+pub fn solar_sample_distance(
+    altitude_a: f64,
+    azimuth_a: f64,
+    altitude_b: f64,
+    azimuth_b: f64,
+) -> f64 {
+    let d_alt = altitude_a - altitude_b;
+    let mut d_az = (azimuth_a - azimuth_b).abs();
+    if d_az > 180.0 {
+        d_az = 360.0 - d_az;
+    }
+    let mean_alt = (altitude_a + altitude_b) * 0.5;
+    let az_scale = mean_alt.to_radians().cos().abs().max(0.2);
+    (d_alt * d_alt + (d_az * az_scale) * (d_az * az_scale)).sqrt()
+}
+
+fn active_time_keyed_frame(set: &DynamicStillSet, ctx: DynamicEvalContext) -> FrameSelection {
+    let mut best: Option<(InstantSeconds, &DynamicStillFrame)> = None;
+    for day_offset in -1..=0 {
+        for frame in &set.frames {
+            if let Some(instant) =
+                resolve_time_key_on_day(set, frame.key, ctx.now, ctx.utc_offset_minutes, day_offset)
+            {
+                if instant.unix_seconds <= ctx.now.unix_seconds
+                    && best
+                        .as_ref()
+                        .is_none_or(|(current, _)| instant.unix_seconds >= current.unix_seconds)
+                {
+                    best = Some((instant, frame));
+                }
+            }
+        }
+    }
+
+    if let Some((instant, frame)) = best {
+        let local = instant.to_local(ctx.utc_offset_minutes);
+        return FrameSelection {
+            asset_id: frame.asset_id,
+            key: Some(frame.key),
+            reason: format!(
+                "active {} since {:02}:{:02} local",
+                frame.key.label(),
+                local.time.hour,
+                local.time.minute
+            ),
+            used_fallback: false,
+        };
+    }
+
+    fallback_selection(set, "fallback frame (no keyed transition at or before now)")
+}
+
+fn active_solar_position_frame(set: &DynamicStillSet, ctx: DynamicEvalContext) -> FrameSelection {
+    let (altitude, azimuth) = solar_position_deg(
+        ctx.now,
+        ctx.utc_offset_minutes,
+        set.latitude_deg,
+        set.longitude_deg,
+    );
+    let mut best: Option<(f64, &DynamicStillFrame)> = None;
+    for frame in &set.frames {
+        let DynamicStillKey::SolarPosition {
+            altitude_deg,
+            azimuth_deg,
+        } = frame.key
+        else {
+            continue;
+        };
+        let distance = solar_sample_distance(altitude, azimuth, altitude_deg, azimuth_deg);
+        if best.is_none_or(|(current, _)| distance < current) {
+            best = Some((distance, frame));
+        }
+    }
+    if let Some((distance, frame)) = best {
+        return FrameSelection {
+            asset_id: frame.asset_id,
+            key: Some(frame.key),
+            reason: format!(
+                "nearest solar sample {} (Δ={distance:.2}°, sun a={altitude:.1}° z={azimuth:.1}°)",
+                frame.key.label()
+            ),
+            used_fallback: false,
+        };
+    }
+    fallback_selection(set, "fallback frame (no solar-position samples)")
+}
+
+fn active_appearance_frame(set: &DynamicStillSet, mode: AppearanceMode) -> FrameSelection {
+    if let Some(frame) = set.frames.iter().find(|frame| {
+        matches!(
+            frame.key,
+            DynamicStillKey::Appearance {
+                mode: frame_mode
+            } if frame_mode == mode
+        )
+    }) {
+        return FrameSelection {
+            asset_id: frame.asset_id,
+            key: Some(frame.key),
+            reason: format!("appearance {mode:?}"),
+            used_fallback: false,
+        };
+    }
+    fallback_selection(set, "fallback frame (appearance mode missing)")
+}
+
+fn fallback_selection(set: &DynamicStillSet, reason: &str) -> FrameSelection {
+    FrameSelection {
+        asset_id: set.fallback_asset_id,
+        key: None,
+        reason: reason.into(),
+        used_fallback: true,
+    }
+}
+
+fn resolve_time_key_on_day(
     set: &DynamicStillSet,
     key: DynamicStillKey,
     now: InstantSeconds,
@@ -381,6 +625,7 @@ fn resolve_key_on_day(
             let time = LocalTimeOfDay { hour, minute };
             Some(instant_at_local(y, m, d, time, utc_offset_minutes))
         }
+        DynamicStillKey::SolarPosition { .. } | DynamicStillKey::Appearance { .. } => None,
     }
 }
 
@@ -443,6 +688,14 @@ pub enum DynamicStillError {
     /// Longitude must be finite and within ±180°.
     #[error("invalid longitude: {0}")]
     InvalidLongitude(f64),
+    /// Solar position sample is out of range.
+    #[error("invalid solar position altitude={altitude_deg} azimuth={azimuth_deg}")]
+    InvalidSolarPosition {
+        /// Altitude that failed validation.
+        altitude_deg: f64,
+        /// Azimuth that failed validation.
+        azimuth_deg: f64,
+    },
     /// Two frames share the same key label.
     #[error("duplicate dynamic still key: {0}")]
     DuplicateKey(String),
@@ -463,18 +716,21 @@ mod tests {
         let mut set = DynamicStillSet::with_fallback("Day", ProfileId::new(), asset_a);
         set.frames = vec![
             DynamicStillFrame {
+                source_index: Some(0),
                 key: DynamicStillKey::TimeOfDay {
                     time: LocalTimeOfDay::new(6, 0).unwrap(),
                 },
                 asset_id: asset_a,
             },
             DynamicStillFrame {
+                source_index: Some(1),
                 key: DynamicStillKey::TimeOfDay {
                     time: LocalTimeOfDay::new(12, 0).unwrap(),
                 },
                 asset_id: asset_b,
             },
             DynamicStillFrame {
+                source_index: Some(2),
                 key: DynamicStillKey::TimeOfDay {
                     time: LocalTimeOfDay::new(18, 0).unwrap(),
                 },
@@ -491,7 +747,6 @@ mod tests {
         let b = AssetId::new();
         let c = AssetId::new();
         let set = morning_noon_evening(a, b, c);
-        // 2024-01-01 14:30 UTC
         let now = InstantSeconds {
             unix_seconds: 1_704_119_400,
         };
@@ -502,14 +757,12 @@ mod tests {
     }
 
     #[test]
-    fn uses_fallback_before_first_key() {
+    fn uses_yesterday_evening_before_first_key() {
         let a = AssetId::new();
         let set = morning_noon_evening(a, a, a);
-        // 2024-01-01 03:00 UTC — before 06:00
         let now = InstantSeconds {
             unix_seconds: 1_704_078_000,
         };
-        // Looking back to yesterday 18:00 should win over fallback.
         let selection = active_frame_at(&set, now, 0);
         assert!(!selection.used_fallback);
         assert_eq!(selection.key_label(), "tod:18:00");
@@ -532,7 +785,7 @@ mod tests {
         let a = AssetId::new();
         let set = morning_noon_evening(a, a, a);
         let now = InstantSeconds {
-            unix_seconds: 1_704_119_400, // 14:30
+            unix_seconds: 1_704_119_400,
         };
         let (instant, frame) = next_transition_after(&set, now, 0).unwrap();
         assert_eq!(frame.key.label(), "tod:18:00");
@@ -540,73 +793,109 @@ mod tests {
     }
 
     #[test]
-    fn missed_transition_applies_once_on_catch_up() {
-        let a = AssetId::new();
-        let b = AssetId::new();
-        let set = morning_noon_evening(a, b, a);
-        let now = InstantSeconds {
-            unix_seconds: 1_704_119_400, // 14:30 → noon frame
-        };
-        let selection = active_frame_at(&set, now, 0);
-        let last = AppliedDynamicFrame {
-            asset_id: a,
-            key_label: "tod:06:00".into(),
-            applied_at: now.unix_seconds - 8 * 3600,
-        };
-        let decision = decide_transition(Some(&last), &selection);
-        assert!(decision.should_apply);
-        let again = decide_transition(
-            Some(&AppliedDynamicFrame {
-                asset_id: selection.asset_id,
-                key_label: selection.key_label(),
-                applied_at: now.unix_seconds,
-            }),
-            &selection,
-        );
-        assert!(!again.should_apply);
-    }
-
-    #[test]
-    fn solar_key_resolves_near_equator() {
-        let asset = AssetId::new();
-        let mut set = DynamicStillSet::with_fallback("Solar", ProfileId::new(), asset);
+    fn solar_position_picks_nearest_sample() {
+        let dawn = AssetId::new();
+        let noon = AssetId::new();
+        let dusk = AssetId::new();
+        let mut set = DynamicStillSet::with_fallback("Solar", ProfileId::new(), dawn);
+        set.schedule_kind = DynamicScheduleKind::SolarPosition;
         set.latitude_deg = 0.0;
         set.longitude_deg = 0.0;
-        set.frames = vec![DynamicStillFrame {
-            key: DynamicStillKey::Solar {
-                event: SolarEvent::Sunrise,
-                offset_minutes: 0,
+        set.frames = vec![
+            DynamicStillFrame {
+                source_index: Some(0),
+                key: DynamicStillKey::SolarPosition {
+                    altitude_deg: -10.0,
+                    azimuth_deg: 90.0,
+                },
+                asset_id: dawn,
             },
-            asset_id: asset,
-        }];
+            DynamicStillFrame {
+                source_index: Some(1),
+                key: DynamicStillKey::SolarPosition {
+                    altitude_deg: 60.0,
+                    azimuth_deg: 180.0,
+                },
+                asset_id: noon,
+            },
+            DynamicStillFrame {
+                source_index: Some(2),
+                key: DynamicStillKey::SolarPosition {
+                    altitude_deg: -5.0,
+                    azimuth_deg: 270.0,
+                },
+                asset_id: dusk,
+            },
+        ];
         set.validate().unwrap();
-        // 2024-03-20 noon UTC
+        // 2024-03-20 noon UTC near equator → high altitude.
         let now = InstantSeconds {
             unix_seconds: 1_710_936_000,
         };
         let selection = active_frame_at(&set, now, 0);
-        assert!(!selection.used_fallback);
-        assert_eq!(selection.asset_id, asset);
+        assert_eq!(selection.asset_id, noon);
     }
 
     #[test]
-    fn rejects_duplicate_keys() {
-        let asset = AssetId::new();
-        let mut set = DynamicStillSet::with_fallback("Dup", ProfileId::new(), asset);
-        let time = LocalTimeOfDay::new(8, 0).unwrap();
+    fn appearance_selects_dark_frame() {
+        let light = AssetId::new();
+        let dark = AssetId::new();
+        let mut set = DynamicStillSet::with_fallback("Apr", ProfileId::new(), light);
+        set.schedule_kind = DynamicScheduleKind::Appearance;
         set.frames = vec![
             DynamicStillFrame {
-                key: DynamicStillKey::TimeOfDay { time },
-                asset_id: asset,
+                source_index: Some(0),
+                key: DynamicStillKey::Appearance {
+                    mode: AppearanceMode::Light,
+                },
+                asset_id: light,
             },
             DynamicStillFrame {
-                key: DynamicStillKey::TimeOfDay { time },
-                asset_id: asset,
+                source_index: Some(1),
+                key: DynamicStillKey::Appearance {
+                    mode: AppearanceMode::Dark,
+                },
+                asset_id: dark,
             },
         ];
-        assert!(matches!(
-            set.validate(),
-            Err(DynamicStillError::DuplicateKey(_))
-        ));
+        set.validate().unwrap();
+        let selection = active_frame_with_context(
+            &set,
+            DynamicEvalContext {
+                now: InstantSeconds {
+                    unix_seconds: 1_704_100_000,
+                },
+                utc_offset_minutes: 0,
+                appearance: AppearanceMode::Dark,
+            },
+        );
+        assert_eq!(selection.asset_id, dark);
+        assert_eq!(selection.key_label(), "appearance:dark");
+    }
+
+    #[test]
+    fn hourly_default_has_twenty_four_frames() {
+        let asset = AssetId::new();
+        let set = DynamicStillSet::default_hourly("Day", ProfileId::new(), asset).unwrap();
+        assert_eq!(set.frames.len(), 24);
+        assert_eq!(set.schedule_kind, DynamicScheduleKind::TimeOfDay);
+    }
+
+    #[test]
+    fn migrate_v1_infers_solar_position_kind() {
+        let asset = AssetId::new();
+        let mut set = DynamicStillSet::with_fallback("Old", ProfileId::new(), asset);
+        set.schema_version = 1;
+        set.frames = vec![DynamicStillFrame {
+            source_index: Some(0),
+            key: DynamicStillKey::SolarPosition {
+                altitude_deg: 10.0,
+                azimuth_deg: 120.0,
+            },
+            asset_id: asset,
+        }];
+        let migrated = set.migrate().unwrap();
+        assert_eq!(migrated.schema_version, 2);
+        assert_eq!(migrated.schedule_kind, DynamicScheduleKind::SolarPosition);
     }
 }

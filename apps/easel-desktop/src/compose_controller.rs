@@ -110,7 +110,7 @@ impl Default for ComposeControllerRust {
             profile_name: QString::from("Compose"),
             media_mode_index: 0,
             timeline_preview: QString::from(
-                "Select Dynamic stills to scrub a morning / noon / evening timeline.",
+                "Select Dynamic stills to scrub the hourly placeholder timeline, or import a HEIC.",
             ),
             job_generation: AtomicU64::new(0),
             apply_generation: AtomicU64::new(0),
@@ -269,12 +269,8 @@ impl qobject::ComposeController {
         let whole_hour = hour.floor() as u8;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let minute = ((hour.fract() * 60.0).floor() as u8).min(59);
-        let label = match (whole_hour, minute) {
-            (h, _) if h < 6 => "fallback / previous evening frame",
-            (h, _) if h < 12 => "morning frame (tod:06:00)",
-            (h, _) if h < 18 => "noon frame (tod:12:00)",
-            _ => "evening frame (tod:18:00)",
-        };
+        let label =
+            format!("tod:{whole_hour:02}:00 (hourly placeholder; import a HEIC for solar samples)");
         self.as_mut().set_timeline_preview(QString::from(
             format!("Simulated {whole_hour:02}:{minute:02} → {label}").as_str(),
         ));

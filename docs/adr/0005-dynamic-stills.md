@@ -31,8 +31,10 @@ media (Stage 6) and must not invent a second apply pipeline.
    and Windows still backends leave it false, so requested fades degrade to a hard cut while
    remaining on the static wallpaper path.
 
-5. **Compose authors a default morning / noon / evening set** from the selected local image and
-   exposes a timeline scrub preview. Live media remains rejected until Stage 6.
+5. **Compose authors a dense hourly placeholder** when Media=Dynamic stills is saved without a
+   HEIC import, and exposes a timeline scrub preview. Prefer importing an Apple/Plasma dynamic
+   HEIC (`easel inspect-heic` / future Compose import) for solar-position or appearance sets.
+   Live media remains rejected until Stage 6.
 
 ## Consequences
 
@@ -40,8 +42,8 @@ media (Stage 6) and must not invent a second apply pipeline.
 - Suspend/resume and forward clock jumps converge on the current frame once; intermediate frames
   are skipped intentionally.
 - CLI `status` / `stills` share the same store as the Automation poller.
-- Real cross-fade and multi-asset timeline editors can land later without changing the apply
-  contract.
+- ADR 0006 supersedes the sparse morning/noon/evening framing: Apple HEIC is the interchange
+  format, and native per-display bundles are the preferred apply path where backends allow.
 
 ## References
 

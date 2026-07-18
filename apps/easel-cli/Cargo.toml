@@ -15,6 +15,7 @@ path = "src/main.rs"
 clap.workspace = true
 directories = "6.0.0"
 easel-core = { path = "../../crates/easel-core" }
+easel-dynamic = { path = "../../crates/easel-dynamic" }
 easel-scheduler = { path = "../../crates/easel-scheduler" }
 
 [lints]

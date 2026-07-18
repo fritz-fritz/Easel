@@ -476,6 +476,55 @@ pub fn solar_event_local_minutes(
     Some(minutes.round() as i32)
 }
 
+/// Approximate solar altitude and azimuth in degrees for an observer.
+///
+/// Altitude is degrees above the horizon (negative below). Azimuth is degrees
+/// east of north in \[0, 360). Uses the same NOAA-style approximation as
+/// [`solar_event_local_minutes`].
+#[allow(
+    clippy::unreadable_literal,
+    clippy::cast_possible_truncation,
+    clippy::cast_sign_loss
+)]
+#[must_use]
+pub fn solar_position_deg(
+    now: InstantSeconds,
+    utc_offset_minutes: i32,
+    latitude_deg: f64,
+    longitude_deg: f64,
+) -> (f64, f64) {
+    let local = now.to_local(utc_offset_minutes);
+    let ordinal = local.day_of_year;
+    let minutes = i32::from(local.time.hour) * 60 + i32::from(local.time.minute);
+    let lat = latitude_deg.to_radians();
+    let gamma = 2.0 * std::f64::consts::PI / 365.0 * (f64::from(ordinal) - 1.0);
+    let eq_time = 229.18
+        * (0.000075 + 0.001868 * gamma.cos()
+            - 0.032077 * gamma.sin()
+            - 0.014615 * (2.0 * gamma).cos()
+            - 0.040849 * (2.0 * gamma).sin());
+    let decl = 0.006918 - 0.399912 * gamma.cos() + 0.070257 * gamma.sin()
+        - 0.006758 * (2.0 * gamma).cos()
+        + 0.000907 * (2.0 * gamma).sin()
+        - 0.002697 * (3.0 * gamma).cos()
+        + 0.00148 * (3.0 * gamma).sin();
+    let time_offset = eq_time + 4.0 * longitude_deg - f64::from(utc_offset_minutes);
+    let tst = f64::from(minutes) + time_offset;
+    let ha = ((tst / 4.0) - 180.0).to_radians();
+    let cos_zenith = lat.sin() * decl.sin() + lat.cos() * decl.cos() * ha.cos();
+    let zenith = cos_zenith.clamp(-1.0, 1.0).acos();
+    let altitude = 90.0 - zenith.to_degrees();
+    let mut azimuth = {
+        let sin_az = -(ha.sin() * decl.cos()) / zenith.sin().max(1e-9);
+        let cos_az = (decl.sin() - lat.sin() * zenith.cos()) / (lat.cos() * zenith.sin().max(1e-9));
+        sin_az.atan2(cos_az).to_degrees()
+    };
+    if azimuth < 0.0 {
+        azimuth += 360.0;
+    }
+    (altitude, azimuth)
+}
+
 /// Converts a local civil date and time into a UTC instant using a fixed offset.
 #[must_use]
 pub fn instant_at_local(

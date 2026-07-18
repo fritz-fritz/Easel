@@ -1,0 +1,21 @@
+[package]
+name = "easel-dynamic"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+description = "Apple HEIC / Plasma dynamic still import and native bundle planning"
+
+[dependencies]
+base64 = "0.22"
+easel-core = { path = "../easel-core" }
+image = { workspace = true }
+libheif-rs = { version = "2.7", default-features = false, features = ["v1_17"] }
+plist = "=1.7.0"
+serde = { workspace = true }
+thiserror.workspace = true
+
+[lints]
+workspace = true

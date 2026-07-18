@@ -36,6 +36,8 @@ pub struct BackendCapabilities {
     pub lock_screen: bool,
     /// Can cross-fade still replacements without a live wallpaper host.
     pub cross_fade: bool,
+    /// Can host a native dynamic still package (Apple/Plasma HEIC) without Easel polling.
+    pub native_dynamic_bundle: bool,
 }
 
 /// One completed still image ready for a specific output.

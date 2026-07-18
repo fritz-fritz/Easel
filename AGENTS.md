@@ -51,4 +51,8 @@ workspace. It has two distinct build scopes:
   cargo run -p easel-cli -- profiles
   cargo run -p easel-cli -- schedules
   cargo run -p easel-cli -- stills
+  cargo run -p easel-cli -- inspect-heic path/to/Dynamic.heic
   ```
+
+- `easel-dynamic` (HEIC import) needs `libheif-dev` at build time. The Cloud VM image includes it;
+  on a clean host install `libheif-dev` (and a decoder plugin such as `libheif-plugin-libde265`).

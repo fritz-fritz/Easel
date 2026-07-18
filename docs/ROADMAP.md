@@ -91,12 +91,14 @@ available (`cxx-qt-lib` exposes `QGuiApplication` only).
 Exit: a scheduled still set remains correct across restart, sleep, clock changes, and display
 topology changes on every supported static backend.
 
-**Status:** Implemented for still images (`DynamicStillSet` domain with ToD/solar keys +
-fallback, TOML persistence, SQLite last-applied catch-up, poller sync with atomic pre-render
-promote, Compose Media=Dynamic stills save + timeline scrub, `easel stills` / status hints).
-Cross-fade is capability-gated and currently unsupported on Plasma/Windows still backends
-(hard cut). Multi-asset timeline editing beyond the default morning/noon/evening set remains
-manual via TOML.
+**Status:** Implemented for still images with Apple HEIC interchange foundations
+(`DynamicStillSet` schema v2: `SolarPosition` / dense `TimeOfDay` / `Appearance` keys,
+`easel-dynamic` HEIC XMP+plist import + per-display native bundle planning, TOML persistence,
+SQLite last-applied catch-up, still-frame poller with atomic pre-render, Compose Media=Dynamic
+stills + timeline scrub, `easel stills` / `easel inspect-heic`). Cross-fade and
+`native_dynamic_bundle` are capability-gated; Plasma/Windows still backends report both false
+today (hard-cut still apply). Per-display HEIC/AVIF encode+host apply is the next hardening
+step on macOS/Plasma; Windows remains still-poller-only.
 
 ## Stage 6 — Live media
 

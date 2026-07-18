@@ -30,6 +30,8 @@ impl WallpaperBackend for PlasmaBackend {
             workspaces: false,
             lock_screen: false,
             cross_fade: false,
+            // Plasma dynamic HEIC/AVIF host planned; still-frame apply remains the safe path.
+            native_dynamic_bundle: false,
         }
     }
 

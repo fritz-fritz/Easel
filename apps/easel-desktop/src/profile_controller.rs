@@ -247,9 +247,8 @@ pub fn save_compose_profile(
     profile.schedule_id = Some(schedule.id);
 
     let still_set = if profile.presentation == PresentationMode::DynamicStills {
-        let set =
-            DynamicStillSet::default_time_of_day(format!("{name} stills"), profile.id, asset_id)
-                .map_err(|error| error.to_string())?;
+        let set = DynamicStillSet::default_hourly(format!("{name} stills"), profile.id, asset_id)
+            .map_err(|error| error.to_string())?;
         profile.still_set_id = Some(set.id);
         Some(set)
     } else {

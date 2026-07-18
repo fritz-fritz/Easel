@@ -4,6 +4,7 @@ members = [
     "apps/easel-cli",
     "apps/easel-desktop",
     "crates/easel-core",
+    "crates/easel-dynamic",
     "crates/easel-library",
     "crates/easel-platform",
     "crates/easel-providers",
@@ -12,6 +13,7 @@ members = [
 ]
 default-members = [
     "crates/easel-core",
+    "crates/easel-dynamic",
     "crates/easel-library",
     "crates/easel-platform",
     "crates/easel-providers",
