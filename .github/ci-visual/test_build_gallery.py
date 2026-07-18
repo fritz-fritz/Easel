@@ -12,11 +12,13 @@ import zlib
 from pathlib import Path
 
 from build_gallery import (
+    asset_key,
     build_comparisons,
     collect_images,
     comparison_totals,
     decode_png_rgba,
     extract_display_label,
+    extract_gui_view_label,
     load_manifests,
     main,
     png_meta,
@@ -204,16 +206,25 @@ class BuildGalleryTests(unittest.TestCase):
             root.mkdir()
             for os_name in ("ubuntu-latest", "windows-latest", "macos-latest"):
                 apply_name = f"apply-payload-{os_name}-apply-display-0.png"
-                gui_name = f"gui-smoke-{os_name}-gui.png"
+                gui_preview = f"gui-smoke-{os_name}-gui-preview.png"
+                gui_compose = f"gui-smoke-{os_name}-gui-compose.png"
                 write_png(root / apply_name, 16, 9, (9, 9, 9))
                 write_png(
-                    root / gui_name,
+                    root / gui_preview,
                     40,
                     20,
                     (10, 10, 10) if os_name == "ubuntu-latest" else (11, 10, 10),
                 )
+                write_png(
+                    root / gui_compose,
+                    80,
+                    50,
+                    (12, 12, 12) if os_name == "ubuntu-latest" else (13, 12, 12),
+                )
                 write_manifest(root, "apply-payload", os_name, [apply_name])
-                write_manifest(root, "gui-smoke", os_name, [gui_name])
+                write_manifest(
+                    root, "gui-smoke", os_name, [gui_preview, gui_compose]
+                )
 
             rc = main_with(
                 artifacts=root,
@@ -228,12 +239,43 @@ class BuildGalleryTests(unittest.TestCase):
             comment = (out / "comment.md").read_text(encoding="utf8")
             self.assertIn("Apply-payload OS compare", comment)
             self.assertIn("byte-identical across runners", comment)
-            self.assertIn("SHA-256 (12)", comment)
+            self.assertIn("| Display |", comment)
+            self.assertIn("| View |", comment)
+            # preview before compose (canonical smoke order), not alphabetical.
+            self.assertLess(comment.index("| preview |"), comment.index("| compose |"))
+            self.assertNotIn("| OS | Preview | Size | SHA-256 (12) |", comment)
             self.assertIn("Cross-OS metadata", comment)
+            self.assertIn("`preview`", comment)
+            self.assertIn("`compose`", comment)
             html_page = (out / "site" / "index.html").read_text(encoding="utf8")
             self.assertIn("OS compare", html_page)
             self.assertIn("byte-identical across OS", html_page)
             self.assertIn('table class="compare"', html_page)
+            self.assertIn(">preview<", html_page)
+            self.assertIn(">compose<", html_page)
+            self.assertIn("smoke views", html_page)
+
+            comparisons = build_comparisons(
+                collect_images(root, load_manifests(root))
+            )
+            gui_assets = sorted(
+                c["asset"] for c in comparisons if c["stage"] == "gui-smoke"
+            )
+            self.assertEqual(gui_assets, ["compose", "preview"])
+            # Sorted comparison list should keep preview before compose.
+            gui_ordered = [
+                c["asset"] for c in comparisons if c["stage"] == "gui-smoke"
+            ]
+            self.assertEqual(gui_ordered, ["preview", "compose"])
+
+    def test_gui_view_label_helpers(self) -> None:
+        self.assertEqual(extract_gui_view_label("gui-preview"), "preview")
+        self.assertEqual(extract_gui_view_label("gui-compose"), "compose")
+        self.assertEqual(
+            asset_key({"stage": "gui-smoke", "stem": "gui-discover"}),
+            "discover",
+        )
+        self.assertEqual(extract_display_label("apply-display-2"), "2")
 
     def test_fail_on_mismatch_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

@@ -50,8 +50,9 @@ exempt a backend from the same measurements.
 
 The default workspace excludes the Qt application so core checks run on all hosted platforms.
 `cargo fmt` runs once on Ubuntu; `cargo test` and `cargo clippy` still run on Linux, Windows, and
-macOS. A dedicated multi-OS desktop job builds `easel-desktop`, runs `--smoke-screenshot`, and
-publishes Qt GUI PNGs as artifacts on Linux (Xvfb), Windows, and macOS. Core jobs also write
+macOS. A dedicated multi-OS desktop job builds `easel-desktop`, runs `--smoke-screenshot`
+with `--smoke-views` selected from the PR/push diff, and publishes Qt GUI PNGs as
+artifacts on Linux (Xvfb), Windows, and macOS. Core jobs also write
 per-display apply-payload raster PNGs for visual review. Full packaging and code signing remain
 separate later stages. Live wallpaper Apply against a real desktop session is still a manual
 matrix item; CI never mutates an operator wallpaper.
@@ -96,7 +97,18 @@ runners produce matching apply-payload bytes.
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
 | `apply-payload` | [`crates/easel-render/tests/visual_artifacts.rs`](../crates/easel-render/tests/visual_artifacts.rs) | `EASEL_VISUAL_OUTDIR` set (CI only) | `apply-display-*.png` | `ci-visual` |
-| `gui-smoke` | `easel-desktop --smoke-screenshot <dir>` | smoke flag / out dir | `gui-*.png` | `ci-visual` |
+| `gui-smoke` | `easel-desktop --smoke-screenshot <dir> --smoke-views …` | smoke flag / out dir | `gui-*.png` (fixture `gui-preview.png` plus selected full-window `gui-<view>.png`) | `ci-visual` |
+
+### Selective GUI smoke views
+
+Desktop smoke always captures the fixture multi-monitor **preview** (`gui-preview.png`, the
+`MonitorPreview` grab). It also captures full-window screenshots for workspace pages that the
+diff may have affected (`compose`, `discover`, `library`, `profiles`, `automation`).
+
+[`.github/ci-visual/select_smoke_views.py`](../.github/ci-visual/select_smoke_views.py) maps
+changed paths → a comma-separated `--smoke-views` list. Shared shell / `crates/**` changes
+select every page; a Discover-only controller change selects `preview,discover`. Local default
+when the flag is omitted is `preview,compose`.
 
 ### PR gallery (dual surface)
 
@@ -118,7 +130,7 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 | Stage | Expectation | Gate |
 | --- | --- | --- |
 | `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail on digest/pixel mismatch (including ±1 LSB near-matches, which are labeled `match-tolerant` for debugging) or size mismatch |
-| `gui-smoke` | Platform chrome differs | Informational only (hashes/dims still shown) |
+| `gui-smoke` | Platform chrome differs; sticky comment + HTML show a **View × OS** matrix (fixture `preview` plus selected full-window pages) | Informational only (hashes/dims still shown) |
 
 Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
 

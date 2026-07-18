@@ -108,8 +108,34 @@ ApplicationWindow {
         compose.refreshPreview()
     }
 
+    function parseSmokeViews(spec) {
+        var views = []
+        var parts = (spec || "").split(/[,\s;]+/)
+        for (var i = 0; i < parts.length; ++i) {
+            var token = parts[i].trim().toLowerCase()
+            if (token.length > 0)
+                views.push(token)
+        }
+        if (views.length === 0)
+            views = ["preview", "compose"]
+        return views
+    }
+
+    function smokePageIndex(view) {
+        switch (view) {
+        case "compose": return 0
+        case "discover": return 1
+        case "library": return 2
+        case "profiles": return 3
+        case "automation": return 4
+        default: return -1
+        }
+    }
+
     function runSmokeScreenshot() {
-        console.log("smokeOutDir=", controller.smoke_out_dir, "image=", controller.smoke_image_path)
+        console.log("smokeOutDir=", controller.smoke_out_dir,
+                    "image=", controller.smoke_image_path,
+                    "views=", controller.smoke_views)
         if (!controller.smoke_out_dir || controller.smoke_out_dir.length === 0) {
             console.error("Smoke mode requested but smokeOutDir is empty")
             controller.forceSmokeExit(1)
@@ -124,7 +150,80 @@ ApplicationWindow {
             controller.forceSmokeExit(1)
             return
         }
-        smokeTimer.start()
+        smokeCapture.queue = parseSmokeViews(controller.smoke_views)
+        smokeCapture.index = 0
+        smokeCapture.failed = false
+        smokeCapture.startNext()
+    }
+
+    QtObject {
+        id: smokeCapture
+        property var queue: []
+        property int index: 0
+        property bool failed: false
+        property string phase: ""
+        property string activeView: ""
+
+        function startNext() {
+            if (index >= queue.length) {
+                controller.forceSmokeExit(failed ? 1 : 0)
+                return
+            }
+            activeView = queue[index]
+            smokeTimer.ticks = 0
+            if (activeView === "preview") {
+                pageStack.currentIndex = 0
+                phase = "wait-preview"
+                smokeTimer.start()
+                return
+            }
+            var page = smokePageIndex(activeView)
+            if (page < 0) {
+                console.error("Unknown smoke view:", activeView)
+                failed = true
+                index += 1
+                startNext()
+                return
+            }
+            pageStack.currentIndex = page
+            // Profiles / Automation refresh on first show via Component.onCompleted;
+            // force a refresh when revisiting during a multi-view smoke run.
+            if (page === 3)
+                profiles.refresh()
+            if (page === 4)
+                automation.refresh()
+            phase = page === 0 ? "wait-compose" : "wait-page"
+            smokeTimer.start()
+        }
+
+        function grabTarget(item, path, done) {
+            if (!item || item.width < 2 || item.height < 2) {
+                console.error("Smoke grab target not ready for", path,
+                              "item=", item, "w=", item ? item.width : -1,
+                              "h=", item ? item.height : -1)
+                failed = true
+                done()
+                return
+            }
+            item.grabToImage(function(result) {
+                var ok = false
+                try {
+                    ok = result.saveToFile(path)
+                } catch (error) {
+                    console.error("Smoke grabToImage save threw", path, error)
+                }
+                console.log("Smoke grabToImage save", path, "ok=", ok,
+                            "size=", result.width, "x", result.height)
+                if (!ok)
+                    failed = true
+                done()
+            }, Qt.size(Math.max(2, Math.round(item.width)), Math.max(2, Math.round(item.height))))
+        }
+
+        function finishCurrent() {
+            index += 1
+            startNext()
+        }
     }
 
     Timer {
@@ -134,18 +233,47 @@ ApplicationWindow {
         property int ticks: 0
         onTriggered: {
             ticks += 1
-            var ready = compose.preview_ready
-            if (ready || ticks > 80) {
-                stop()
-                if (!ready)
-                    console.error("Smoke screenshot timed out waiting for preview; status=", compose.preview_status)
-                var os = Qt.platform.os
-                var path = controller.smoke_out_dir + "/gui-" + os + ".png"
-                monitorPreview.grabToImage(function(result) {
-                    var ok = result.saveToFile(path)
-                    console.log("Smoke grabToImage save", path, "ok=", ok, "size=", result.width, "x", result.height)
-                    controller.forceSmokeExit(ok ? 0 : 1)
-                }, Qt.size(Math.max(2, monitorPreview.width), Math.max(2, monitorPreview.height)))
+            var view = smokeCapture.activeView
+            var path = controller.smoke_out_dir + "/gui-" + view + ".png"
+
+            if (smokeCapture.phase === "wait-preview") {
+                var previewReady = compose.preview_ready
+                if (previewReady || ticks > 80) {
+                    stop()
+                    if (!previewReady) {
+                        console.error("Smoke preview timed out; status=", compose.preview_status)
+                        smokeCapture.failed = true
+                    }
+                    smokeCapture.grabTarget(monitorPreview, path, function() {
+                        smokeCapture.finishCurrent()
+                    })
+                }
+                return
+            }
+
+            if (smokeCapture.phase === "wait-compose") {
+                var composeReady = compose.preview_ready
+                if ((composeReady && ticks > 2) || ticks > 80) {
+                    stop()
+                    if (!composeReady) {
+                        console.error("Smoke compose window timed out; status=", compose.preview_status)
+                        smokeCapture.failed = true
+                    }
+                    smokeCapture.grabTarget(uiChrome, path, function() {
+                        smokeCapture.finishCurrent()
+                    })
+                }
+                return
+            }
+
+            if (smokeCapture.phase === "wait-page") {
+                // Give StackLayout + list models a moment to settle without network waits.
+                if (ticks >= 6) {
+                    stop()
+                    smokeCapture.grabTarget(uiChrome, path, function() {
+                        smokeCapture.finishCurrent()
+                    })
+                }
             }
         }
     }
@@ -172,62 +300,74 @@ ApplicationWindow {
         onAccepted: library.addFolderFromUrl(selectedFolder)
     }
 
-    header: ToolBar {
-        RowLayout {
-            anchors.fill: parent
-            anchors.leftMargin: 16
-            anchors.rightMargin: 12
-            spacing: 12
-
-            Label {
-                text: qsTr("Easel")
-                font.pixelSize: 22
-                font.weight: Font.DemiBold
-            }
-
-            Label {
-                text: {
-                    if (pageStack.currentIndex === 0)
-                        return compose.preview_status
-                    if (pageStack.currentIndex === 1)
-                        return discover.status_text
-                    if (pageStack.currentIndex === 2)
-                        return library.status_text
-                    return controller.status_text
-                }
-                opacity: 0.65
-                Layout.fillWidth: true
-                elide: Text.ElideRight
-            }
-
-            ToolButton {
-                text: automation.paused ? qsTr("Resume") : qsTr("Pause")
-                Accessible.name: text
-                onClicked: automation.setRotationPaused(!automation.paused)
-            }
-
-            ToolButton {
-                text: qsTr("Skip")
-                Accessible.name: text
-                onClicked: automation.skipNext()
-            }
-
-            ToolButton {
-                text: qsTr("Refresh displays")
-                Accessible.name: text
-                onClicked: probeScreens()
-            }
-
-            ToolButton {
-                text: qsTr("Settings")
-                Accessible.name: text
-            }
-        }
-    }
-
-    RowLayout {
+    // Single Item root so full-window smoke grabs include chrome + page content.
+    // ApplicationWindow.contentItem cannot grabToImage on some Qt builds.
+    Item {
+        id: uiChrome
         anchors.fill: parent
-        spacing: 0
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 0
+
+            ToolBar {
+                Layout.fillWidth: true
+                RowLayout {
+                    anchors.fill: parent
+                    anchors.leftMargin: 16
+                    anchors.rightMargin: 12
+                    spacing: 12
+
+                    Label {
+                        text: qsTr("Easel")
+                        font.pixelSize: 22
+                        font.weight: Font.DemiBold
+                    }
+
+                    Label {
+                        text: {
+                            if (pageStack.currentIndex === 0)
+                                return compose.preview_status
+                            if (pageStack.currentIndex === 1)
+                                return discover.status_text
+                            if (pageStack.currentIndex === 2)
+                                return library.status_text
+                            return controller.status_text
+                        }
+                        opacity: 0.65
+                        Layout.fillWidth: true
+                        elide: Text.ElideRight
+                    }
+
+                    ToolButton {
+                        text: automation.paused ? qsTr("Resume") : qsTr("Pause")
+                        Accessible.name: text
+                        onClicked: automation.setRotationPaused(!automation.paused)
+                    }
+
+                    ToolButton {
+                        text: qsTr("Skip")
+                        Accessible.name: text
+                        onClicked: automation.skipNext()
+                    }
+
+                    ToolButton {
+                        text: qsTr("Refresh displays")
+                        Accessible.name: text
+                        onClicked: probeScreens()
+                    }
+
+                    ToolButton {
+                        text: qsTr("Settings")
+                        Accessible.name: text
+                    }
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Layout.fillHeight: true
+                spacing: 0
 
         Pane {
             Layout.fillHeight: true
@@ -256,7 +396,7 @@ ApplicationWindow {
                         required property int index
                         text: modelData
                         checkable: true
-                        checked: index === 0
+                        checked: pageStack.currentIndex === index
                         autoExclusive: true
                         ButtonGroup.group: navigationGroup
                         Layout.fillWidth: true
@@ -920,6 +1060,8 @@ ApplicationWindow {
                         }
                     }
                 }
+            }
+        }
             }
         }
     }
