@@ -598,12 +598,42 @@ ApplicationWindow {
                             ComboBox {
                                 id: mediaMode
                                 model: [qsTr("Still image"), qsTr("Dynamic stills"), qsTr("Animated / video")]
+                                currentIndex: compose.media_mode_index
+                                onActivated: {
+                                    compose.media_mode_index = currentIndex
+                                    if (currentIndex === 1)
+                                        compose.previewTimelineHour(timelineSlider.value)
+                                }
                             }
                             Label { text: qsTr("Motion") }
                             ComboBox {
                                 model: [qsTr("Loop at 30 fps"), qsTr("Play once"), qsTr("Poster frame only")]
                                 enabled: mediaMode.currentIndex === 2
                                 Layout.fillWidth: true
+                            }
+
+                            Label {
+                                text: qsTr("Timeline")
+                                visible: mediaMode.currentIndex === 1
+                            }
+                            ColumnLayout {
+                                visible: mediaMode.currentIndex === 1
+                                Layout.columnSpan: 3
+                                Layout.fillWidth: true
+                                Slider {
+                                    id: timelineSlider
+                                    from: 0
+                                    to: 23.99
+                                    value: 12
+                                    Layout.fillWidth: true
+                                    onMoved: compose.previewTimelineHour(value)
+                                }
+                                Label {
+                                    text: compose.timeline_preview
+                                    wrapMode: Text.WordWrap
+                                    opacity: 0.75
+                                    Layout.fillWidth: true
+                                }
                             }
 
                             Label { text: qsTr("Fit") }
@@ -692,6 +722,7 @@ ApplicationWindow {
                             onClicked: {
                                 compose.profile_name = profileNameField.text
                                 compose.schedule_index = scheduleMode.currentIndex
+                                compose.media_mode_index = mediaMode.currentIndex
                                 compose.saveProfile()
                                 profiles.refresh()
                                 automation.refresh()

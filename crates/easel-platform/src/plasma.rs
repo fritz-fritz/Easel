@@ -29,6 +29,7 @@ impl WallpaperBackend for PlasmaBackend {
             activities: false,
             workspaces: false,
             lock_screen: false,
+            cross_fade: false,
         }
     }
 

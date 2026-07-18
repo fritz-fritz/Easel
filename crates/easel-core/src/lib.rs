@@ -11,6 +11,7 @@ mod asset;
 mod collection;
 mod display;
 mod display_group;
+mod dynamic_still;
 mod history;
 mod hotplug;
 mod layout_fixtures;
@@ -34,6 +35,11 @@ pub use display::{
     PhysicalPoint, PhysicalSize, ScaleFactor,
 };
 pub use display_group::{DisplayGroup, DisplayGroupError, DisplayGroupId};
+pub use dynamic_still::{
+    AppliedDynamicFrame, DYNAMIC_STILL_SET_SCHEMA_VERSION, DynamicStillError, DynamicStillFrame,
+    DynamicStillKey, DynamicStillSet, DynamicStillSetId, FrameSelection, TransitionDecision,
+    active_frame_at, decide_transition, next_transition_after,
+};
 pub use history::{HistoryAction, HistoryEvent, HistoryEventId};
 pub use hotplug::{
     HOTPLUG_POLICY_SCHEMA_VERSION, HotplugError, HotplugPolicy, HotplugResolution,
@@ -58,6 +64,7 @@ pub use rotation::{
 };
 pub use schedule::{
     InstantSeconds, LocalCivilTime, LocalTimeOfDay, SCHEDULE_SCHEMA_VERSION, Schedule,
-    ScheduleError, ScheduleId, ScheduleRule, SolarEvent, explain_fire, next_fire_after,
+    ScheduleError, ScheduleId, ScheduleRule, SolarEvent, explain_fire, instant_at_local,
+    next_fire_after, solar_event_local_minutes,
 };
 pub use suitability::{PixelBudget, SuitabilityAssessment, assess_suitability};

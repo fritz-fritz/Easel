@@ -9,7 +9,7 @@ use std::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
 use easel_core::{
-    AssetId, AssetLocation, HotplugPolicy, InstantSeconds, MissingOutputPolicy, ProfileId,
+    AssetId, AssetLocation, HotplugPolicy, InstantSeconds, MissingOutputPolicy, Profile, ProfileId,
     RotationSource, resolve_displays,
 };
 use easel_scheduler::now_unix_i64;
@@ -130,13 +130,24 @@ impl AutomationControllerRust {
         };
         self.status_text = QString::from(
             format!(
-                "{} schedule(s), paused={}, hotplug={:?}",
+                "{} schedule(s), {} still set(s), paused={}, hotplug={:?}",
                 store.schedules().len(),
+                store.still_sets().len(),
                 self.paused,
                 store.hotplug_policy().on_missing
             )
             .as_str(),
         );
+        if let Some(hint) = summary.next_dynamic_hint.as_deref() {
+            self.next_fire_hint = QString::from(
+                format!(
+                    "{}; dynamic {}",
+                    summary.next_fire_hint.as_deref().unwrap_or("none"),
+                    hint
+                )
+                .as_str(),
+            );
+        }
         Ok(())
     }
 }
@@ -274,15 +285,19 @@ impl qobject::AutomationController {
                     .due_schedules(now, utc_offset_minutes)
                     .map_err(|error| error.to_string())?
             };
-            if due.is_empty() {
-                return Ok("No due schedules.".to_string());
-            }
             let mut messages = Vec::new();
             for schedule in due {
                 match note_due_schedule(schedule.profile_id, schedule.id, &schedule.name) {
                     Ok(message) => messages.push(message),
                     Err(error) => messages.push(error),
                 }
+            }
+            match sync_dynamic_stills(now, utc_offset_minutes) {
+                Ok(dynamic_messages) => messages.extend(dynamic_messages),
+                Err(error) => messages.push(error),
+            }
+            if messages.is_empty() {
+                return Ok("No due schedules or dynamic transitions.".to_string());
             }
             Ok(messages.join(" | "))
         })();
@@ -416,6 +431,185 @@ fn note_due_schedule(
         "schedule '{schedule_name}' applied {} ({path})",
         decision.asset_id.to_hyphenated_string()
     ))
+}
+
+fn sync_dynamic_stills(
+    now: InstantSeconds,
+    utc_offset_minutes: i32,
+) -> Result<Vec<String>, String> {
+    use std::path::Path;
+
+    use easel_core::AppliedDynamicFrame;
+    use easel_platform::select_wallpaper_backend;
+    use easel_scheduler::{RotationHistoryEntry, now_unix_i64};
+
+    let due = {
+        let store = automation_store()?;
+        store
+            .due_dynamic_stills(now, utc_offset_minutes)
+            .map_err(|error| error.to_string())?
+    };
+    if due.is_empty() {
+        // Still pre-render upcoming transitions for profiles that are already current.
+        prerender_upcoming(now, utc_offset_minutes)?;
+        return Ok(Vec::new());
+    }
+
+    let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;
+    let cross_fade_supported = backend.capabilities().cross_fade;
+    let mut messages = Vec::new();
+
+    for item in due {
+        let profile = {
+            let store = automation_store()?;
+            store
+                .profile(item.profile_id)
+                .cloned()
+                .ok_or_else(|| "profile not found".to_string())?
+        };
+        let path = resolve_asset_path(item.selection.asset_id)?;
+        let ready = {
+            let store = automation_store()?;
+            store.prerender_ready_path(item.profile_id, item.selection.asset_id)
+        };
+        let apply_path = if ready.is_file() {
+            ready
+        } else {
+            Path::new(&path).to_path_buf()
+        };
+        let apply_message = apply_service::apply_still(&apply_path, &profile)?;
+        let fade_note = if item.request_cross_fade && !cross_fade_supported {
+            "; cross-fade requested but unsupported (hard cut)"
+        } else {
+            ""
+        };
+        let occurred_at = now_unix_i64();
+        let reason = format!(
+            "dynamic {}; {}{fade_note}",
+            item.decision_reason, apply_message
+        );
+        let store = automation_store()?;
+        store
+            .history()
+            .record(&RotationHistoryEntry {
+                queue_id: None,
+                profile_id: item.profile_id,
+                schedule_id: profile.schedule_id,
+                asset_id: item.selection.asset_id,
+                reason: reason.clone(),
+                occurred_at,
+            })
+            .map_err(|error| error.to_string())?;
+        store
+            .history()
+            .set_dynamic_still_state(
+                item.profile_id,
+                &AppliedDynamicFrame {
+                    asset_id: item.selection.asset_id,
+                    key_label: item.selection.key_label(),
+                    applied_at: occurred_at,
+                },
+            )
+            .map_err(|error| error.to_string())?;
+        messages.push(format!(
+            "dynamic '{}' → {} ({})",
+            profile.name,
+            item.selection.key_label(),
+            item.selection.asset_id.to_hyphenated_string()
+        ));
+
+        if let Some(next_asset) = item.next_asset_id {
+            let _ = prerender_asset(&profile, next_asset);
+        }
+    }
+    Ok(messages)
+}
+
+fn prerender_upcoming(now: InstantSeconds, utc_offset_minutes: i32) -> Result<(), String> {
+    use easel_core::{PresentationMode, next_transition_after};
+
+    let jobs: Vec<(easel_core::AssetId, Profile)> = {
+        let store = automation_store()?;
+        let mut jobs = Vec::new();
+        for profile in store.profiles() {
+            if profile.presentation != PresentationMode::DynamicStills {
+                continue;
+            }
+            let Some(still_set_id) = profile.still_set_id else {
+                continue;
+            };
+            let Some(still_set) = store.still_set(still_set_id) else {
+                continue;
+            };
+            if let Some((_, frame)) = next_transition_after(still_set, now, utc_offset_minutes) {
+                jobs.push((frame.asset_id, profile.clone()));
+            }
+        }
+        jobs
+    };
+    for (asset_id, profile) in jobs {
+        let _ = prerender_asset(&profile, asset_id);
+    }
+    Ok(())
+}
+
+fn prerender_asset(profile: &Profile, asset_id: AssetId) -> Result<(), String> {
+    use std::path::Path;
+
+    use easel_core::resolve_displays;
+    use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
+
+    use crate::display_session;
+
+    let path = resolve_asset_path(asset_id)?;
+    let store = automation_store()?;
+    let staging = store.prerender_staging_path(profile.id, asset_id);
+    let ready = store.prerender_ready_path(profile.id, asset_id);
+    if ready.is_file() {
+        return Ok(());
+    }
+    let live = display_session::current_displays();
+    if live.is_empty() {
+        return Err("no displays available for pre-render".into());
+    }
+    let policy = store.hotplug_policy().clone();
+    let resolution = resolve_displays(profile, &live, &policy);
+    if !resolution.should_apply || resolution.active_displays.is_empty() {
+        return Ok(());
+    }
+    let displays = resolution.active_displays;
+    let mut request_profile = profile.clone();
+    request_profile.displays = displays.iter().map(|display| display.id).collect();
+    if let Some(parent) = staging.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    let request = RenderRequest {
+        source_path: Path::new(&path).to_path_buf(),
+        displays: displays.clone(),
+        composition: CompositionSettings::from_profile(&request_profile),
+        purpose: RenderPurpose::StaticWallpaper,
+    };
+    // Raster into a temp dir then copy the first display output into staging.
+    let output_dir = store.prerender_dir().join("jobs").join(format!(
+        "{}-{}",
+        profile.id.to_hyphenated_string(),
+        asset_id.to_hyphenated_string()
+    ));
+    let outputs = RasterJob {
+        request,
+        output_dir: output_dir.clone(),
+    }
+    .execute()
+    .map_err(|error| error.to_string())?;
+    let first = outputs
+        .first()
+        .ok_or_else(|| "pre-render produced no outputs".to_string())?;
+    std::fs::copy(&first.path, &staging).map_err(|error| error.to_string())?;
+    store
+        .promote_prerender(&staging, &ready)
+        .map_err(|error| error.to_string())?;
+    let _ = std::fs::remove_dir_all(output_dir);
+    Ok(())
 }
 
 fn resolve_asset_path(asset_id: AssetId) -> Result<String, String> {

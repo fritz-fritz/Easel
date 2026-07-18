@@ -368,7 +368,7 @@ fn next_daily_local_times(
     // Compare full instants (second precision) rather than truncated minutes so a
     // candidate at HH:MM:00 is not treated as still due after HH:MM:01.
     for time in &sorted {
-        let candidate = local_civil_to_instant(
+        let candidate = instant_at_local(
             local.year,
             local.month,
             local.day,
@@ -380,7 +380,7 @@ fn next_daily_local_times(
         }
     }
     let (year, month, day) = add_days(local.year, local.month, local.day, 1);
-    local_civil_to_instant(year, month, day, sorted[0], utc_offset_minutes)
+    instant_at_local(year, month, day, sorted[0], utc_offset_minutes)
 }
 
 fn next_calendar_fire(
@@ -397,7 +397,7 @@ fn next_calendar_fire(
         if (weekdays & (1 << weekday)) == 0 {
             continue;
         }
-        let candidate = local_civil_to_instant(year, month, day, time, utc_offset_minutes);
+        let candidate = instant_at_local(year, month, day, time, utc_offset_minutes);
         if candidate.unix_seconds >= now.unix_seconds {
             return Some(candidate);
         }
@@ -417,8 +417,7 @@ fn next_solar_event(
     for day_offset in 0..3 {
         let (year, month, day) = add_days(local.year, local.month, local.day, day_offset);
         let ordinal = day_of_year(year, month, day);
-        let solar_minutes =
-            approximate_solar_local_minutes(ordinal, latitude_deg, longitude_deg, event)?;
+        let solar_minutes = solar_event_local_minutes(ordinal, latitude_deg, longitude_deg, event)?;
         let total = solar_minutes + offset_minutes;
         let wrapped_day = total.div_euclid(24 * 60);
         let minutes_in_day = total.rem_euclid(24 * 60);
@@ -428,7 +427,7 @@ fn next_solar_event(
         let minute = (minutes_in_day % 60) as u8;
         let (y, m, d) = add_days(year, month, day, wrapped_day);
         let time = LocalTimeOfDay { hour, minute };
-        let candidate = local_civil_to_instant(y, m, d, time, utc_offset_minutes);
+        let candidate = instant_at_local(y, m, d, time, utc_offset_minutes);
         if candidate.unix_seconds >= now.unix_seconds {
             return Some(candidate);
         }
@@ -437,12 +436,15 @@ fn next_solar_event(
 }
 
 /// NOAA-style approximate local solar event minutes past local midnight.
+///
+/// Returns `None` when the event does not occur (for example polar night/day).
 #[allow(
     clippy::unreadable_literal,
     clippy::cast_possible_truncation,
     clippy::cast_sign_loss
 )]
-fn approximate_solar_local_minutes(
+#[must_use]
+pub fn solar_event_local_minutes(
     day_of_year: u16,
     latitude_deg: f64,
     longitude_deg: f64,
@@ -474,7 +476,9 @@ fn approximate_solar_local_minutes(
     Some(minutes.round() as i32)
 }
 
-fn local_civil_to_instant(
+/// Converts a local civil date and time into a UTC instant using a fixed offset.
+#[must_use]
+pub fn instant_at_local(
     year: i32,
     month: u8,
     day: u8,
@@ -681,7 +685,7 @@ mod tests {
         assert_eq!(local.year, 2024);
         assert_eq!(local.month, 1);
         assert_eq!(local.day, 1);
-        let back = local_civil_to_instant(local.year, local.month, local.day, local.time, 0);
+        let back = instant_at_local(local.year, local.month, local.day, local.time, 0);
         assert_eq!(back.unix_seconds, instant.unix_seconds);
     }
 }

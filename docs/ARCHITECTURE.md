@@ -99,12 +99,13 @@ in Compose. Domain types remain in `easel-core`; this crate only adds IO, watchi
 
 ## Scheduler
 
-`easel-scheduler` persists profiles, display groups, schedules, rotation queues, and hotplug
-policy as versioned TOML, and stores rotation apply history in SQLite. Schedule evaluation,
-avoid-repeat selection, and hotplug resolution are pure functions in `easel-core` (injected
-clock / UTC offset). The desktop poller and `easel` CLI share the same store; pause, skip, and
-status mutate or read those documents. A native OS system tray icon is deferred until the
-desktop host uses Qt Widgets/`QApplication` (Qt Labs Platform requirement).
+`easel-scheduler` persists profiles, display groups, schedules, rotation queues, dynamic still
+sets, and hotplug policy as versioned TOML, and stores rotation apply history plus last-applied
+dynamic frame state in SQLite. Schedule evaluation, dynamic frame selection, avoid-repeat
+selection, and hotplug resolution are pure functions in `easel-core` (injected clock / UTC
+offset). The desktop poller and `easel` CLI share the same store; pause, skip, and status mutate
+or read those documents. A native OS system tray icon is deferred until the desktop host uses Qt
+Widgets/`QApplication` (Qt Labs Platform requirement).
 
 ## Image providers
 

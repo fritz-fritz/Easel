@@ -59,6 +59,12 @@ impl RotationHistoryStore {
                 schedule_id TEXT PRIMARY KEY NOT NULL,
                 last_fired_at INTEGER NOT NULL
             );
+            CREATE TABLE IF NOT EXISTS dynamic_still_state (
+                profile_id TEXT PRIMARY KEY NOT NULL,
+                asset_id TEXT NOT NULL,
+                key_label TEXT NOT NULL,
+                applied_at INTEGER NOT NULL
+            );
             ",
         )?;
         Ok(Self { conn, path })
@@ -189,6 +195,60 @@ impl RotationHistoryStore {
             )
             .optional()
             .map_err(Into::into)
+    }
+
+    /// Returns the last applied dynamic-still frame for a profile, if any.
+    pub fn dynamic_still_state(
+        &self,
+        profile_id: ProfileId,
+    ) -> Result<Option<easel_core::AppliedDynamicFrame>, RotationHistoryStoreError> {
+        self.conn
+            .query_row(
+                "SELECT asset_id, key_label, applied_at FROM dynamic_still_state
+                 WHERE profile_id = ?1",
+                params![profile_id.to_hyphenated_string()],
+                |row| {
+                    Ok((
+                        row.get::<_, String>(0)?,
+                        row.get::<_, String>(1)?,
+                        row.get::<_, i64>(2)?,
+                    ))
+                },
+            )
+            .optional()?
+            .map(|(asset, key_label, applied_at)| {
+                Ok(easel_core::AppliedDynamicFrame {
+                    asset_id: AssetId::parse(&asset).map_err(|error| {
+                        RotationHistoryStoreError::Corrupt(format!("bad asset id: {error}"))
+                    })?,
+                    key_label,
+                    applied_at,
+                })
+            })
+            .transpose()
+    }
+
+    /// Records the last applied dynamic-still frame for catch-up decisions.
+    pub fn set_dynamic_still_state(
+        &self,
+        profile_id: ProfileId,
+        state: &easel_core::AppliedDynamicFrame,
+    ) -> Result<(), RotationHistoryStoreError> {
+        self.conn.execute(
+            "INSERT INTO dynamic_still_state (profile_id, asset_id, key_label, applied_at)
+             VALUES (?1, ?2, ?3, ?4)
+             ON CONFLICT(profile_id) DO UPDATE SET
+                asset_id = excluded.asset_id,
+                key_label = excluded.key_label,
+                applied_at = excluded.applied_at",
+            params![
+                profile_id.to_hyphenated_string(),
+                state.asset_id.to_hyphenated_string(),
+                state.key_label,
+                state.applied_at,
+            ],
+        )?;
+        Ok(())
     }
 }
 

@@ -44,6 +44,8 @@ mod qobject {
         #[qproperty(bool, apply_busy)]
         #[qproperty(i32, schedule_index)]
         #[qproperty(QString, profile_name)]
+        #[qproperty(i32, media_mode_index)]
+        #[qproperty(QString, timeline_preview)]
         type ComposeController = super::ComposeControllerRust;
 
         #[qinvokable]
@@ -61,6 +63,10 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "save_profile"]
         fn saveProfile(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[rust_name = "preview_timeline_hour"]
+        fn previewTimelineHour(self: Pin<&mut Self>, hour: f64);
     }
 
     impl cxx_qt::Threading for ComposeController {}
@@ -80,6 +86,8 @@ pub struct ComposeControllerRust {
     apply_busy: bool,
     schedule_index: i32,
     profile_name: QString,
+    media_mode_index: i32,
+    timeline_preview: QString,
     job_generation: AtomicU64,
     apply_generation: AtomicU64,
     job_tx: Sender<WorkerJob>,
@@ -100,6 +108,10 @@ impl Default for ComposeControllerRust {
             apply_busy: false,
             schedule_index: 0,
             profile_name: QString::from("Compose"),
+            media_mode_index: 0,
+            timeline_preview: QString::from(
+                "Select Dynamic stills to scrub a morning / noon / evening timeline.",
+            ),
             job_generation: AtomicU64::new(0),
             apply_generation: AtomicU64::new(0),
             job_tx: worker_sender(),
@@ -207,6 +219,7 @@ impl qobject::ComposeController {
             }
         };
         let schedule_index = *self.schedule_index();
+        let media_mode_index = *self.media_mode_index();
         match crate::profile_controller::save_compose_profile(
             &name,
             &source,
@@ -220,11 +233,18 @@ impl qobject::ComposeController {
             (*self.focal_x()).clamp(0.0, 1.0),
             (*self.focal_y()).clamp(0.0, 1.0),
             schedule_index,
+            media_mode_index,
         ) {
             Ok(profile) => {
+                let mode = match profile.presentation {
+                    easel_core::PresentationMode::DynamicStills => "dynamic stills",
+                    easel_core::PresentationMode::LiveMedia => "live media",
+                    easel_core::PresentationMode::Static => "static",
+                };
                 self.as_mut().set_preview_status(QString::from(
                     format!(
-                        "Saved profile '{}' ({})",
+                        "Saved {} profile '{}' ({})",
+                        mode,
                         profile.name,
                         profile.id.to_hyphenated_string()
                     )
@@ -237,6 +257,27 @@ impl qobject::ComposeController {
                 ));
             }
         }
+    }
+
+    fn preview_timeline_hour(mut self: Pin<&mut Self>, hour: f64) {
+        let hour = if hour.is_finite() {
+            hour.clamp(0.0, 23.99)
+        } else {
+            0.0
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let whole_hour = hour.floor() as u8;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let minute = ((hour.fract() * 60.0).floor() as u8).min(59);
+        let label = match (whole_hour, minute) {
+            (h, _) if h < 6 => "fallback / previous evening frame",
+            (h, _) if h < 12 => "morning frame (tod:06:00)",
+            (h, _) if h < 18 => "noon frame (tod:12:00)",
+            _ => "evening frame (tod:18:00)",
+        };
+        self.as_mut().set_timeline_preview(QString::from(
+            format!("Simulated {whole_hour:02}:{minute:02} → {label}").as_str(),
+        ));
     }
 }
 

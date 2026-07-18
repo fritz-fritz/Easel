@@ -77,6 +77,8 @@ impl ProfileControllerRust {
                 "displays": profile.displays.len(),
                 "hasQueue": profile.rotation_queue_id.is_some(),
                 "hasSchedule": profile.schedule_id.is_some(),
+                "presentation": format!("{:?}", profile.presentation),
+                "hasStillSet": profile.still_set_id.is_some(),
             })
             .to_string()
         }));
@@ -178,10 +180,11 @@ pub fn save_compose_profile(
     focal_x: f64,
     focal_y: f64,
     schedule_index: i32,
+    media_mode_index: i32,
 ) -> Result<Profile, String> {
     use easel_core::{
-        AssetId, AssetLocation, ContentSafety, MediaAsset, MediaDimensions, MediaMetadata,
-        RotationQueue,
+        AssetId, AssetLocation, ContentSafety, DynamicStillSet, MediaAsset, MediaDimensions,
+        MediaMetadata, PresentationMode, RotationQueue,
     };
     use easel_scheduler::AutomationStore;
 
@@ -195,6 +198,16 @@ pub fn save_compose_profile(
     profile.zoom = zoom;
     profile.focal_x = focal_x;
     profile.focal_y = focal_y;
+    profile.presentation = match media_mode_index {
+        1 => PresentationMode::DynamicStills,
+        2 => PresentationMode::LiveMedia,
+        _ => PresentationMode::Static,
+    };
+    if profile.presentation == PresentationMode::LiveMedia {
+        return Err(
+            "live media profiles require Stage 6; choose Still image or Dynamic stills".into(),
+        );
+    }
 
     let asset_id = AssetId::new();
     let asset = MediaAsset {
@@ -233,6 +246,16 @@ pub fn save_compose_profile(
     .map_err(|error| error.to_string())?;
     profile.schedule_id = Some(schedule.id);
 
+    let still_set = if profile.presentation == PresentationMode::DynamicStills {
+        let set =
+            DynamicStillSet::default_time_of_day(format!("{name} stills"), profile.id, asset_id)
+                .map_err(|error| error.to_string())?;
+        profile.still_set_id = Some(set.id);
+        Some(set)
+    } else {
+        None
+    };
+
     let mut store = automation_store()?;
     store
         .upsert_queue(queue)
@@ -240,6 +263,11 @@ pub fn save_compose_profile(
     store
         .upsert_schedule(schedule)
         .map_err(|error| error.to_string())?;
+    if let Some(still_set) = still_set {
+        store
+            .upsert_still_set(still_set)
+            .map_err(|error| error.to_string())?;
+    }
     store
         .upsert_profile(profile.clone())
         .map_err(|error| error.to_string())?;

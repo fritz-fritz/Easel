@@ -9,9 +9,10 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use easel_core::{
-    AssetId, DisplayGroup, DisplayGroupId, HotplugPolicy, InstantSeconds, Profile, ProfileId,
-    RotationQueue, RotationQueueId, Schedule, ScheduleId, ScheduleRule, explain_fire,
-    next_fire_after, select_next, skip_current,
+    AssetId, DisplayGroup, DisplayGroupId, DynamicStillSet, DynamicStillSetId, HotplugPolicy,
+    InstantSeconds, Profile, ProfileId, RotationQueue, RotationQueueId, Schedule, ScheduleId,
+    ScheduleRule, active_frame_at, decide_transition, explain_fire, next_fire_after,
+    next_transition_after, select_next, skip_current,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -60,6 +61,11 @@ struct QueueDocument {
     queues: Vec<RotationQueue>,
 }
 
+#[derive(Clone, Debug, Default, Serialize, Deserialize)]
+struct StillSetDocument {
+    still_sets: Vec<DynamicStillSet>,
+}
+
 /// Human-readable automation status for CLI and tray.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct AutomationSummary {
@@ -67,17 +73,21 @@ pub struct AutomationSummary {
     pub profile_count: usize,
     /// Number of enabled schedules.
     pub enabled_schedules: usize,
+    /// Number of dynamic still sets.
+    pub still_set_count: usize,
     /// Whether any rotation queue is paused.
     pub any_paused: bool,
     /// Next scheduled fire explanation, when known.
     pub next_fire_hint: Option<String>,
+    /// Next dynamic-still transition hint, when known.
+    pub next_dynamic_hint: Option<String>,
     /// Latest apply reason, when history exists.
     pub last_apply_reason: Option<String>,
     /// Hotplug policy label.
     pub hotplug_policy: String,
 }
 
-/// Loads and saves Stage 4 automation configuration.
+/// Loads and saves Stage 4/5 automation configuration.
 pub struct AutomationStore {
     paths: AutomationPaths,
     history: RotationHistoryStore,
@@ -85,6 +95,7 @@ pub struct AutomationStore {
     groups: Vec<DisplayGroup>,
     schedules: Vec<Schedule>,
     queues: Vec<RotationQueue>,
+    still_sets: Vec<DynamicStillSet>,
     hotplug: HotplugPolicy,
 }
 
@@ -103,6 +114,7 @@ impl AutomationStore {
             groups: Vec::new(),
             schedules: Vec::new(),
             queues: Vec::new(),
+            still_sets: Vec::new(),
             hotplug: HotplugPolicy::default(),
         };
         store.reload()?;
@@ -145,6 +157,12 @@ impl AutomationStore {
         for queue in &self.queues {
             queue.validate()?;
         }
+        self.still_sets = read_document::<StillSetDocument>(&self.still_sets_path())?
+            .unwrap_or_default()
+            .still_sets;
+        for still_set in &self.still_sets {
+            still_set.validate()?;
+        }
         self.hotplug = read_document::<HotplugPolicy>(&self.hotplug_path())?.unwrap_or_default();
         self.hotplug.validate()?;
         Ok(())
@@ -172,6 +190,12 @@ impl AutomationStore {
     #[must_use]
     pub fn queues(&self) -> &[RotationQueue] {
         &self.queues
+    }
+
+    /// Saved dynamic still sets.
+    #[must_use]
+    pub fn still_sets(&self) -> &[DynamicStillSet] {
+        &self.still_sets
     }
 
     /// Active hotplug policy.
@@ -277,6 +301,30 @@ impl AutomationStore {
         self.queues.iter_mut().find(|queue| queue.id == id)
     }
 
+    /// Upserts a dynamic still set.
+    pub fn upsert_still_set(
+        &mut self,
+        still_set: DynamicStillSet,
+    ) -> Result<(), AutomationStoreError> {
+        still_set.validate()?;
+        if let Some(existing) = self
+            .still_sets
+            .iter_mut()
+            .find(|item| item.id == still_set.id)
+        {
+            *existing = still_set;
+        } else {
+            self.still_sets.push(still_set);
+        }
+        self.write_still_sets()
+    }
+
+    /// Looks up a dynamic still set.
+    #[must_use]
+    pub fn still_set(&self, id: DynamicStillSetId) -> Option<&DynamicStillSet> {
+        self.still_sets.iter().find(|still_set| still_set.id == id)
+    }
+
     /// Replaces the hotplug policy.
     pub fn set_hotplug_policy(
         &mut self,
@@ -331,6 +379,32 @@ impl AutomationStore {
             }
         }
         let last_apply_reason = self.history.latest()?.map(|entry| entry.reason);
+        let mut next_dynamic_hint = None;
+        let mut best_dynamic: Option<i64> = None;
+        for profile in &self.profiles {
+            if profile.presentation != easel_core::PresentationMode::DynamicStills {
+                continue;
+            }
+            let Some(still_set_id) = profile.still_set_id else {
+                continue;
+            };
+            let Some(still_set) = self.still_set(still_set_id) else {
+                continue;
+            };
+            if let Some((instant, frame)) =
+                next_transition_after(still_set, now, utc_offset_minutes)
+            {
+                if best_dynamic.is_none_or(|current| instant.unix_seconds < current) {
+                    best_dynamic = Some(instant.unix_seconds);
+                    next_dynamic_hint = Some(format!(
+                        "{}: {} → {}",
+                        profile.name,
+                        frame.key.label(),
+                        frame.asset_id.to_hyphenated_string()
+                    ));
+                }
+            }
+        }
         Ok(AutomationSummary {
             profile_count: self.profiles.len(),
             enabled_schedules: self
@@ -338,8 +412,10 @@ impl AutomationStore {
                 .iter()
                 .filter(|schedule| schedule.enabled)
                 .count(),
+            still_set_count: self.still_sets.len(),
             any_paused: self.any_paused(),
             next_fire_hint: next_hint,
+            next_dynamic_hint,
             last_apply_reason,
             hotplug_policy: format!("{:?}", self.hotplug.on_missing),
         })
@@ -486,6 +562,103 @@ impl AutomationStore {
         Ok(due)
     }
 
+    /// Profiles whose dynamic still frame should be applied at `now`.
+    ///
+    /// Skipped while any rotation queue is paused (shared tray/CLI pause).
+    pub fn due_dynamic_stills(
+        &self,
+        now: InstantSeconds,
+        utc_offset_minutes: i32,
+    ) -> Result<Vec<DueDynamicStill>, AutomationStoreError> {
+        if self.any_paused() {
+            return Ok(Vec::new());
+        }
+        let mut due = Vec::new();
+        for profile in &self.profiles {
+            if profile.presentation != easel_core::PresentationMode::DynamicStills {
+                continue;
+            }
+            let Some(still_set_id) = profile.still_set_id else {
+                continue;
+            };
+            let Some(still_set) = self.still_set(still_set_id) else {
+                return Err(AutomationStoreError::MissingStillSet(still_set_id));
+            };
+            let selection = active_frame_at(still_set, now, utc_offset_minutes);
+            let last = self.history.dynamic_still_state(profile.id)?;
+            let decision = decide_transition(last.as_ref(), &selection);
+            if !decision.should_apply {
+                continue;
+            }
+            let next = next_transition_after(still_set, now, utc_offset_minutes);
+            due.push(DueDynamicStill {
+                profile_id: profile.id,
+                still_set_id,
+                selection,
+                decision_reason: decision.reason,
+                next_transition_unix: next.as_ref().map(|(instant, _)| instant.unix_seconds),
+                next_asset_id: next.map(|(_, frame)| frame.asset_id),
+                request_cross_fade: still_set.request_cross_fade,
+            });
+        }
+        Ok(due)
+    }
+
+    /// Staging directory for pre-rendered dynamic still outputs.
+    #[must_use]
+    pub fn prerender_dir(&self) -> PathBuf {
+        self.paths
+            .history_db
+            .parent()
+            .map_or_else(|| PathBuf::from("."), Path::to_path_buf)
+            .join("dynamic-prerender")
+    }
+
+    /// Staging path for a profile's upcoming dynamic frame.
+    #[must_use]
+    pub fn prerender_staging_path(&self, profile_id: ProfileId, asset_id: AssetId) -> PathBuf {
+        self.prerender_dir().join(format!(
+            "{}-{}.staging.png",
+            profile_id.to_hyphenated_string(),
+            asset_id.to_hyphenated_string()
+        ))
+    }
+
+    /// Completed path for a profile's upcoming dynamic frame.
+    #[must_use]
+    pub fn prerender_ready_path(&self, profile_id: ProfileId, asset_id: AssetId) -> PathBuf {
+        self.prerender_dir().join(format!(
+            "{}-{}.png",
+            profile_id.to_hyphenated_string(),
+            asset_id.to_hyphenated_string()
+        ))
+    }
+
+    /// Atomically promotes a completed staging render into the ready path.
+    pub fn promote_prerender(
+        &self,
+        staging: &Path,
+        ready: &Path,
+    ) -> Result<(), AutomationStoreError> {
+        if let Some(parent) = ready.parent() {
+            fs::create_dir_all(parent)?;
+        }
+        if !staging.is_file() {
+            return Err(AutomationStoreError::MissingPrerender(
+                staging.to_path_buf(),
+            ));
+        }
+        let temp = ready.with_extension("png.part");
+        fs::copy(staging, &temp)?;
+        {
+            let file = fs::File::open(&temp)?;
+            file.sync_all()?;
+        }
+        fs::rename(&temp, ready)?;
+        let _ = fs::remove_file(staging);
+        Ok(())
+    }
+
     fn profiles_path(&self) -> PathBuf {
         self.paths.config_dir.join("profiles.toml")
     }
@@ -500,6 +673,10 @@ impl AutomationStore {
 
     fn queues_path(&self) -> PathBuf {
         self.paths.config_dir.join("rotation_queues.toml")
+    }
+
+    fn still_sets_path(&self) -> PathBuf {
+        self.paths.config_dir.join("dynamic_still_sets.toml")
     }
 
     fn hotplug_path(&self) -> PathBuf {
@@ -541,6 +718,34 @@ impl AutomationStore {
             },
         )
     }
+
+    fn write_still_sets(&self) -> Result<(), AutomationStoreError> {
+        atomic_write_toml(
+            &self.still_sets_path(),
+            &StillSetDocument {
+                still_sets: self.still_sets.clone(),
+            },
+        )
+    }
+}
+
+/// A dynamic still profile that needs an apply at the evaluated instant.
+#[derive(Clone, Debug, PartialEq)]
+pub struct DueDynamicStill {
+    /// Profile to update.
+    pub profile_id: ProfileId,
+    /// Still set driving the selection.
+    pub still_set_id: DynamicStillSetId,
+    /// Frame that should be showing.
+    pub selection: easel_core::FrameSelection,
+    /// Why the transition should apply.
+    pub decision_reason: String,
+    /// Next transition unix seconds, when known.
+    pub next_transition_unix: Option<i64>,
+    /// Asset that becomes active at the next transition.
+    pub next_asset_id: Option<AssetId>,
+    /// Whether the still set requested a cross-fade.
+    pub request_cross_fade: bool,
 }
 
 fn read_document<T: for<'de> Deserialize<'de>>(
@@ -616,6 +821,9 @@ pub enum AutomationStoreError {
     /// Hotplug validation failure.
     #[error(transparent)]
     Hotplug(#[from] easel_core::HotplugError),
+    /// Dynamic still set validation failure.
+    #[error(transparent)]
+    DynamicStill(#[from] easel_core::DynamicStillError),
     /// History store failure.
     #[error(transparent)]
     History(#[from] crate::history::RotationHistoryStoreError),
@@ -625,12 +833,18 @@ pub enum AutomationStoreError {
     /// Referenced queue is missing.
     #[error("rotation queue not found: {0:?}")]
     MissingQueue(RotationQueueId),
+    /// Referenced dynamic still set is missing.
+    #[error("dynamic still set not found: {0:?}")]
+    MissingStillSet(DynamicStillSetId),
     /// Profile has no rotation queue assigned.
     #[error("profile has no rotation queue: {0:?}")]
     ProfileHasNoQueue(ProfileId),
     /// Compose schedule combo index is unknown.
     #[error("unknown compose schedule index: {0}")]
     UnknownScheduleIndex(i32),
+    /// Pre-rendered staging file is missing.
+    #[error("missing dynamic pre-render: {0}")]
+    MissingPrerender(PathBuf),
 }
 
 #[cfg(test)]
@@ -736,6 +950,70 @@ mod tests {
             due_again.is_empty(),
             "already-fired schedule must not re-trigger"
         );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn persists_and_evaluates_dynamic_still_set() {
+        let (paths, root) = temp_paths();
+        let mut store = AutomationStore::open(paths.clone()).unwrap();
+        let asset_a = AssetId::new();
+        let asset_b = AssetId::new();
+        let mut profile = Profile::new("Dynamic");
+        profile.presentation = easel_core::PresentationMode::DynamicStills;
+        let mut still_set =
+            easel_core::DynamicStillSet::default_time_of_day("Day", profile.id, asset_a).unwrap();
+        still_set.frames[1].asset_id = asset_b;
+        profile.still_set_id = Some(still_set.id);
+        store.upsert_still_set(still_set).unwrap();
+        store.upsert_profile(profile.clone()).unwrap();
+
+        let reloaded = AutomationStore::open(paths).unwrap();
+        assert_eq!(reloaded.still_sets().len(), 1);
+        // 2024-01-01 14:30 UTC → noon frame
+        let now = InstantSeconds {
+            unix_seconds: 1_704_119_400,
+        };
+        let due = reloaded.due_dynamic_stills(now, 0).unwrap();
+        assert_eq!(due.len(), 1);
+        assert_eq!(due[0].selection.asset_id, asset_b);
+        assert_eq!(due[0].selection.key_label(), "tod:12:00");
+
+        reloaded
+            .history()
+            .set_dynamic_still_state(
+                profile.id,
+                &easel_core::AppliedDynamicFrame {
+                    asset_id: asset_b,
+                    key_label: "tod:12:00".into(),
+                    applied_at: now.unix_seconds,
+                },
+            )
+            .unwrap();
+        let due_again = reloaded.due_dynamic_stills(now, 0).unwrap();
+        assert!(due_again.is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn pause_blocks_dynamic_still_due() {
+        let (paths, root) = temp_paths();
+        let mut store = AutomationStore::open(paths).unwrap();
+        let asset = AssetId::new();
+        let mut profile = Profile::new("Dynamic");
+        profile.presentation = easel_core::PresentationMode::DynamicStills;
+        let still_set =
+            easel_core::DynamicStillSet::default_time_of_day("Day", profile.id, asset).unwrap();
+        profile.still_set_id = Some(still_set.id);
+        let queue = RotationQueue::from_assets("Queue", vec![asset]);
+        store.upsert_queue(queue).unwrap();
+        store.upsert_still_set(still_set).unwrap();
+        store.upsert_profile(profile).unwrap();
+        store.set_all_paused(true).unwrap();
+        let now = InstantSeconds {
+            unix_seconds: 1_704_119_400,
+        };
+        assert!(store.due_dynamic_stills(now, 0).unwrap().is_empty());
         let _ = fs::remove_dir_all(root);
     }
 }

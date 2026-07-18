@@ -12,4 +12,6 @@ mod store;
 pub use history::{
     RotationHistoryEntry, RotationHistoryStore, RotationHistoryStoreError, now_unix_i64,
 };
-pub use store::{AutomationPaths, AutomationStore, AutomationStoreError, AutomationSummary};
+pub use store::{
+    AutomationPaths, AutomationStore, AutomationStoreError, AutomationSummary, DueDynamicStill,
+};

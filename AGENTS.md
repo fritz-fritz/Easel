@@ -50,4 +50,5 @@ workspace. It has two distinct build scopes:
   cargo run -p easel-cli -- next
   cargo run -p easel-cli -- profiles
   cargo run -p easel-cli -- schedules
+  cargo run -p easel-cli -- stills
   ```

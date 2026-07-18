@@ -91,6 +91,13 @@ available (`cxx-qt-lib` exposes `QGuiApplication` only).
 Exit: a scheduled still set remains correct across restart, sleep, clock changes, and display
 topology changes on every supported static backend.
 
+**Status:** Implemented for still images (`DynamicStillSet` domain with ToD/solar keys +
+fallback, TOML persistence, SQLite last-applied catch-up, poller sync with atomic pre-render
+promote, Compose Media=Dynamic stills save + timeline scrub, `easel stills` / status hints).
+Cross-fade is capability-gated and currently unsupported on Plasma/Windows still backends
+(hard cut). Multi-asset timeline editing beyond the default morning/noon/evening set remains
+manual via TOML.
+
 ## Stage 6 — Live media
 
 - Local animated-image and video metadata, bounded poster extraction, and library thumbnails.

@@ -32,6 +32,8 @@ enum Commands {
     Profiles,
     /// List schedules and next fire hints.
     Schedules,
+    /// List dynamic still sets.
+    Stills,
     /// Show automation status (pause, next fire, last apply).
     Status,
     /// Pause all rotation queues.
@@ -71,6 +73,10 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Commands::Schedules => list_schedules(&store, cli.utc_offset_minutes),
+        Commands::Stills => {
+            list_stills(&store);
+            Ok(())
+        }
         Commands::Status => show_status(&store, cli.utc_offset_minutes),
         Commands::Pause => {
             store
@@ -98,9 +104,10 @@ fn list_profiles(store: &AutomationStore) {
     }
     for profile in store.profiles() {
         println!(
-            "{}\t{}\tdisplays={}\tqueue={}\tschedule={}",
+            "{}\t{}\tpresentation={:?}\tdisplays={}\tqueue={}\tschedule={}\tstill_set={}",
             profile.id.to_hyphenated_string(),
             profile.name,
+            profile.presentation,
             profile.displays.len(),
             profile.rotation_queue_id.map_or_else(
                 || "-".into(),
@@ -109,7 +116,35 @@ fn list_profiles(store: &AutomationStore) {
             profile
                 .schedule_id
                 .map_or_else(|| "-".into(), easel_core::ScheduleId::to_hyphenated_string),
+            profile.still_set_id.map_or_else(
+                || "-".into(),
+                easel_core::DynamicStillSetId::to_hyphenated_string
+            ),
         );
+    }
+}
+
+fn list_stills(store: &AutomationStore) {
+    if store.still_sets().is_empty() {
+        println!("No dynamic still sets saved.");
+        return;
+    }
+    for still_set in store.still_sets() {
+        println!(
+            "{}\t{}\tframes={}\tfallback={}\tcross_fade={}",
+            still_set.id.to_hyphenated_string(),
+            still_set.name,
+            still_set.frames.len(),
+            still_set.fallback_asset_id.to_hyphenated_string(),
+            still_set.request_cross_fade
+        );
+        for frame in &still_set.frames {
+            println!(
+                "\t{}\t{}",
+                frame.key.label(),
+                frame.asset_id.to_hyphenated_string()
+            );
+        }
     }
 }
 
@@ -149,16 +184,49 @@ fn show_status(store: &AutomationStore, utc_offset_minutes: i32) -> Result<(), S
         .map_err(|error| error.to_string())?;
     println!("profiles:\t{}", summary.profile_count);
     println!("enabled schedules:\t{}", summary.enabled_schedules);
+    println!("still sets:\t{}", summary.still_set_count);
     println!("paused:\t{}", summary.any_paused);
     println!(
         "next fire:\t{}",
         summary.next_fire_hint.as_deref().unwrap_or("none")
     );
     println!(
+        "next dynamic:\t{}",
+        summary.next_dynamic_hint.as_deref().unwrap_or("none")
+    );
+    println!(
         "last apply:\t{}",
         summary.last_apply_reason.as_deref().unwrap_or("none")
     );
     println!("hotplug:\t{}", summary.hotplug_policy);
+
+    let now = InstantSeconds {
+        unix_seconds: now_unix_i64(),
+    };
+    for profile in store.profiles() {
+        if profile.presentation != easel_core::PresentationMode::DynamicStills {
+            continue;
+        }
+        let Some(still_set_id) = profile.still_set_id else {
+            continue;
+        };
+        let Some(still_set) = store.still_set(still_set_id) else {
+            continue;
+        };
+        let selection = easel_core::active_frame_at(still_set, now, utc_offset_minutes);
+        let last = store
+            .history()
+            .dynamic_still_state(profile.id)
+            .map_err(|error| error.to_string())?;
+        println!(
+            "dynamic {}:\tactive={} ({}) last={}",
+            profile.name,
+            selection.key_label(),
+            selection.asset_id.to_hyphenated_string(),
+            last.as_ref()
+                .map_or("none", |frame| frame.key_label.as_str())
+        );
+    }
     Ok(())
 }
 

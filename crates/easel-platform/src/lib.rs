@@ -34,6 +34,8 @@ pub struct BackendCapabilities {
     pub workspaces: bool,
     /// Can set the lock-screen image through an authorized API.
     pub lock_screen: bool,
+    /// Can cross-fade still replacements without a live wallpaper host.
+    pub cross_fade: bool,
 }
 
 /// One completed still image ready for a specific output.
