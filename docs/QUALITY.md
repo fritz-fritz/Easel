@@ -56,17 +56,33 @@ per-display apply-payload raster PNGs for visual review. Full packaging and code
 separate later stages. Live wallpaper Apply against a real desktop session is still a manual
 matrix item; CI never mutates an operator wallpaper.
 
+### Path filters
+
+[`ci.yml`](../.github/workflows/ci.yml) uses `dorny/paths-filter` so expensive jobs only run when
+the diff can affect them:
+
+| Output | Runs | Typical paths |
+| --- | --- | --- |
+| `rust` | Core matrix (fmt/test/clippy + apply-payload visuals) | `crates/**`, `apps/**`, `Cargo.*`, rust toolchain/fmt config |
+| `desktop` | Qt desktop smoke matrix + gui-smoke visuals | `apps/easel-desktop/**`, `crates/**`, `Cargo.*`, `.github/actions/ci-visual/**` |
+| `gallery_tooling` | Gallery builder unit tests | `.github/ci-visual/**`, gallery/action workflows, `ci.yml` |
+
+Docs-only or unrelated `.github` docs changes skip core and desktop. With no visual artifacts, the
+`workflow_run` gallery publisher exits early (and still posts a successful
+`CI Visual Gallery / OS compare` status). Prefer requiring the aggregate **`CI gate`** check in
+branch protection rather than individual matrix legs, so skipped jobs do not block merges.
+
 Media CI adds only short, project-owned, silent fixtures. Codec assertions are capability-aware so
 the suite distinguishes an unavailable runtime decoder from an incorrect compositor result.
 
 ### Visual harness stages
 
 Producers write stage-local PNGs under a temp directory. The composite action
-[`.github/actions/ci-visual`](../.github/actions/ci-visual) renames, uploads (`archive: false`),
-emits a JSON manifest, and summarizes them. Non-zipped uploads require
-`actions/download-artifact@v8` in the gallery publisher (v7 fails extracting raw PNG/JSON).
-New stages only need a producer plus one `uses: ./.github/actions/ci-visual` block with a
-distinct `stage` / `pattern`.
+[`.github/actions/ci-visual`](../.github/actions/ci-visual) renames them, writes a JSON
+manifest, and uploads **one zip artifact per stage×OS** named `ci-visual-<stage>-<os>`.
+The gallery publisher downloads those bundles (`pattern: ci-visual-*`), unpacks them, and
+builds the dual review surfaces. New stages only need a producer plus one
+`uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
 
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
@@ -77,17 +93,49 @@ distinct `stage` / `pattern`.
 
 After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](../.github/workflows/ci-visual-gallery.yml):
 
-1. Lists visual artifacts on the triggering CI run; if none, exits success (skips publish)
-2. Downloads visual artifacts + manifests (`download-artifact@v8` for `archive: false`)
-3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
+1. Lists `ci-visual-*` zip bundles on the triggering CI run; if none, exits success (skips publish)
+2. Downloads and unpacks those bundles (`download-artifact` + `merge-multiple`)
+3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py),
+   including per-asset metadata (dimensions, bytes, SHA-256) and a **cross-OS comparison**
 4. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
    `EASEL_CI_VISUAL_TOKEN` is configured)
-5. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery
-   (thumbnails from `raw.githubusercontent.com` so camo does not race Pages) and a link to
-   the hosted HTML gallery
+5. Upserts a sticky PR comment with inline thumbnails, metadata, comparison summary, and a
+   link to the hosted HTML gallery (`raw.githubusercontent.com` embeds so camo does not race Pages)
+6. Posts a commit status **`CI Visual Gallery / OS compare`** on the PR head SHA (and fails the
+   gallery job when `apply-payload` assets content/size-mismatch across OS)
+
+**Cross-OS compare rules**
+
+| Stage | Expectation | Gate |
+| --- | --- | --- |
+| `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail status + job on content/size mismatch |
+| `gui-smoke` | Platform chrome differs | Informational only (hashes/dims still shown) |
+
+Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
 
 CI visual PNGs/HTML must not be committed to branches of this source repository. Setup details:
 [ci-visual-assets-repo.md](ci-visual-assets-repo.md).
+
+#### Required checks vs `workflow_run` / `workflow_dispatch`
+
+The gallery publisher is **`workflow_run`-driven** (not a `pull_request` job and not
+`workflow_dispatch`). That means GitHub will not list the gallery workflow itself as a classic
+PR check produced by the PR head workflow file.
+
+To still require the visual OS compare before merge:
+
+1. Require the aggregate **`CI gate`** check from [`ci.yml`](../.github/workflows/ci.yml)
+   (path filters may skip core/desktop; the gate stays green when those jobs are intentionally
+   skipped)
+2. In branch protection / rulesets, also require the commit status context
+   **`CI Visual Gallery / OS compare`** (posted by the gallery workflow onto the PR head SHA;
+   succeeds immediately when the CI run produced no visual artifacts)
+
+A **`workflow_dispatch`-only** workflow cannot be a meaningful required PR check: it does not run
+automatically on each PR push, so branch protection cannot rely on it. Optional manual
+`workflow_dispatch` is fine for republish/backfill helpers (see the archive workflow), but the
+merge gate should stay on automatic `pull_request` jobs and/or commit statuses from
+`workflow_run`.
 
 Cursor Cloud Agent **Demo** artifacts are complementary and agent-scoped; Actions cannot write
 into Demo. Prefer CI galleries for every PR.

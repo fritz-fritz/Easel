@@ -11,6 +11,9 @@ permissions:
   actions: read
   contents: read
   pull-requests: write
+  # Commit status on the PR head SHA so branch protection can require
+  # "CI Visual Gallery / OS compare" even though this workflow is workflow_run-driven.
+  statuses: write
 
 concurrency:
   group: ci-visual-gallery-${{ github.event.workflow_run.id || github.event.pull_request.number }}
@@ -57,28 +60,39 @@ jobs:
             core.info(`PR #${prNumber} sha=${run.head_sha}`);
 
       # Skip empty galleries: no Pages publish, no sticky "no artifacts" comment.
+      # Still post a success commit status so a required "OS compare" check is not left pending.
       - name: Check for CI visual artifacts
         id: visuals
         uses: actions/github-script@v7
         with:
           script: |
             const runId = Number('${{ steps.meta.outputs.run_id }}');
+            const sha = '${{ steps.meta.outputs.sha }}';
+            const runUrl = '${{ steps.meta.outputs.run_url }}';
             const { data } = await github.rest.actions.listWorkflowRunArtifacts({
               owner: context.repo.owner,
               repo: context.repo.repo,
               run_id: runId,
               per_page: 100,
             });
+            // Producers upload one zip per stage×OS named ci-visual-<stage>-<os>.
             const visual = (data.artifacts || []).filter(
-              (a) =>
-                !a.expired &&
-                (a.name.endsWith('.png') || a.name.startsWith('ci-visual-manifest-')),
+              (a) => !a.expired && a.name.startsWith('ci-visual-'),
             );
             core.setOutput('count', String(visual.length));
             if (visual.length === 0) {
               core.info(
-                `No CI visual artifacts on run ${runId}; skipping gallery publish`,
+                `No CI visual bundle artifacts on run ${runId}; skipping gallery publish`,
               );
+              await github.rest.repos.createCommitStatus({
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                sha,
+                state: 'success',
+                context: 'CI Visual Gallery / OS compare',
+                description: 'no visual artifacts on CI run',
+                target_url: runUrl,
+              });
             } else {
               core.info(`Found ${visual.length} CI visual artifact(s) on run ${runId}`);
             }
@@ -86,7 +100,7 @@ jobs:
       # workflow_run is a privileged context (secrets + write tokens). Never check out
       # the PR head SHA here — that would execute untrusted code with those privileges.
       # Gallery tooling always comes from the default branch; keep build_gallery.py
-      # backward-compatible with older ci-visual manifests.
+      # backward-compatible with older ci-visual manifests (filename/stem fields).
       - name: Check out default branch (trusted gallery tooling)
         if: steps.visuals.outputs.count != '0'
         uses: actions/checkout@v7
@@ -94,15 +108,16 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      # ci-visual uploads with upload-artifact@v7 archive:false (raw PNG/JSON).
-      # Those require download-artifact@v8; v7 tries to unzip them and fails after retries.
-      - name: Download CI visual artifacts
+      # Each stage×OS producer uploads one zip (ci-visual-<stage>-<os>). download-artifact
+      # unpacks those zips; merge-multiple flattens unique PNG/manifest names into path.
+      - name: Download CI visual bundles
         if: steps.visuals.outputs.count != '0'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           run-id: ${{ steps.meta.outputs.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/ci-visual-artifacts
+          pattern: ci-visual-*
           merge-multiple: true
 
       - name: Detect deploy credentials
@@ -121,17 +136,36 @@ jobs:
 
       - name: Build HTML gallery and PR comment
         if: steps.visuals.outputs.count != '0'
+        id: gallery
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/ci-visual-artifacts"
+          # Always emit site/comment even when strict OS compare fails; the gate
+          # is enforced via commit status + final step so reviewers still get embeds.
           python3 .github/ci-visual/build_gallery.py \
             --artifacts "${{ runner.temp }}/ci-visual-artifacts" \
             --out "${{ runner.temp }}/ci-visual-gallery" \
             --pr-number "${{ steps.meta.outputs.pr_number }}" \
             --sha "${{ steps.meta.outputs.sha }}" \
             --run-url "${{ steps.meta.outputs.run_url }}" \
+            --run-id "${{ steps.meta.outputs.run_id }}" \
             --pages-base "${{ steps.meta.outputs.pages_base }}" \
+            --no-fail-on-os-mismatch \
             $([[ "${{ steps.deploy.outputs.enabled }}" == "true" ]] && echo --deployed || echo --no-deployed)
+          SUMMARY_JSON="${{ runner.temp }}/ci-visual-gallery/summary.json"
+          python3 - "$SUMMARY_JSON" <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import sys
+          from pathlib import Path
+          summary = json.loads(Path(sys.argv[1]).read_text())
+          cmp = summary.get("comparison", {})
+          print(f"gate_ok={'true' if cmp.get('gate_ok', True) else 'false'}")
+          print(f"strict_failed={cmp.get('strict_failed', 0)}")
+          print(f"strict_total={cmp.get('strict_total', 0)}")
+          print(f"strict_match={cmp.get('strict_match', 0)}")
+          print(f"strict_warnings={cmp.get('strict_warnings', 0)}")
+          print(f"image_count={summary.get('image_count', 0)}")
+          PY
 
       - name: Publish gallery to easel-ci-visual Pages repo
         if: steps.visuals.outputs.count != '0' && steps.deploy.outputs.enabled == 'true'
@@ -184,6 +218,63 @@ jobs:
           header: easel-ci-visual
           path: ${{ runner.temp }}/ci-visual-gallery/comment.md
 
+      - name: Publish commit status for branch protection
+        if: always() && steps.visuals.outputs.count != '0'
+        uses: actions/github-script@v7
+        env:
+          GALLERY_CONCLUSION: ${{ steps.gallery.conclusion }}
+          GATE_OK: ${{ steps.gallery.outputs.gate_ok }}
+          STRICT_FAILED: ${{ steps.gallery.outputs.strict_failed }}
+          STRICT_TOTAL: ${{ steps.gallery.outputs.strict_total }}
+          STRICT_MATCH: ${{ steps.gallery.outputs.strict_match }}
+          STRICT_WARNINGS: ${{ steps.gallery.outputs.strict_warnings }}
+          PAGES_BASE: ${{ steps.meta.outputs.pages_base }}
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+          SHA: ${{ steps.meta.outputs.sha }}
+          RUN_URL: ${{ steps.meta.outputs.run_url }}
+          DEPLOYED: ${{ steps.deploy.outputs.enabled }}
+        with:
+          script: |
+            const galleryConclusion = process.env.GALLERY_CONCLUSION || '';
+            const gateOk = process.env.GATE_OK === 'true';
+            const failed = Number(process.env.STRICT_FAILED || '0');
+            const total = Number(process.env.STRICT_TOTAL || '0');
+            const matched = Number(process.env.STRICT_MATCH || '0');
+            const warnings = Number(process.env.STRICT_WARNINGS || '0');
+            const deployed = process.env.DEPLOYED === 'true';
+            const galleryUrl = deployed
+              ? `${process.env.PAGES_BASE.replace(/\/$/, '')}/pr/${process.env.PR_NUMBER}/`
+              : process.env.RUN_URL;
+            let state;
+            let description;
+            if (galleryConclusion !== 'success') {
+              state = 'failure';
+              description = 'gallery build failed';
+            } else if (!gateOk) {
+              state = 'failure';
+              description = `apply-payload OS mismatch: ${failed}/${total} asset(s)`;
+            } else if (total === 0) {
+              state = 'success';
+              description = 'no strict-stage assets to compare';
+            } else if (warnings > 0) {
+              state = 'success';
+              description =
+                `apply-payload gate ok (${matched}/${total} full match, ${warnings} incomplete)`;
+            } else {
+              state = 'success';
+              description = `apply-payload identical across OS (${matched} asset(s))`;
+            }
+            await github.rest.repos.createCommitStatus({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              sha: process.env.SHA,
+              state,
+              context: 'CI Visual Gallery / OS compare',
+              description: description.slice(0, 140),
+              target_url: galleryUrl,
+            });
+            core.info(`Posted commit status ${state}: ${description}`);
+
       - name: Upload built gallery from this job
         if: always() && steps.visuals.outputs.count != '0'
         uses: actions/upload-artifact@v7
@@ -191,6 +282,15 @@ jobs:
           name: ci-visual-gallery-pr-${{ steps.meta.outputs.pr_number }}
           path: ${{ runner.temp }}/ci-visual-gallery
           retention-days: 7
+
+      - name: Fail on strict cross-OS regressions
+        if: >-
+          steps.visuals.outputs.count != '0' &&
+          steps.gallery.conclusion == 'success' &&
+          steps.gallery.outputs.gate_ok != 'true'
+        run: |
+          echo "::error::Strict-stage visual assets differ across OS (see sticky comment / HTML gallery)."
+          exit 1
 
   cleanup:
     name: Remove closed PR gallery

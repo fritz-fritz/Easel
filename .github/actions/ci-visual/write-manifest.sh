@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# Build ci-visual-manifest-*.json from staged PNGs + upload-artifact outputs.
+# Build ci-visual-manifest-*.json from staged PNGs (included in the stage×OS zip).
 # Compatible with macOS Bash 3.2 (no mapfile).
 set -euo pipefail
 
@@ -7,6 +7,7 @@ staged_dir="${STAGED_DIR:?}"
 stage="${INPUT_STAGE:?}"
 runner_os="${INPUT_RUNNER_OS:?}"
 count="${FILE_COUNT:?}"
+bundle_name="${BUNDLE_NAME:-ci-visual-${stage}-${runner_os}}"
 
 manifest_name="ci-visual-manifest-${stage}-${runner_os}.json"
 manifest_path="${staged_dir}/${manifest_name}"
@@ -17,7 +18,7 @@ if [[ ! -f "$list_file" ]]; then
   find "$staged_dir" -maxdepth 1 -type f -name '*.png' | LC_ALL=C sort >"$list_file"
 fi
 
-export STAGED_DIR INPUT_STAGE INPUT_RUNNER_OS FILE_COUNT
+export STAGED_DIR INPUT_STAGE INPUT_RUNNER_OS FILE_COUNT BUNDLE_NAME="$bundle_name"
 i=0
 while IFS= read -r path || [[ -n "${path:-}" ]]; do
   [[ -n "$path" ]] || continue
@@ -28,14 +29,6 @@ done <"$list_file"
 if [[ "$i" -ne "$count" ]]; then
   echo "::warning::ci-visual: staged PNG count ${i} != reported count ${count}"
 fi
-
-for i in 0 1 2 3 4 5 6 7 8 9 10 11; do
-  id_var="UP${i}_ID"
-  url_var="UP${i}_URL"
-  # Bash 3.2-safe indirect expansion
-  eval "export ${id_var}=\"\${${id_var}-}\""
-  eval "export ${url_var}=\"\${${url_var}-}\""
-done
 
 python3 - <<'PY' >"$manifest_path"
 import json
@@ -48,6 +41,7 @@ repo = os.environ.get("GITHUB_REPOSITORY", "")
 run_id = os.environ.get("GITHUB_RUN_ID", "")
 sha = os.environ.get("GITHUB_SHA", "")
 attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
+bundle_name = os.environ.get("BUNDLE_NAME", "")
 
 images = []
 for index in range(count):
@@ -55,23 +49,10 @@ for index in range(count):
     if not file_path:
         continue
     path = Path(file_path)
-    artifact_id = os.environ.get("UP%d_ID" % index, "") or None
-    artifact_url = os.environ.get("UP%d_URL" % index, "") or ""
-    if artifact_id and not artifact_url and repo and run_id:
-        artifact_url = (
-            "%s/%s/actions/runs/%s/artifacts/%s"
-            % (server, repo, run_id, artifact_id)
-        )
     images.append(
         {
             "filename": path.name,
             "stem": path.stem,
-            "artifact_id": (
-                int(artifact_id)
-                if artifact_id and str(artifact_id).isdigit()
-                else artifact_id
-            ),
-            "artifact_url": artifact_url,
         }
     )
 
@@ -82,8 +63,11 @@ manifest = {
     "run_id": run_id,
     "run_attempt": attempt,
     "repository": repo,
+    "bundle": bundle_name,
     "images": images,
 }
+if repo and run_id:
+    manifest["run_url"] = "%s/%s/actions/runs/%s" % (server, repo, run_id)
 print(json.dumps(manifest, indent=2))
 PY
 
