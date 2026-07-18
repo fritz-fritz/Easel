@@ -204,16 +204,25 @@ class BuildGalleryTests(unittest.TestCase):
             root.mkdir()
             for os_name in ("ubuntu-latest", "windows-latest", "macos-latest"):
                 apply_name = f"apply-payload-{os_name}-apply-display-0.png"
-                gui_name = f"gui-smoke-{os_name}-gui.png"
+                gui_preview = f"gui-smoke-{os_name}-gui-preview.png"
+                gui_compose = f"gui-smoke-{os_name}-gui-compose.png"
                 write_png(root / apply_name, 16, 9, (9, 9, 9))
                 write_png(
-                    root / gui_name,
+                    root / gui_preview,
                     40,
                     20,
                     (10, 10, 10) if os_name == "ubuntu-latest" else (11, 10, 10),
                 )
+                write_png(
+                    root / gui_compose,
+                    80,
+                    50,
+                    (12, 12, 12) if os_name == "ubuntu-latest" else (13, 12, 12),
+                )
                 write_manifest(root, "apply-payload", os_name, [apply_name])
-                write_manifest(root, "gui-smoke", os_name, [gui_name])
+                write_manifest(
+                    root, "gui-smoke", os_name, [gui_preview, gui_compose]
+                )
 
             rc = main_with(
                 artifacts=root,

@@ -22,6 +22,19 @@ use crate::fixtures::dev_displays;
 static SESSION: OnceLock<Mutex<DisplaySession>> = OnceLock::new();
 static SMOKE: OnceLock<SmokePaths> = OnceLock::new();
 
+/// Canonical smoke capture ids, in capture order.
+pub const SMOKE_VIEW_ORDER: &[&str] = &[
+    "preview",
+    "compose",
+    "discover",
+    "library",
+    "profiles",
+    "automation",
+];
+
+/// Default captures when `--smoke-views` is omitted: fixture preview + Compose shell.
+pub const DEFAULT_SMOKE_VIEWS: &[&str] = &["preview", "compose"];
+
 /// Smoke screenshot output paths configured before the Qt event loop starts.
 #[derive(Clone, Debug)]
 pub struct SmokePaths {
@@ -29,13 +42,16 @@ pub struct SmokePaths {
     pub out_dir: PathBuf,
     /// Local still image loaded into Compose for the screenshot.
     pub image_path: PathBuf,
+    /// Ordered capture ids (`preview`, page names, or both).
+    pub views: Vec<String>,
 }
 
 /// Records smoke screenshot paths for the QML controllers.
-pub fn configure_smoke(out_dir: PathBuf, image_path: PathBuf) {
+pub fn configure_smoke(out_dir: PathBuf, image_path: PathBuf, views: Vec<String>) {
     let _ = SMOKE.set(SmokePaths {
         out_dir,
         image_path,
+        views,
     });
 }
 
@@ -43,6 +59,53 @@ pub fn configure_smoke(out_dir: PathBuf, image_path: PathBuf) {
 #[must_use]
 pub fn smoke_paths() -> Option<&'static SmokePaths> {
     SMOKE.get()
+}
+
+/// Parses a comma/space-separated `--smoke-views` value into ordered unique ids.
+///
+/// Accepts `all` for every capture. Unknown tokens return an error.
+pub fn parse_smoke_views(spec: &str) -> Result<Vec<String>, String> {
+    let trimmed = spec.trim();
+    if trimmed.is_empty() {
+        return Ok(DEFAULT_SMOKE_VIEWS
+            .iter()
+            .map(|view| (*view).to_string())
+            .collect());
+    }
+    let mut selected = Vec::new();
+    for raw in trimmed.split([',', ' ', ';']) {
+        let token = raw.trim().to_ascii_lowercase();
+        if token.is_empty() {
+            continue;
+        }
+        if token == "all" {
+            return Ok(SMOKE_VIEW_ORDER
+                .iter()
+                .map(|view| (*view).to_string())
+                .collect());
+        }
+        if !SMOKE_VIEW_ORDER.contains(&token.as_str()) {
+            return Err(format!(
+                "unknown smoke view '{token}' (expected one of: {}, or all)",
+                SMOKE_VIEW_ORDER.join(", ")
+            ));
+        }
+        if !selected.iter().any(|view| view == &token) {
+            selected.push(token);
+        }
+    }
+    if selected.is_empty() {
+        return Ok(DEFAULT_SMOKE_VIEWS
+            .iter()
+            .map(|view| (*view).to_string())
+            .collect());
+    }
+    // Stable capture order regardless of CLI token order.
+    Ok(SMOKE_VIEW_ORDER
+        .iter()
+        .filter(|view| selected.iter().any(|selected| selected == **view))
+        .map(|view| (*view).to_string())
+        .collect())
 }
 
 /// In-memory display arrangement used by Compose and App controllers.
@@ -445,5 +508,45 @@ fn save_arrangement(arrangement: &DisplayArrangement) -> Result<(), String> {
             let _ = fs::remove_file(&temp);
             Err(error.to_string())
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{DEFAULT_SMOKE_VIEWS, SMOKE_VIEW_ORDER, parse_smoke_views};
+
+    #[test]
+    fn parse_smoke_views_defaults_and_all() {
+        assert_eq!(
+            parse_smoke_views("").unwrap(),
+            DEFAULT_SMOKE_VIEWS
+                .iter()
+                .map(|view| (*view).to_string())
+                .collect::<Vec<_>>()
+        );
+        assert_eq!(
+            parse_smoke_views("all").unwrap(),
+            SMOKE_VIEW_ORDER
+                .iter()
+                .map(|view| (*view).to_string())
+                .collect::<Vec<_>>()
+        );
+    }
+
+    #[test]
+    fn parse_smoke_views_orders_and_dedupes() {
+        assert_eq!(
+            parse_smoke_views("automation,preview,automation,compose").unwrap(),
+            vec![
+                "preview".to_string(),
+                "compose".to_string(),
+                "automation".to_string()
+            ]
+        );
+    }
+
+    #[test]
+    fn parse_smoke_views_rejects_unknown() {
+        assert!(parse_smoke_views("preview,nope").is_err());
     }
 }

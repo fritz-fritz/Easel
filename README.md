@@ -10,8 +10,8 @@ physical multi-display composition, Compose previews, Qt display enumeration wit
 persistence, Plasma 6 / Windows still apply backends, local library indexing, Openverse
 discovery with retained provenance, reusable profiles with schedule-driven rotation, and
 hotplug policy. Use Compose → Open image → Apply (or Save profile for automation), or
-Discover/Library to select an image first. CI captures only apply-payload rasters and Qt GUI
-smoke screenshots for review. Animated/live media hosts and additional Linux desktops remain
+Discover/Library to select an image first. CI captures apply-payload rasters plus selective Qt GUI
+smoke screenshots (fixture preview and affected workspace pages) for review. Animated/live media hosts and additional Linux desktops remain
 deliberately unimplemented.
 
 ## Product direction

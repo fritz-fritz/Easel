@@ -29,6 +29,7 @@ mod qobject {
         #[qproperty(QStringList, layout_model)]
         #[qproperty(QString, smoke_out_dir)]
         #[qproperty(QString, smoke_image_path)]
+        #[qproperty(QString, smoke_views)]
         #[qproperty(bool, physical_preview)]
         #[qproperty(QString, selected_display_id)]
         #[qproperty(f64, selected_origin_x_mm)]
@@ -106,6 +107,7 @@ pub struct AppControllerRust {
     layout_model: QStringList,
     smoke_out_dir: QString,
     smoke_image_path: QString,
+    smoke_views: QString,
     physical_preview: bool,
     selected_display_id: QString,
     selected_origin_x_mm: f64,
@@ -120,12 +122,14 @@ impl Default for AppControllerRust {
     fn default() -> Self {
         let layout = layout_qstring_list(true);
         let count = i32::try_from(display_session::current_displays().len()).unwrap_or(0);
-        let smoke_out = display_session::smoke_paths()
+        let smoke = display_session::smoke_paths();
+        let smoke_out = smoke
             .map(|paths| paths.out_dir.to_string_lossy().into_owned())
             .unwrap_or_default();
-        let smoke_image = display_session::smoke_paths()
+        let smoke_image = smoke
             .map(|paths| paths.image_path.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let smoke_views = smoke.map(|paths| paths.views.join(",")).unwrap_or_default();
         Self {
             status_text: "Ready".into(),
             display_count: count,
@@ -133,6 +137,7 @@ impl Default for AppControllerRust {
             layout_model: layout,
             smoke_out_dir: smoke_out.into(),
             smoke_image_path: smoke_image.into(),
+            smoke_views: smoke_views.into(),
             physical_preview: true,
             selected_display_id: QString::default(),
             selected_origin_x_mm: 0.0,
