@@ -77,11 +77,12 @@ distinct `stage` / `pattern`.
 
 After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](../.github/workflows/ci-visual-gallery.yml):
 
-1. Downloads visual artifacts + manifests
-2. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
-3. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
+1. Lists visual artifacts on the triggering CI run; if none, exits success (skips publish)
+2. Downloads visual artifacts + manifests (`download-artifact@v8` for `archive: false`)
+3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
+4. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
    `EASEL_CI_VISUAL_TOKEN` is configured)
-4. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery and a
+5. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery and a
    link to the hosted HTML gallery
 
 CI visual PNGs/HTML must not be committed to branches of this source repository. Setup details:

@@ -56,31 +56,9 @@ jobs:
             core.setOutput('pages_base', pagesBase);
             core.info(`PR #${prNumber} sha=${run.head_sha}`);
 
-      # workflow_run is a privileged context (secrets + write tokens). Never check out
-      # the PR head SHA here — that would execute untrusted code with those privileges.
-      # Gallery tooling always comes from the default branch; keep build_gallery.py
-      # backward-compatible with older ci-visual manifests.
-      - name: Check out default branch (trusted gallery tooling)
-        uses: actions/checkout@v7
-        with:
-          ref: ${{ github.event.repository.default_branch }}
-          persist-credentials: false
-
-      # ci-visual uploads with upload-artifact@v7 archive:false (raw PNG/JSON).
-      # Those require download-artifact@v8; v7 tries to unzip them and fails after retries.
-      - name: Download CI visual artifacts
-        id: download
-        continue-on-error: true
-        uses: actions/download-artifact@v8
-        with:
-          run-id: ${{ steps.meta.outputs.run_id }}
-          github-token: ${{ github.token }}
-          path: ${{ runner.temp }}/ci-visual-artifacts
-          merge-multiple: true
-
-      # Empty CI runs (no visual PNGs) are fine; a failed download when artifacts exist is not.
-      - name: Require artifact download when CI published visuals
-        if: steps.download.outcome == 'failure'
+      # Skip empty galleries: no Pages publish, no sticky "no artifacts" comment.
+      - name: Check for CI visual artifacts
+        id: visuals
         uses: actions/github-script@v7
         with:
           script: |
@@ -96,18 +74,39 @@ jobs:
                 !a.expired &&
                 (a.name.endsWith('.png') || a.name.startsWith('ci-visual-manifest-')),
             );
-            if (visual.length > 0) {
-              core.setFailed(
-                `Failed to download ${visual.length} CI visual artifact(s) from run ${runId}. ` +
-                  'Non-zipped artifacts (upload-artifact archive:false) require actions/download-artifact@v8.',
+            core.setOutput('count', String(visual.length));
+            if (visual.length === 0) {
+              core.info(
+                `No CI visual artifacts on run ${runId}; skipping gallery publish`,
               );
-              return;
+            } else {
+              core.info(`Found ${visual.length} CI visual artifact(s) on run ${runId}`);
             }
-            core.info(
-              `No CI visual artifacts on run ${runId}; continuing with an empty gallery`,
-            );
+
+      # workflow_run is a privileged context (secrets + write tokens). Never check out
+      # the PR head SHA here — that would execute untrusted code with those privileges.
+      # Gallery tooling always comes from the default branch; keep build_gallery.py
+      # backward-compatible with older ci-visual manifests.
+      - name: Check out default branch (trusted gallery tooling)
+        if: steps.visuals.outputs.count != '0'
+        uses: actions/checkout@v7
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
+
+      # ci-visual uploads with upload-artifact@v7 archive:false (raw PNG/JSON).
+      # Those require download-artifact@v8; v7 tries to unzip them and fails after retries.
+      - name: Download CI visual artifacts
+        if: steps.visuals.outputs.count != '0'
+        uses: actions/download-artifact@v8
+        with:
+          run-id: ${{ steps.meta.outputs.run_id }}
+          github-token: ${{ github.token }}
+          path: ${{ runner.temp }}/ci-visual-artifacts
+          merge-multiple: true
 
       - name: Detect deploy credentials
+        if: steps.visuals.outputs.count != '0'
         id: deploy
         env:
           EASEL_CI_VISUAL_TOKEN: ${{ secrets.EASEL_CI_VISUAL_TOKEN }}
@@ -121,6 +120,7 @@ jobs:
           fi
 
       - name: Build HTML gallery and PR comment
+        if: steps.visuals.outputs.count != '0'
         run: |
           set -euo pipefail
           mkdir -p "${{ runner.temp }}/ci-visual-artifacts"
@@ -134,7 +134,7 @@ jobs:
             $([[ "${{ steps.deploy.outputs.enabled }}" == "true" ]] && echo --deployed || echo --no-deployed)
 
       - name: Publish gallery to easel-ci-visual Pages repo
-        if: steps.deploy.outputs.enabled == 'true'
+        if: steps.visuals.outputs.count != '0' && steps.deploy.outputs.enabled == 'true'
         uses: peaceiris/actions-gh-pages@v4
         with:
           personal_token: ${{ secrets.EASEL_CI_VISUAL_TOKEN }}
@@ -149,6 +149,7 @@ jobs:
           commit_message: "gallery: update PR #${{ steps.meta.outputs.pr_number }} (${{ steps.meta.outputs.sha }})"
 
       - name: Upsert sticky PR comment
+        if: steps.visuals.outputs.count != '0'
         uses: marocchino/sticky-pull-request-comment@v2
         with:
           number: ${{ steps.meta.outputs.pr_number }}
@@ -156,7 +157,7 @@ jobs:
           path: ${{ runner.temp }}/ci-visual-gallery/comment.md
 
       - name: Upload built gallery from this job
-        if: always()
+        if: always() && steps.visuals.outputs.count != '0'
         uses: actions/upload-artifact@v7
         with:
           name: ci-visual-gallery-pr-${{ steps.meta.outputs.pr_number }}
