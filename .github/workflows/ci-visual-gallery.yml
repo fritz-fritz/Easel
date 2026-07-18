@@ -66,14 +66,46 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
+      # ci-visual uploads with upload-artifact@v7 archive:false (raw PNG/JSON).
+      # Those require download-artifact@v8; v7 tries to unzip them and fails after retries.
       - name: Download CI visual artifacts
+        id: download
         continue-on-error: true
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ steps.meta.outputs.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/ci-visual-artifacts
           merge-multiple: true
+
+      # Empty CI runs (no visual PNGs) are fine; a failed download when artifacts exist is not.
+      - name: Require artifact download when CI published visuals
+        if: steps.download.outcome == 'failure'
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const runId = Number('${{ steps.meta.outputs.run_id }}');
+            const { data } = await github.rest.actions.listWorkflowRunArtifacts({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              run_id: runId,
+              per_page: 100,
+            });
+            const visual = (data.artifacts || []).filter(
+              (a) =>
+                !a.expired &&
+                (a.name.endsWith('.png') || a.name.startsWith('ci-visual-manifest-')),
+            );
+            if (visual.length > 0) {
+              core.setFailed(
+                `Failed to download ${visual.length} CI visual artifact(s) from run ${runId}. ` +
+                  'Non-zipped artifacts (upload-artifact archive:false) require actions/download-artifact@v8.',
+              );
+              return;
+            }
+            core.info(
+              `No CI visual artifacts on run ${runId}; continuing with an empty gallery`,
+            );
 
       - name: Detect deploy credentials
         id: deploy

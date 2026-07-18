@@ -63,8 +63,10 @@ the suite distinguishes an unavailable runtime decoder from an incorrect composi
 
 Producers write stage-local PNGs under a temp directory. The composite action
 [`.github/actions/ci-visual`](../.github/actions/ci-visual) renames, uploads (`archive: false`),
-emits a JSON manifest, and summarizes them. New stages only need a producer plus one
-`uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
+emits a JSON manifest, and summarizes them. Non-zipped uploads require
+`actions/download-artifact@v8` in the gallery publisher (v7 fails extracting raw PNG/JSON).
+New stages only need a producer plus one `uses: ./.github/actions/ci-visual` block with a
+distinct `stage` / `pattern`.
 
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |

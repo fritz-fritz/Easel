@@ -60,6 +60,7 @@ runs:
 
     # upload-artifact must be a real `uses:` step so ACTIONS_RUNTIME_TOKEN is available.
     # archive:false accepts a single file per step; support up to 12 staged PNGs.
+    # Consumers must download with actions/download-artifact@v8 (v7 cannot extract raw artifacts).
     - name: Upload visual file 0
       id: up0
       if: steps.stage.outputs.file_0 != ''
