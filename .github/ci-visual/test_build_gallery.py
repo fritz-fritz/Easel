@@ -11,10 +11,13 @@ import unittest
 import zlib
 from pathlib import Path
 
+# zlib is also used by the one-LSB tolerant-match fixture encoder.
+
 from build_gallery import (
     build_comparisons,
     collect_images,
     comparison_totals,
+    decode_png_rgba,
     extract_display_label,
     load_manifests,
     main,
@@ -92,7 +95,7 @@ class BuildGalleryTests(unittest.TestCase):
             root = Path(tmp)
             for os_name, rgb in [
                 ("ubuntu-latest", (1, 2, 3)),
-                ("windows-latest", (1, 2, 4)),
+                ("windows-latest", (10, 20, 30)),  # far above ±1 LSB tolerance
                 ("macos-latest", (1, 2, 3)),
             ]:
                 name = f"apply-payload-{os_name}-apply-display-0.png"
@@ -105,6 +108,56 @@ class BuildGalleryTests(unittest.TestCase):
             self.assertEqual(comparisons[0]["status"], "content-mismatch")
             self.assertFalse(totals["gate_ok"])
             self.assertEqual(totals["strict_match"], 0)
+
+    def test_strict_one_lsb_is_tolerant_match(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            width, height = 8, 4
+            pixels = bytearray([128, 255, 0, 255] * (width * height))
+
+            def encode_rgba(buf: bytes) -> bytes:
+                raw = b"".join(
+                    b"\x00" + buf[y * width * 4 : (y + 1) * width * 4]
+                    for y in range(height)
+                )
+
+                def chunk(tag: bytes, data: bytes) -> bytes:
+                    return (
+                        struct.pack(">I", len(data))
+                        + tag
+                        + data
+                        + struct.pack(">I", zlib.crc32(tag + data) & 0xFFFFFFFF)
+                    )
+
+                return (
+                    b"\x89PNG\r\n\x1a\n"
+                    + chunk(
+                        b"IHDR",
+                        struct.pack(">IIBBBBB", width, height, 8, 6, 0, 0, 0),
+                    )
+                    + chunk(b"IDAT", zlib.compress(raw, 9))
+                    + chunk(b"IEND", b"")
+                )
+
+            base_blob = encode_rgba(bytes(pixels))
+            mutated = bytearray(pixels)
+            mutated[0] = (mutated[0] - 1) & 0xFF
+            alt_blob = encode_rgba(bytes(mutated))
+            self.assertIsNotNone(decode_png_rgba)
+            for os_name, blob in [
+                ("ubuntu-latest", base_blob),
+                ("macos-latest", base_blob),
+                ("windows-latest", alt_blob),
+            ]:
+                name = f"apply-payload-{os_name}-apply-display-0.png"
+                (root / name).write_bytes(blob)
+                write_manifest(root, "apply-payload", os_name, [name])
+            comparisons = build_comparisons(collect_images(root, load_manifests(root)))
+            totals = comparison_totals(comparisons)
+            self.assertEqual(comparisons[0]["status"], "match-tolerant")
+            self.assertTrue(totals["gate_ok"])
+            self.assertEqual(totals["strict_match"], 1)
+            self.assertEqual(comparisons[0]["pixel_compare"]["max_channel_delta"], 1)
 
     def test_display_numeric_sort_order(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

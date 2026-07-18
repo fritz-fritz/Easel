@@ -17,6 +17,7 @@ import json
 import re
 import shutil
 import struct
+import zlib
 from collections import defaultdict
 from pathlib import Path
 from urllib.parse import quote
@@ -24,8 +25,11 @@ from urllib.parse import quote
 
 MARKER = "<!-- easel-ci-visual -->"
 EXPECTED_OS = ("macos-latest", "ubuntu-latest", "windows-latest")
-# Stages where byte-identical cross-OS output is expected (regression signal).
+# Stages where cross-OS raster parity is gated (regression signal).
 STRICT_STAGES = frozenset({"apply-payload"})
+# Hosted runners can differ by 1 LSB on a handful of edge samples; require
+# matching dimensions and keep channel drift within this bound for strict stages.
+STRICT_MAX_CHANNEL_DELTA = 1
 
 CSS = """\
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;650&family=IBM+Plex+Mono:wght@400;500&display=swap");
@@ -272,6 +276,119 @@ def png_meta(path: Path) -> dict:
     return meta
 
 
+def decode_png_rgba(path: Path) -> tuple[int, int, bytes] | None:
+    """Decode an 8-bit RGBA PNG to raw pixels (stdlib only)."""
+    data = path.read_bytes()
+    if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
+        return None
+    index = 8
+    width = height = None
+    idat = bytearray()
+    while index + 8 <= len(data):
+        length = struct.unpack(">I", data[index : index + 4])[0]
+        tag = data[index + 4 : index + 8]
+        start = index + 8
+        end = start + length
+        if end + 4 > len(data):
+            return None
+        chunk = data[start:end]
+        index = end + 4
+        if tag == b"IHDR":
+            if length < 13:
+                return None
+            width, height, bit_depth, color_type, _comp, _filt, inter = struct.unpack(
+                ">IIBBBBB", chunk[:13]
+            )
+            if bit_depth != 8 or color_type != 6 or inter != 0:
+                return None
+        elif tag == b"IDAT":
+            idat.extend(chunk)
+        elif tag == b"IEND":
+            break
+    if width is None or height is None or not idat:
+        return None
+    try:
+        raw = zlib.decompress(bytes(idat))
+    except zlib.error:
+        return None
+    bpp = 4
+    stride = width * bpp
+    expected = height * (1 + stride)
+    if len(raw) != expected:
+        return None
+    out = bytearray(height * stride)
+    prev = bytearray(stride)
+    pos = 0
+    for row in range(height):
+        filter_type = raw[pos]
+        pos += 1
+        scan = raw[pos : pos + stride]
+        pos += stride
+        cur = bytearray(stride)
+        if filter_type == 0:
+            cur[:] = scan
+        elif filter_type == 1:  # Sub
+            for x, value in enumerate(scan):
+                left = cur[x - bpp] if x >= bpp else 0
+                cur[x] = (value + left) & 0xFF
+        elif filter_type == 2:  # Up
+            for x, value in enumerate(scan):
+                cur[x] = (value + prev[x]) & 0xFF
+        elif filter_type == 3:  # Average
+            for x, value in enumerate(scan):
+                left = cur[x - bpp] if x >= bpp else 0
+                cur[x] = (value + ((left + prev[x]) // 2)) & 0xFF
+        elif filter_type == 4:  # Paeth
+            for x, value in enumerate(scan):
+                a = cur[x - bpp] if x >= bpp else 0
+                b = prev[x]
+                c = prev[x - bpp] if x >= bpp else 0
+                p = a + b - c
+                pa, pb, pc = abs(p - a), abs(p - b), abs(p - c)
+                pr = a if pa <= pb and pa <= pc else b if pb <= pc else c
+                cur[x] = (value + pr) & 0xFF
+        else:
+            return None
+        out[row * stride : (row + 1) * stride] = cur
+        prev = cur
+    return width, height, bytes(out)
+
+
+def pixel_compare(paths: list[Path]) -> dict | None:
+    """Compare decoded RGBA PNGs. Returns None when images are not comparable."""
+    if len(paths) < 2:
+        return None
+    decoded: list[tuple[int, int, bytes]] = []
+    for path in paths:
+        rgba = decode_png_rgba(path)
+        if rgba is None:
+            return None
+        decoded.append(rgba)
+    width, height, reference = decoded[0]
+    if any(item[0] != width or item[1] != height for item in decoded):
+        return None
+    max_delta = 0
+    diff_pixels: set[int] = set()
+    for _w, _h, pixels in decoded[1:]:
+        for index in range(0, len(reference), 4):
+            pixel_delta = max(
+                abs(reference[index + channel] - pixels[index + channel])
+                for channel in range(4)
+            )
+            if pixel_delta:
+                diff_pixels.add(index // 4)
+                if pixel_delta > max_delta:
+                    max_delta = pixel_delta
+    return {
+        "width": width,
+        "height": height,
+        "pixel_count": width * height,
+        "diff_pixels": len(diff_pixels),
+        "max_channel_delta": max_delta,
+        "within_tolerance": max_delta <= STRICT_MAX_CHANNEL_DELTA,
+    }
+
+
 def collect_images(
     artifact_root: Path, manifests: list[dict]
 ) -> list[dict]:
@@ -454,6 +571,7 @@ def build_comparisons(images: list[dict]) -> list[dict]:
         unique_dims = set(dims.values())
         missing = [os_name for os_name in EXPECTED_OS if os_name not in by_os]
         strict = stage in STRICT_STAGES
+        pixel_stats: dict | None = None
 
         if not all_os:
             status = "empty"
@@ -463,6 +581,13 @@ def build_comparisons(images: list[dict]) -> list[dict]:
             status = "size-mismatch"
         elif len(unique_hashes) > 1:
             status = "content-mismatch"
+            if strict:
+                # Byte digests often differ across OS from PNG filter choice even when
+                # pixels match; decode and allow tiny channel drift (±1 LSB).
+                paths = [Path(by_os[os_name]["src_path"]) for os_name in all_os]
+                pixel_stats = pixel_compare(paths)
+                if pixel_stats and pixel_stats["within_tolerance"]:
+                    status = "match-tolerant"
         elif missing:
             status = "match-incomplete"
         else:
@@ -473,31 +598,36 @@ def build_comparisons(images: list[dict]) -> list[dict]:
         gate = "strict" if strict else "informational"
         gate_ok = True
         if strict:
-            gate_ok = status in {"match", "match-incomplete", "single-os"}
-            # Incomplete/single are warnings, not hard failures — content mismatch is.
+            gate_ok = status in {
+                "match",
+                "match-tolerant",
+                "match-incomplete",
+                "single-os",
+            }
             if status in {"content-mismatch", "size-mismatch"}:
                 gate_ok = False
 
-        comparisons.append(
-            {
-                "stage": stage,
-                "asset": key,
-                "status": status,
-                "gate": gate,
-                "gate_ok": gate_ok,
-                "missing_os": missing,
-                "os": {
-                    os_name: {
-                        "filename": by_os[os_name]["filename"],
-                        "sha256": by_os[os_name]["sha256"],
-                        "bytes": by_os[os_name]["bytes"],
-                        "width": by_os[os_name].get("width"),
-                        "height": by_os[os_name].get("height"),
-                    }
-                    for os_name in all_os
-                },
-            }
-        )
+        row = {
+            "stage": stage,
+            "asset": key,
+            "status": status,
+            "gate": gate,
+            "gate_ok": gate_ok,
+            "missing_os": missing,
+            "os": {
+                os_name: {
+                    "filename": by_os[os_name]["filename"],
+                    "sha256": by_os[os_name]["sha256"],
+                    "bytes": by_os[os_name]["bytes"],
+                    "width": by_os[os_name].get("width"),
+                    "height": by_os[os_name].get("height"),
+                }
+                for os_name in all_os
+            },
+        }
+        if pixel_stats is not None:
+            row["pixel_compare"] = pixel_stats
+        comparisons.append(row)
     return comparisons
 
 
@@ -505,7 +635,9 @@ def comparison_totals(comparisons: list[dict]) -> dict:
     strict = [c for c in comparisons if c["gate"] == "strict"]
     informational = [c for c in comparisons if c["gate"] == "informational"]
     strict_bad = [c for c in strict if not c["gate_ok"]]
-    strict_match = [c for c in strict if c["status"] == "match"]
+    strict_match = [
+        c for c in strict if c["status"] in {"match", "match-tolerant"}
+    ]
     strict_warn = [
         c
         for c in strict
@@ -531,7 +663,7 @@ def comparison_totals(comparisons: list[dict]) -> dict:
 
 
 def status_chip_class(status: str, *, gate: str) -> str:
-    if status == "match":
+    if status in {"match", "match-tolerant"}:
         return "match"
     if status in {"content-mismatch", "size-mismatch"}:
         return "info" if gate == "informational" else "mismatch"
@@ -543,6 +675,7 @@ def status_chip_class(status: str, *, gate: str) -> str:
 def status_label(status: str, *, gate: str) -> str:
     labels = {
         "match": "identical across OS",
+        "match-tolerant": f"within ±{STRICT_MAX_CHANNEL_DELTA} LSB across OS",
         "match-incomplete": "identical (matrix incomplete)",
         "single-os": "single OS only",
         "content-mismatch": (

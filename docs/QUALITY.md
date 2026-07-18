@@ -84,6 +84,10 @@ The gallery publisher downloads those bundles (`pattern: ci-visual-*`), unpacks 
 builds the dual review surfaces. New stages only need a producer plus one
 `uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
 
+When SHA-256 digests differ for `apply-payload`, the gallery builder decodes the PNGs and
+still treats the asset as a match if every channel stays within ±1 LSB (common on Windows
+vs Linux/macOS). Larger drift fails the OS-compare gate.
+
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
 | `apply-payload` | [`crates/easel-render/tests/visual_artifacts.rs`](../crates/easel-render/tests/visual_artifacts.rs) | `EASEL_VISUAL_OUTDIR` set (CI only) | `apply-display-*.png` | `ci-visual` |
@@ -108,7 +112,7 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 
 | Stage | Expectation | Gate |
 | --- | --- | --- |
-| `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail status + job on content/size mismatch |
+| `apply-payload` | Same dimensions; pixels match across `ubuntu` / `windows` / `macos` within ±1 LSB per channel (PNG digests may still differ) | Fail status + job on size mismatch or channel drift above tolerance |
 | `gui-smoke` | Platform chrome differs | Informational only (hashes/dims still shown) |
 
 Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
