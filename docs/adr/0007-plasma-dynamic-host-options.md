@@ -7,23 +7,56 @@
 
 Stage 5 treats Apple Dynamic Desktop HEIC as the interchange format and prefers native
 OS hosting when `BackendCapabilities::native_dynamic_bundle` is true. On KDE Plasma the
-landscape is split:
+landscape is split, and “dynamic wallpaper” means different things depending on which
+stack is installed.
 
-1. **Built-in Plasma 6 day/night wallpapers** (Vlad Zahorodnii / Plasma Workspace,
-   KNightTime, shipped with recent Plasma 6.x): regular wallpaper packages under
-   `~/.local/share/wallpapers` with `contents/images` + `contents/images_dark` and
-   `metadata.json` (`X-KDE-CrossFade` optional). `org.kde.image` switches light/dark at
-   sunrise/sunset (or fixed times) via `knighttimed`. This is **two frames only** — not
-   Apple-style dense altitude/azimuth samples.
+### What shipped as standard (Plasma 6.4+)
 
-2. **Community plugin** [`com.github.zzag.dynamic`](https://github.com/zzag/plasma5-wallpapers-dynamic)
-   (same author; basis for the upstream day/night work): full solar elevation/azimuth and
-   day-night engines, consuming HEIC/AVIF packages built with `kdynamicwallpaperbuilder` /
-   `dynamicwallpaperconverter` from Apple HEIC. Not installed by default.
+Plasma 6.4 added **time-of-day / day-night wallpapers** to stock `org.kde.image`
+(Vlad Zahorodnii; covered in This Week in Plasma and his dark-mode write-up). Compatible
+packages live under `~/.local/share/wallpapers` with:
 
-3. **Easel still poller**: evaluates `DynamicStillSet` in-process and applies cropped PNGs
-   through `org.kde.image`. Correct for dense solar/h24 on stock Plasma; works without
-   plugins.
+- `contents/images/` — light frame(s), named by resolution (`5120x2880.png`)
+- `contents/images_dark/` — dark frame(s)
+- `metadata.json` (`KPlugin` id/name; optional `X-KDE-CrossFade`)
+
+`DynamicMode=1` switches light/dark from the **sunrise/sunset** schedule provided by
+**KNightTime** (`knighttimed`), using geolocation when available, else fixed morning/evening
+times. This is the **standard** Plasma Wayland path today. It is **two frames only** — not
+Apple-style dense altitude/azimuth sampling.
+
+Plasma 6.5 moved day/night cycle configuration to its own System Settings page so Night
+Light, wallpapers, and (later) theme switching share one schedule. That does not expand
+the wallpaper format beyond light/dark.
+
+### Why stock Plasma is not Apple-parity solar
+
+The same author previously shipped
+[`com.github.zzag.dynamic`](https://github.com/zzag/plasma5-wallpapers-dynamic)
+(community plugin; master targets Plasma 6). It supports solar elevation/azimuth engines
+and HEIC→AVIF conversion tooling (`dynamicwallpaperconverter` /
+`kdynamicwallpaperbuilder`). Upstream deliberately took only the **day/night** subset into
+Plasma Workspace: the full plugin is large, needs special tooling, and its multi-frame
+package format was judged too cumbersome for default shipping — while remaining excellent
+for dense 5K/8K solar sets.
+
+So on a stock Plasma Wayland install:
+
+| Capability | Available? |
+| --- | --- |
+| Light/dark package + KNightTime | Yes (built-in) |
+| Dense solar / h24 HEIC host | No (needs zzag) |
+| Apple HEIC import as native host | Only via zzag conversion |
+
+### Options evaluated for Easel
+
+| Option | Pros | Cons | Verdict |
+| --- | --- | --- | --- |
+| **A. Built-in day/night packages** | Zero extra deps; Wayland-native; matches Plasma 6.4+ UX | Appearance / two-frame only | **Use for `Appearance` sets** |
+| **B. Community zzag HEIC/AVIF** | Closest to Apple solar/h24 hosting | Not installed by default; optional probe | **Use when plugin present** for dense solar |
+| **C. Easel still poller** | Correct on every Plasma; no plugin | Easel must stay running; not “OS-hosted” | **Fallback** for dense solar without zzag |
+| **D. Reduce dense solar → day/night** | Stock hosting for more imports | Loses intermediate frames | Future optional quality trade-off |
+| **E. Claim stock Plasma = Apple Dynamic Desktop** | Marketing simplicity | Factually wrong | **Rejected** |
 
 Windows still has no public dynamic-HEIC API. macOS hosts Apple HEIC natively.
 
@@ -53,7 +86,10 @@ chosen native format is unavailable (dense solar without zzag).
 
 ## References
 
+- https://blogs.kde.org/2025/05/24/this-week-in-plasma-time-of-day-wallpapers/ (Plasma 6.4)
 - https://blog.vladzahorodnii.com/2025/08/11/dark-mode-improvements-in-plasma/
+- https://blogs.kde.org/2025/07/12/this-week-in-plasma-tablet-dials-and-day/night-cycles/ (KNightTime settings)
 - https://invent.kde.org/plasma/plasma-workspace (org.kde.image + KNightTime)
+- https://invent.kde.org/plasma/knighttime
 - https://github.com/zzag/plasma5-wallpapers-dynamic
 - `docs/adr/0006-apple-heic-dynamic-interchange.md`

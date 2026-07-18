@@ -96,8 +96,13 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-vcpkg
-          # cargo-vcpkg cannot run against a virtual workspace manifest.
-          cargo vcpkg -v build -p easel-dynamic
+          # cargo-vcpkg cannot run against a virtual workspace manifest; point at
+          # the package that declares [package.metadata.vcpkg].
+          cargo vcpkg -v build --manifest-path crates/easel-dynamic/Cargo.toml
+          # libheif-sys / vcpkg-rs look up the tree via VCPKG_ROOT (or OUT_DIR walk).
+          $vcpkg = Join-Path $PWD "target\vcpkg"
+          "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "VCPKG_ROOT=$vcpkg"
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
@@ -196,7 +201,10 @@ jobs:
         shell: pwsh
         run: |
           cargo install cargo-vcpkg
-          cargo vcpkg -v build -p easel-dynamic
+          cargo vcpkg -v build --manifest-path crates/easel-dynamic/Cargo.toml
+          $vcpkg = Join-Path $PWD "target\vcpkg"
+          "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "VCPKG_ROOT=$vcpkg"
 
       - name: Install Qt + libheif (macOS)
         if: runner.os == 'macOS'
