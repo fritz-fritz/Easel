@@ -11,8 +11,6 @@ import unittest
 import zlib
 from pathlib import Path
 
-# zlib is also used by the one-LSB tolerant-match fixture encoder.
-
 from build_gallery import (
     build_comparisons,
     collect_images,
