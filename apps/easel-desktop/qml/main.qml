@@ -74,7 +74,7 @@ ApplicationWindow {
 
     // Native SystemTrayIcon needs QApplication (Qt Widgets); cxx-qt-lib exposes
     // QGuiApplication only. Pause/skip/status are available on the Automation
-    // page and via `easel` CLI until a Widgets host is wired.
+    // page, toolbar, and `easel` CLI until a Widgets host is wired.
 
     function probeScreens() {
         controller.beginScreenProbe()
@@ -189,6 +189,18 @@ ApplicationWindow {
                 opacity: 0.65
                 Layout.fillWidth: true
                 elide: Text.ElideRight
+            }
+
+            ToolButton {
+                text: automation.paused ? qsTr("Resume") : qsTr("Pause")
+                Accessible.name: text
+                onClicked: automation.setRotationPaused(!automation.paused)
+            }
+
+            ToolButton {
+                text: qsTr("Skip")
+                Accessible.name: text
+                onClicked: automation.skipNext()
             }
 
             ToolButton {

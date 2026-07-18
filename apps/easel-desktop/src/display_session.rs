@@ -359,6 +359,19 @@ pub fn replace_from_probes(probes: Vec<ScreenProbe>) -> Result<DisplayArrangemen
     save_arrangement(&matched).map_err(|error| error.to_string())?;
     guard.arrangement = matched.clone();
     guard.from_probe = true;
+    drop(guard);
+
+    // Rematch first, then resolve each profile under the hotplug policy so the
+    // next automated apply sees a consistent topology decision (ADR 0004).
+    if let Ok(store) = crate::automation_session::automation_store() {
+        let policy = store.hotplug_policy().clone();
+        if policy.rematch_on_reconnect {
+            for profile in store.profiles() {
+                let _ = easel_core::resolve_displays(profile, &matched.displays, &policy);
+            }
+        }
+    }
+
     Ok(matched)
 }
 

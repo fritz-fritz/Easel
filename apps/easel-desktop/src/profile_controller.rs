@@ -168,6 +168,7 @@ fn qstring_list(items: impl IntoIterator<Item = String>) -> QStringList {
 }
 
 /// Saves a Compose snapshot as a named profile with optional schedule.
+#[allow(clippy::too_many_arguments)]
 pub fn save_compose_profile(
     name: &str,
     source_path: &str,

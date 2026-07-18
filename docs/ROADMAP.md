@@ -74,11 +74,11 @@ Exit: unattended, explainable wallpaper rotation survives restart and topology c
 **Status:** Implemented for still images (`easel-scheduler` TOML profile/group/schedule/queue
 store + SQLite rotation history, domain schedule/rotation/hotplug evaluators, Compose Save
 profile with Manual/Hourly/Time-of-day schedules, Profiles and Automation pages with
-pause/skip/status/hotplug controls, `easel` CLI). Background poller records due selections
-and history; Compose remains the full render/apply path for the chosen still. A native
-system-tray icon is deferred until a Qt Widgets `QApplication` host is available
-(`cxx-qt-lib` exposes `QGuiApplication` only); tray-equivalent controls live on the
-Automation page and CLI.
+pause/skip/status/hotplug controls, toolbar tray-equivalent pause/skip, `easel` CLI).
+Background poller selects due wallpapers, renders, and applies through the platform
+backend while recording explainable history; hotplug policy is re-evaluated after display
+rematch. A native system-tray icon is deferred until a Qt Widgets `QApplication` host is
+available (`cxx-qt-lib` exposes `QGuiApplication` only).
 
 ## Stage 5 — Dynamic stills
 

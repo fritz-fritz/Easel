@@ -11,6 +11,7 @@
 )]
 
 mod app_controller;
+mod apply_service;
 mod automation_controller;
 mod automation_session;
 mod compose_controller;

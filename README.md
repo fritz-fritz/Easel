@@ -5,12 +5,14 @@ desktops. It combines physically correct spanning with a modern Qt 6 interface a
 policy-aware catalog of high-quality, reusable images. Its architecture also distinguishes
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
-This repository contains the Stage 1–3 still-image vertical slice: decode/fit/raster with
+This repository contains the Stage 1–4 still-image vertical slice: decode/fit/raster with
 physical multi-display composition, Compose previews, Qt display enumeration with arrangement
-persistence, Plasma 6 / Windows still apply backends, local library indexing, and Openverse
-discovery with retained provenance. Use Compose → Open image → Apply, or Discover/Library to
-select an image first. CI captures only apply-payload rasters and Qt GUI smoke screenshots for
-review. Animated/live media hosts and additional Linux desktops remain deliberately unimplemented.
+persistence, Plasma 6 / Windows still apply backends, local library indexing, Openverse
+discovery with retained provenance, reusable profiles with schedule-driven rotation, and
+hotplug policy. Use Compose → Open image → Apply (or Save profile for automation), or
+Discover/Library to select an image first. CI captures only apply-payload rasters and Qt GUI
+smoke screenshots for review. Animated/live media hosts and additional Linux desktops remain
+deliberately unimplemented.
 
 ## Product direction
 
@@ -32,8 +34,10 @@ reuse the prior codebase or configuration model.
 
 ```text
 apps/easel-desktop/     Qt Quick application and CXX-Qt boundary
+apps/easel-cli/         Headless profile/schedule/status/pause/skip controls
 crates/easel-core/      Versioned domain model and validation
 crates/easel-library/   Local folder index, SQLite library store, acquisition cache
+crates/easel-scheduler/ Automation TOML store and SQLite rotation history
 crates/easel-render/    Display-space planning, raster output, and live frame plans
 crates/easel-providers/ Online image provider contracts and adapters
 crates/easel-platform/  Static wallpaper and persistent live-host contracts

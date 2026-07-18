@@ -42,8 +42,10 @@ output. Dynamic stills (Stage 5) and live media (Stage 6) both assume a schedule
 - Interval, wall-clock, solar, and weekday schedules can be tested without a desktop session.
 - Stage 5 dynamic-still timelines reuse the same schedule evaluator and apply history.
 - Collection-backed queues resolve membership through `easel-library` at selection time.
-- Full render/apply from the background poller can land incrementally; selection + history are
-  recorded first so CLI/tray status stays explainable.
+- The desktop background poller selects, renders, and applies due stills through
+  `WallpaperBackend`, committing rotation history only after a successful apply. The
+  `easel` CLI remains a shared control plane (status/pause/resume/skip/next) without
+  linking the Qt/render stack.
 
 ## References
 

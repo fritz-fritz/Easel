@@ -15,6 +15,7 @@ use easel_core::{
 use easel_scheduler::now_unix_i64;
 use serde_json::json;
 
+use crate::apply_service;
 use crate::automation_session::automation_store;
 use crate::display_session::current_displays;
 use crate::library_session::library_store;
@@ -156,18 +157,55 @@ impl qobject::AutomationController {
 
     fn skip_next(mut self: Pin<&mut Self>) {
         let result = (|| {
-            let store = automation_store()?;
-            let profile_id = store
-                .profiles()
-                .iter()
-                .find(|profile| profile.rotation_queue_id.is_some())
-                .map(|profile| profile.id)
-                .ok_or_else(|| "no profile with a rotation queue".to_string())?;
-            drop(store);
+            use std::path::Path;
+
+            use easel_scheduler::{RotationHistoryEntry, now_unix_i64};
+
+            let profile_id = {
+                let store = automation_store()?;
+                store
+                    .profiles()
+                    .iter()
+                    .find(|profile| profile.rotation_queue_id.is_some())
+                    .map(|profile| profile.id)
+                    .ok_or_else(|| "no profile with a rotation queue".to_string())?
+            };
             let membership = membership_for(profile_id)?;
+            {
+                let mut store = automation_store()?;
+                let _ = store
+                    .skip_for_profile(profile_id, &membership)
+                    .map_err(|error| error.to_string())?;
+            }
+            let (queue_id, decision, profile) = {
+                let store = automation_store()?;
+                let (queue_id, decision) = store
+                    .select_for_profile(profile_id, &membership)
+                    .map_err(|error| error.to_string())?;
+                let profile = store
+                    .profile(profile_id)
+                    .cloned()
+                    .ok_or_else(|| "profile not found".to_string())?;
+                (queue_id, decision, profile)
+            };
+            let path = resolve_asset_path(decision.asset_id)?;
+            let apply_message = apply_service::apply_still(Path::new(&path), &profile)?;
             let mut store = automation_store()?;
-            let (_skipped, reason) = store
-                .skip_for_profile(profile_id, &membership)
+            store
+                .commit_selection(queue_id, decision.next_cursor)
+                .map_err(|error| error.to_string())?;
+            let occurred_at = now_unix_i64();
+            let reason = format!("skip; {}; {}", decision.reason, apply_message);
+            store
+                .history()
+                .record(&RotationHistoryEntry {
+                    queue_id: Some(queue_id),
+                    profile_id,
+                    schedule_id: profile.schedule_id,
+                    asset_id: decision.asset_id,
+                    reason: reason.clone(),
+                    occurred_at,
+                })
                 .map_err(|error| error.to_string())?;
             Ok::<_, String>(reason)
         })();
@@ -313,18 +351,31 @@ fn note_due_schedule(
     schedule_id: easel_core::ScheduleId,
     schedule_name: &str,
 ) -> Result<String, String> {
+    use std::path::Path;
+
     use easel_scheduler::{RotationHistoryEntry, now_unix_i64};
 
     let membership = membership_for(profile_id)?;
-    let mut store = automation_store()?;
-    let (queue_id, decision) = store
-        .select_for_profile(profile_id, &membership)
-        .map_err(|error| error.to_string())?;
+    let (queue_id, decision, profile) = {
+        let store = automation_store()?;
+        let (queue_id, decision) = store
+            .select_for_profile(profile_id, &membership)
+            .map_err(|error| error.to_string())?;
+        let profile = store
+            .profile(profile_id)
+            .cloned()
+            .ok_or_else(|| "profile not found".to_string())?;
+        (queue_id, decision, profile)
+    };
     let path = resolve_asset_path(decision.asset_id)?;
+    let apply_message = apply_service::apply_still(Path::new(&path), &profile)?;
+
+    let mut store = automation_store()?;
     store
         .commit_selection(queue_id, decision.next_cursor)
         .map_err(|error| error.to_string())?;
     let occurred_at = now_unix_i64();
+    let reason = format!("{}; {}", decision.reason, apply_message);
     store
         .history()
         .record(&RotationHistoryEntry {
@@ -332,7 +383,7 @@ fn note_due_schedule(
             profile_id,
             schedule_id: Some(schedule_id),
             asset_id: decision.asset_id,
-            reason: decision.reason.clone(),
+            reason: reason.clone(),
             occurred_at,
         })
         .map_err(|error| error.to_string())?;
@@ -341,12 +392,8 @@ fn note_due_schedule(
         .set_last_fired(schedule_id, occurred_at)
         .map_err(|error| error.to_string())?;
 
-    // Selection + history are recorded here; full render/apply stays on the
-    // Compose worker path. Status reports the chosen local path so operators
-    // can confirm the next wallpaper without mutating the desktop from the
-    // poller in this stage.
     Ok(format!(
-        "schedule '{schedule_name}' selected {} ({path})",
+        "schedule '{schedule_name}' applied {} ({path})",
         decision.asset_id.to_hyphenated_string()
     ))
 }
