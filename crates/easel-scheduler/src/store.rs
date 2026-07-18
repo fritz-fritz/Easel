@@ -198,10 +198,17 @@ impl AutomationStore {
         self.write_profiles()
     }
 
-    /// Deletes a profile by id.
+    /// Deletes a profile by id and any schedules that reference it.
     pub fn delete_profile(&mut self, id: ProfileId) -> Result<(), AutomationStoreError> {
         self.profiles.retain(|profile| profile.id != id);
-        self.write_profiles()
+        let before = self.schedules.len();
+        self.schedules.retain(|schedule| schedule.profile_id != id);
+        let schedules_changed = self.schedules.len() != before;
+        self.write_profiles()?;
+        if schedules_changed {
+            self.write_schedules()?;
+        }
+        Ok(())
     }
 
     /// Looks up a profile.
@@ -437,27 +444,43 @@ impl AutomationStore {
     }
 
     /// Returns schedules that are due to fire at `now`.
+    ///
+    /// Non-interval (minute-granularity) rules are evaluated from a short look-back
+    /// window so a 30s poller still catches `:00` slots that landed between ticks.
+    /// Schedules whose `last_fired` is already at or after the candidate are skipped.
     pub fn due_schedules(
         &self,
         now: InstantSeconds,
         utc_offset_minutes: i32,
     ) -> Result<Vec<Schedule>, AutomationStoreError> {
+        /// Seconds before `now` still considered for minute-granularity events.
+        const DUE_GRACE_SECONDS: i64 = 60;
+
         let mut due = Vec::new();
         for schedule in &self.schedules {
             if !schedule.enabled {
                 continue;
             }
-            if matches!(schedule.rule, ScheduleRule::Manual) {
+            if matches!(&schedule.rule, ScheduleRule::Manual) {
                 continue;
             }
             let last = self
                 .history
                 .last_fired(schedule.id)?
                 .map(|unix_seconds| InstantSeconds { unix_seconds });
-            if let Some(next) = next_fire_after(schedule, now, last, utc_offset_minutes) {
-                if next.unix_seconds <= now.unix_seconds {
-                    due.push(schedule.clone());
+            let window_start = InstantSeconds {
+                unix_seconds: now.unix_seconds.saturating_sub(DUE_GRACE_SECONDS),
+            };
+            if let Some(candidate) =
+                next_fire_after(schedule, window_start, last, utc_offset_minutes)
+            {
+                if candidate.unix_seconds > now.unix_seconds {
+                    continue;
                 }
+                if last.is_some_and(|fired| fired.unix_seconds >= candidate.unix_seconds) {
+                    continue;
+                }
+                due.push(schedule.clone());
             }
         }
         Ok(due)
@@ -662,6 +685,57 @@ mod tests {
             AutomationStoreError::Rotation(easel_core::RotationError::Paused)
         ));
         let _ = queue_id;
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn delete_profile_removes_orphan_schedules() {
+        let (paths, root) = temp_paths();
+        let mut store = AutomationStore::open(paths.clone()).unwrap();
+        let profile = Profile::new("Desk");
+        let schedule =
+            AutomationStore::schedule_from_compose_index(profile.id, "Hourly", 1).unwrap();
+        store.upsert_profile(profile.clone()).unwrap();
+        store.upsert_schedule(schedule).unwrap();
+        assert_eq!(store.schedules().len(), 1);
+        store.delete_profile(profile.id).unwrap();
+        assert!(store.profiles().is_empty());
+        assert!(store.schedules().is_empty());
+        let reloaded = AutomationStore::open(paths).unwrap();
+        assert!(reloaded.profiles().is_empty());
+        assert!(reloaded.schedules().is_empty());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn due_schedules_uses_grace_window_and_last_fired_guard() {
+        let (paths, root) = temp_paths();
+        let mut store = AutomationStore::open(paths).unwrap();
+        let profile = Profile::new("Desk");
+        let mut schedule = Schedule::manual("Nine", profile.id);
+        schedule.rule = ScheduleRule::TimeOfDay {
+            times: vec![easel_core::LocalTimeOfDay::new(9, 0).unwrap()],
+        };
+        schedule.enabled = true;
+        store.upsert_profile(profile).unwrap();
+        store.upsert_schedule(schedule.clone()).unwrap();
+
+        // 09:00:30 UTC on 2024-01-01 — within the 60s grace of 09:00:00.
+        let now = InstantSeconds {
+            unix_seconds: 1_704_099_630,
+        };
+        let due = store.due_schedules(now, 0).unwrap();
+        assert_eq!(due.len(), 1);
+
+        store
+            .history()
+            .set_last_fired(schedule.id, 1_704_099_600)
+            .unwrap();
+        let due_again = store.due_schedules(now, 0).unwrap();
+        assert!(
+            due_again.is_empty(),
+            "already-fired schedule must not re-trigger"
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

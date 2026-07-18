@@ -41,6 +41,10 @@ mod qobject {
         type AutomationController = super::AutomationControllerRust;
 
         #[qinvokable]
+        #[rust_name = "set_utc_offset_minutes"]
+        fn setUtcOffsetMinutes(self: Pin<&mut Self>, minutes: i32);
+
+        #[qinvokable]
         #[rust_name = "refresh"]
         fn refresh(self: Pin<&mut Self>);
 
@@ -74,6 +78,8 @@ pub struct AutomationControllerRust {
     next_fire_hint: QString,
     last_apply_reason: QString,
     hotplug_policy_index: i32,
+    /// Local offset east of UTC in minutes (from QML `Date.getTimezoneOffset()` negated).
+    utc_offset_minutes: i32,
 }
 
 impl Default for AutomationControllerRust {
@@ -85,6 +91,7 @@ impl Default for AutomationControllerRust {
             next_fire_hint: QString::from("none"),
             last_apply_reason: QString::from("none"),
             hotplug_policy_index: 0,
+            utc_offset_minutes: 0,
         };
         let _ = controller.reload_models();
         controller
@@ -94,7 +101,9 @@ impl Default for AutomationControllerRust {
 impl AutomationControllerRust {
     fn reload_models(&mut self) -> Result<(), String> {
         let store = automation_store()?;
-        let summary = store.summary(0).map_err(|error| error.to_string())?;
+        let summary = store
+            .summary(self.utc_offset_minutes)
+            .map_err(|error| error.to_string())?;
         self.paused = summary.any_paused;
         self.next_fire_hint = QString::from(summary.next_fire_hint.as_deref().unwrap_or("none"));
         self.last_apply_reason =
@@ -133,6 +142,16 @@ impl AutomationControllerRust {
 }
 
 impl qobject::AutomationController {
+    fn set_utc_offset_minutes(mut self: Pin<&mut Self>, minutes: i32) {
+        self.as_mut().rust_mut().utc_offset_minutes = minutes.clamp(-14 * 60, 14 * 60);
+        match self.as_mut().rust_mut().reload_models() {
+            Ok(()) => publish_state(self),
+            Err(error) => {
+                self.as_mut().set_status_text(QString::from(error.as_str()));
+            }
+        }
+    }
+
     fn refresh(mut self: Pin<&mut Self>) {
         match self.as_mut().rust_mut().reload_models() {
             Ok(()) => publish_state(self),
@@ -244,6 +263,7 @@ impl qobject::AutomationController {
     }
 
     fn poll_due_schedules(mut self: Pin<&mut Self>) {
+        let utc_offset_minutes = self.as_ref().rust().utc_offset_minutes;
         let result: Result<String, String> = (|| {
             let now = InstantSeconds {
                 unix_seconds: now_unix_i64(),
@@ -251,7 +271,7 @@ impl qobject::AutomationController {
             let due = {
                 let store = automation_store()?;
                 store
-                    .due_schedules(now, 0)
+                    .due_schedules(now, utc_offset_minutes)
                     .map_err(|error| error.to_string())?
             };
             if due.is_empty() {

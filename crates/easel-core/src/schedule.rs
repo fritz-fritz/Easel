@@ -365,16 +365,18 @@ fn next_daily_local_times(
     let mut sorted = times.to_vec();
     sorted.sort_unstable();
     let local = now.to_local(utc_offset_minutes);
-    let now_minutes = local.time.minutes_since_midnight();
+    // Compare full instants (second precision) rather than truncated minutes so a
+    // candidate at HH:MM:00 is not treated as still due after HH:MM:01.
     for time in &sorted {
-        if time.minutes_since_midnight() >= now_minutes {
-            return local_civil_to_instant(
-                local.year,
-                local.month,
-                local.day,
-                *time,
-                utc_offset_minutes,
-            );
+        let candidate = local_civil_to_instant(
+            local.year,
+            local.month,
+            local.day,
+            *time,
+            utc_offset_minutes,
+        );
+        if candidate.unix_seconds >= now.unix_seconds {
+            return candidate;
         }
     }
     let (year, month, day) = add_days(local.year, local.month, local.day, 1);
@@ -615,6 +617,28 @@ mod tests {
                 minute: 0
             }
         );
+    }
+
+    #[test]
+    fn time_of_day_skips_past_minute_when_seconds_elapsed() {
+        let profile = ProfileId::new();
+        let mut schedule = Schedule::manual("ToD", profile);
+        schedule.rule = ScheduleRule::TimeOfDay {
+            times: vec![LocalTimeOfDay::new(18, 0).unwrap()],
+        };
+        // 2024-01-01 18:00:30 UTC — the 18:00:00 slot is already past.
+        let now = InstantSeconds {
+            unix_seconds: 1_704_132_030,
+        };
+        let next = next_fire_after(&schedule, now, None, 0).expect("next");
+        assert!(
+            next.unix_seconds > now.unix_seconds,
+            "next fire must be strictly after now when seconds have elapsed past the slot"
+        );
+        let local = next.to_local(0);
+        assert_eq!(local.day, 2);
+        assert_eq!(local.time.hour, 18);
+        assert_eq!(local.time.minute, 0);
     }
 
     #[test]

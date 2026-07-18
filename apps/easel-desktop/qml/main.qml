@@ -69,7 +69,15 @@ ApplicationWindow {
         interval: 30000
         running: true
         repeat: true
-        onTriggered: automation.pollDueSchedules()
+        onTriggered: {
+            syncUtcOffset()
+            automation.pollDueSchedules()
+        }
+    }
+
+    // JS getTimezoneOffset is minutes west of UTC; easel wants minutes east of UTC.
+    function syncUtcOffset() {
+        automation.setUtcOffsetMinutes(-new Date().getTimezoneOffset())
     }
 
     // Native SystemTrayIcon needs QApplication (Qt Widgets); cxx-qt-lib exposes
@@ -143,6 +151,7 @@ ApplicationWindow {
     }
 
     Component.onCompleted: {
+        syncUtcOffset()
         if (controller.smoke_out_dir && controller.smoke_out_dir.length > 0) {
             runSmokeScreenshot()
         } else {
@@ -832,7 +841,10 @@ ApplicationWindow {
 
             ScrollView {
                 contentWidth: availableWidth
-                Component.onCompleted: automation.refresh()
+                Component.onCompleted: {
+                    syncUtcOffset()
+                    automation.refresh()
+                }
 
                 ColumnLayout {
                     x: 24
