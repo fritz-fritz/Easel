@@ -564,6 +564,8 @@ def text(value: str) -> str:
 def asset_key(image: dict) -> str:
     if image["stage"] == "apply-payload":
         return extract_display_label(image["stem"])
+    if image["stage"] == "gui-smoke":
+        return extract_gui_view_label(image["stem"])
     return image["stem"]
 
 
@@ -587,7 +589,8 @@ def build_comparisons(images: list[dict]) -> list[dict]:
 
     comparisons: list[dict] = []
     for (stage, key), by_os in sorted(
-        grouped.items(), key=lambda item: (item[0][0], display_sort_key(item[0][1]))
+        grouped.items(),
+        key=lambda item: (item[0][0], asset_sort_key(item[0][0], item[0][1])),
     ):
         present = [os_name for os_name in EXPECTED_OS if os_name in by_os]
         extra = sorted(os_name for os_name in by_os if os_name not in EXPECTED_OS)
@@ -792,7 +795,12 @@ def write_site(
             "Byte-identical rasters required across OS. Near-matches (±1 LSB) are "
             "shown for debugging but still fail the gate."
             if gate == "strict"
-            else "Platform chrome differs by OS; variance here is informational, not a gate."
+            else (
+                "Rows are smoke views (fixture preview + full-window pages). "
+                "Platform chrome differs by OS; variance here is informational, not a gate."
+                if stage == "gui-smoke"
+                else "Platform chrome differs by OS; variance here is informational, not a gate."
+            )
         )
         matrix = html_comparison_matrix(stage_comparisons, by_stage[stage], gate=gate)
         sections.append(
@@ -983,12 +991,30 @@ def write_comment(
         stage_images = by_stage[stage]
         if stage == "apply-payload":
             lines.extend(
-                markdown_apply_payload_table(
+                markdown_asset_os_table(
                     stage_images,
                     pr_number,
                     pages_base,
                     deployed,
+                    row_header="Display",
+                    row_key_fn=extract_display_label,
+                    row_sort_key=display_sort_key,
                     cache_buster=cache_buster,
+                    thumb_width=200,
+                )
+            )
+        elif stage == "gui-smoke":
+            lines.extend(
+                markdown_asset_os_table(
+                    stage_images,
+                    pr_number,
+                    pages_base,
+                    deployed,
+                    row_header="View",
+                    row_key_fn=extract_gui_view_label,
+                    row_sort_key=gui_view_sort_key,
+                    cache_buster=cache_buster,
+                    thumb_width=200,
                 )
             )
         else:
@@ -1073,29 +1099,32 @@ def markdown_os_table(
     return lines
 
 
-def markdown_apply_payload_table(
+def markdown_asset_os_table(
     images: list[dict],
     pr_number: str,
     pages_base: str,
     deployed: bool,
     *,
+    row_header: str,
+    row_key_fn,
+    row_sort_key,
     cache_buster: str = "",
+    thumb_width: int = 200,
 ) -> list[str]:
-    # Columns by OS, rows by display index inferred from stem (...-display-N / apply-display-N).
+    """Markdown thumbnail matrix: rows = asset/view, columns = OS."""
     os_list = [os_name for os_name in EXPECTED_OS if any(i["os"] == os_name for i in images)]
     os_list.extend(sorted({i["os"] for i in images if i["os"] not in EXPECTED_OS}))
-    by_display: dict[str, dict[str, dict]] = defaultdict(dict)
+    by_row: dict[str, dict[str, dict]] = defaultdict(dict)
     for image in images:
-        display = extract_display_label(image["stem"])
-        by_display[display][image["os"]] = image
+        by_row[row_key_fn(image["stem"])][image["os"]] = image
 
-    header = "| Display | " + " | ".join(f"`{os_name}`" for os_name in os_list) + " |"
+    header = f"| {row_header} | " + " | ".join(f"`{os_name}`" for os_name in os_list) + " |"
     sep = "| --- | " + " | ".join("---" for _ in os_list) + " |"
     lines = [header, sep]
-    for display in sorted(by_display, key=display_sort_key):
-        cells = [display]
+    for label in sorted(by_row, key=row_sort_key):
+        cells = [label]
         for os_name in os_list:
-            image = by_display[display].get(os_name)
+            image = by_row[label].get(os_name)
             if image is None:
                 cells.append("—")
             elif deployed:
@@ -1104,15 +1133,47 @@ def markdown_apply_payload_table(
                         pages_base,
                         pr_number,
                         image["filename"],
-                        alt=f"{os_name} display {display}",
+                        alt=f"{os_name} {row_header.lower()} {label}",
                         cache_buster=cache_buster,
-                        width=200,
+                        width=thumb_width,
                     )
                 )
             else:
                 cells.append("_deploy pending_")
         lines.append("| " + " | ".join(cells) + " |")
     return lines
+
+
+def markdown_apply_payload_table(
+    images: list[dict],
+    pr_number: str,
+    pages_base: str,
+    deployed: bool,
+    *,
+    cache_buster: str = "",
+) -> list[str]:
+    """Backward-compatible wrapper around :func:`markdown_asset_os_table`."""
+    return markdown_asset_os_table(
+        images,
+        pr_number,
+        pages_base,
+        deployed,
+        row_header="Display",
+        row_key_fn=extract_display_label,
+        row_sort_key=display_sort_key,
+        cache_buster=cache_buster,
+        thumb_width=200,
+    )
+
+
+GUI_VIEW_ORDER = (
+    "preview",
+    "compose",
+    "discover",
+    "library",
+    "profiles",
+    "automation",
+)
 
 
 def extract_display_label(stem: str) -> str:
@@ -1122,8 +1183,27 @@ def extract_display_label(stem: str) -> str:
     return stem
 
 
+def extract_gui_view_label(stem: str) -> str:
+    """Map producer stem `gui-preview` → gallery row label `preview`."""
+    m = re.match(r"^gui-(.+)$", stem)
+    return m.group(1) if m else stem
+
+
 def display_sort_key(label: str) -> tuple[int, str]:
     return (0, f"{int(label):04d}") if label.isdigit() else (1, label)
+
+
+def gui_view_sort_key(label: str) -> tuple[int, str]:
+    try:
+        return (0, f"{GUI_VIEW_ORDER.index(label):02d}")
+    except ValueError:
+        return (1, label)
+
+
+def asset_sort_key(stage: str, label: str) -> tuple[int, str]:
+    if stage == "gui-smoke":
+        return gui_view_sort_key(label)
+    return display_sort_key(label)
 
 
 def main() -> int:

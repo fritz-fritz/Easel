@@ -122,15 +122,17 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # Pipe git diff straight into the selector (no mapfile — macOS ships Bash 3).
           before="${{ github.event.before }}"
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
-            mapfile -t files < <(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}")
+            views="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
+              | python3 .github/ci-visual/select_smoke_views.py)"
           elif [[ -n "${before}" && "${before}" != "0000000000000000000000000000000000000000" ]]; then
-            mapfile -t files < <(git diff --name-only "${before}" "${{ github.sha }}")
+            views="$(git diff --name-only "${before}" "${{ github.sha }}" \
+              | python3 .github/ci-visual/select_smoke_views.py)"
           else
-            files=()
+            views="$(python3 .github/ci-visual/select_smoke_views.py </dev/null)"
           fi
-          views="$(printf '%s\n' "${files[@]:-}" | python3 .github/ci-visual/select_smoke_views.py)"
           echo "Selected smoke views: ${views}"
           echo "views=${views}" >> "$GITHUB_OUTPUT"
 
