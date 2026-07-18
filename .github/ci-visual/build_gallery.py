@@ -191,11 +191,57 @@ def safe_filename(filename: str) -> str:
     return name
 
 
-def pages_url(pages_base: str, pr_number: str, filename: str) -> str:
+def pages_url(
+    pages_base: str,
+    pr_number: str,
+    filename: str,
+    *,
+    cache_buster: str = "",
+) -> str:
     base = pages_base.rstrip("/")
     encoded_name = quote(safe_filename(filename), safe="._-")
     encoded_pr = quote(str(pr_number), safe="")
-    return f"{base}/pr/{encoded_pr}/{encoded_name}"
+    url = f"{base}/pr/{encoded_pr}/{encoded_name}"
+    token = re.sub(r"[^0-9a-fA-F]", "", cache_buster)[:12]
+    if token:
+        url = f"{url}?v={token}"
+    return url
+
+
+def raw_asset_base(pages_base: str) -> str:
+    """Map Pages site URL to the gh-pages raw.githubusercontent.com root.
+
+    raw.githubusercontent.com is available as soon as the gallery push finishes;
+    github.io can lag by tens of seconds, which makes GitHub's camo proxy cache
+    404s for sticky-comment embeds.
+    """
+    base = pages_base.rstrip("/")
+    match = re.match(r"^https://([^.]+)\.github\.io/([^/]+)$", base)
+    if match:
+        owner, repo = match.group(1), match.group(2)
+        return f"https://raw.githubusercontent.com/{owner}/{repo}/gh-pages"
+    return base
+
+
+def comment_thumbnail(
+    pages_base: str,
+    pr_number: str,
+    filename: str,
+    *,
+    alt: str,
+    cache_buster: str,
+    width: int = 240,
+) -> str:
+    """HTML <img> for sticky comments (reliable in GFM tables; sized thumbnails)."""
+    url = pages_url(
+        raw_asset_base(pages_base),
+        pr_number,
+        filename,
+        cache_buster=cache_buster,
+    )
+    return (
+        f'<img src="{attr(url)}" alt="{attr(alt)}" width="{int(width)}" />'
+    )
 
 
 def attr(value: str) -> str:
@@ -308,17 +354,30 @@ def write_comment(
     for image in images:
         by_stage[image["stage"]].append(image)
 
+    cache_buster = sha[:12] if sha else ""
     for stage in sorted(by_stage):
         lines.append(f"### {stage}")
         lines.append("")
         stage_images = by_stage[stage]
         if stage == "apply-payload":
             lines.extend(
-                markdown_apply_payload_table(stage_images, pr_number, pages_base, deployed)
+                markdown_apply_payload_table(
+                    stage_images,
+                    pr_number,
+                    pages_base,
+                    deployed,
+                    cache_buster=cache_buster,
+                )
             )
         else:
             lines.extend(
-                markdown_os_table(stage_images, pr_number, pages_base, deployed)
+                markdown_os_table(
+                    stage_images,
+                    pr_number,
+                    pages_base,
+                    deployed,
+                    cache_buster=cache_buster,
+                )
             )
         lines.append("")
 
@@ -330,7 +389,12 @@ def write_comment(
 
 
 def markdown_os_table(
-    images: list[dict], pr_number: str, pages_base: str, deployed: bool
+    images: list[dict],
+    pr_number: str,
+    pages_base: str,
+    deployed: bool,
+    *,
+    cache_buster: str = "",
 ) -> list[str]:
     lines = [
         "| OS | Preview | Artifact |",
@@ -338,7 +402,14 @@ def markdown_os_table(
     ]
     for image in sorted(images, key=lambda i: i["os"]):
         preview = (
-            f"![]({pages_url(pages_base, pr_number, image['filename'])})"
+            comment_thumbnail(
+                pages_base,
+                pr_number,
+                image["filename"],
+                alt=f"{image['os']} {image['stem']}",
+                cache_buster=cache_buster,
+                width=320,
+            )
             if deployed
             else "_deploy pending_"
         )
@@ -350,7 +421,12 @@ def markdown_os_table(
 
 
 def markdown_apply_payload_table(
-    images: list[dict], pr_number: str, pages_base: str, deployed: bool
+    images: list[dict],
+    pr_number: str,
+    pages_base: str,
+    deployed: bool,
+    *,
+    cache_buster: str = "",
 ) -> list[str]:
     # Columns by OS, rows by display index inferred from stem (...-display-N / apply-display-N).
     os_list = sorted({img["os"] for img in images})
@@ -370,7 +446,14 @@ def markdown_apply_payload_table(
                 cells.append("—")
             elif deployed:
                 cells.append(
-                    f"![]({pages_url(pages_base, pr_number, image['filename'])})"
+                    comment_thumbnail(
+                        pages_base,
+                        pr_number,
+                        image["filename"],
+                        alt=f"{os_name} display {display}",
+                        cache_buster=cache_buster,
+                        width=200,
+                    )
                 )
             else:
                 cells.append("_deploy pending_")

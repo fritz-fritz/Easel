@@ -148,6 +148,34 @@ jobs:
           user_email: 41898282+github-actions[bot]@users.noreply.github.com
           commit_message: "gallery: update PR #${{ steps.meta.outputs.pr_number }} (${{ steps.meta.outputs.sha }})"
 
+      # Sticky comment embeds use raw.githubusercontent.com (see build_gallery.py) so camo
+      # does not race GitHub Pages CDN. Still wait briefly for the push to be readable.
+      - name: Wait for raw gallery assets
+        if: steps.visuals.outputs.count != '0' && steps.deploy.outputs.enabled == 'true'
+        env:
+          PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
+          SHA: ${{ steps.meta.outputs.sha }}
+          SITE_DIR: ${{ runner.temp }}/ci-visual-gallery/site
+        run: |
+          set -euo pipefail
+          sample="$(find "$SITE_DIR" -maxdepth 1 -type f -name '*.png' | sort | head -1 || true)"
+          if [[ -z "$sample" ]]; then
+            echo "::warning::No PNGs in gallery site; skipping raw-asset wait"
+            exit 0
+          fi
+          name="$(basename "$sample")"
+          short="$(printf '%s' "$SHA" | tr -cd '0-9a-fA-F' | cut -c1-12)"
+          url="https://raw.githubusercontent.com/fritz-fritz/easel-ci-visual/gh-pages/pr/${PR_NUMBER}/${name}?v=${short}"
+          for attempt in $(seq 1 30); do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' -A 'easel-ci-visual-gallery' "$url" || echo 000)"
+            if [[ "$code" == "200" ]]; then
+              echo "Raw gallery asset ready after ${attempt} attempt(s): $url"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::Raw gallery asset not ready after wait; sticky embeds may 404 until GitHub propagates ($url)"
+
       - name: Upsert sticky PR comment
         if: steps.visuals.outputs.count != '0'
         uses: marocchino/sticky-pull-request-comment@v2
