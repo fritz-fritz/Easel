@@ -2,7 +2,7 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-#![allow(clippy::too_many_arguments)]
+#![allow(clippy::similar_names, clippy::too_many_arguments)]
 
 use std::pin::Pin;
 
@@ -29,6 +29,13 @@ mod qobject {
         #[qproperty(QStringList, layout_model)]
         #[qproperty(QString, smoke_out_dir)]
         #[qproperty(QString, smoke_image_path)]
+        #[qproperty(bool, physical_preview)]
+        #[qproperty(QString, selected_display_id)]
+        #[qproperty(f64, selected_origin_x_mm)]
+        #[qproperty(f64, selected_origin_y_mm)]
+        #[qproperty(f64, selected_width_mm)]
+        #[qproperty(f64, selected_height_mm)]
+        #[qproperty(f64, selected_bezel_mm)]
         type AppController = super::AppControllerRust;
 
         #[qinvokable]
@@ -68,6 +75,26 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "force_smoke_exit"]
         fn forceSmokeExit(self: Pin<&mut Self>, code: i32);
+
+        #[qinvokable]
+        #[rust_name = "set_physical_preview_enabled"]
+        fn setPhysicalPreviewEnabled(self: Pin<&mut Self>, enabled: bool);
+
+        #[qinvokable]
+        #[rust_name = "select_display"]
+        fn selectDisplay(self: Pin<&mut Self>, id: QString);
+
+        #[qinvokable]
+        #[rust_name = "move_selected_display"]
+        fn moveSelectedDisplay(self: Pin<&mut Self>, origin_x_mm: f64, origin_y_mm: f64);
+
+        #[qinvokable]
+        #[rust_name = "apply_selected_size"]
+        fn applySelectedSize(self: Pin<&mut Self>, width_mm: f64, height_mm: f64);
+
+        #[qinvokable]
+        #[rust_name = "apply_selected_bezel"]
+        fn applySelectedBezel(self: Pin<&mut Self>, bezel_mm: f64);
     }
 }
 
@@ -79,12 +106,19 @@ pub struct AppControllerRust {
     layout_model: QStringList,
     smoke_out_dir: QString,
     smoke_image_path: QString,
+    physical_preview: bool,
+    selected_display_id: QString,
+    selected_origin_x_mm: f64,
+    selected_origin_y_mm: f64,
+    selected_width_mm: f64,
+    selected_height_mm: f64,
+    selected_bezel_mm: f64,
     pending_probes: Vec<ScreenProbe>,
 }
 
 impl Default for AppControllerRust {
     fn default() -> Self {
-        let layout = layout_qstring_list();
+        let layout = layout_qstring_list(true);
         let count = i32::try_from(display_session::current_displays().len()).unwrap_or(0);
         let smoke_out = display_session::smoke_paths()
             .map(|paths| paths.out_dir.to_string_lossy().into_owned())
@@ -99,6 +133,13 @@ impl Default for AppControllerRust {
             layout_model: layout,
             smoke_out_dir: smoke_out.into(),
             smoke_image_path: smoke_image.into(),
+            physical_preview: true,
+            selected_display_id: QString::default(),
+            selected_origin_x_mm: 0.0,
+            selected_origin_y_mm: 0.0,
+            selected_width_mm: 0.0,
+            selected_height_mm: 0.0,
+            selected_bezel_mm: 0.0,
             pending_probes: Vec::new(),
         }
     }
@@ -182,14 +223,107 @@ impl qobject::AppController {
         std::process::exit(code);
     }
 
+    fn set_physical_preview_enabled(mut self: Pin<&mut Self>, enabled: bool) {
+        self.as_mut().set_physical_preview(enabled);
+        self.publish_layout();
+    }
+
+    fn select_display(mut self: Pin<&mut Self>, id: QString) {
+        let id_string = id.to_string();
+        self.as_mut().set_selected_display_id(id);
+        if let Some(display) = display_session::current_displays()
+            .into_iter()
+            .find(|display| display.id.to_hyphenated_string() == id_string)
+        {
+            self.as_mut()
+                .set_selected_origin_x_mm(display.physical_origin.x.0);
+            self.as_mut()
+                .set_selected_origin_y_mm(display.physical_origin.y.0);
+            self.as_mut()
+                .set_selected_width_mm(display.physical_size.width.0);
+            self.as_mut()
+                .set_selected_height_mm(display.physical_size.height.0);
+            self.as_mut().set_selected_bezel_mm(display.bezel.left.0);
+            self.as_mut().set_status_text(
+                format!(
+                    "Selected {}",
+                    display
+                        .connector_name
+                        .unwrap_or_else(|| display.id.to_hyphenated_string())
+                )
+                .into(),
+            );
+        }
+    }
+
+    fn move_selected_display(mut self: Pin<&mut Self>, origin_x_mm: f64, origin_y_mm: f64) {
+        let id = self.selected_display_id().to_string();
+        if id.trim().is_empty() {
+            return;
+        }
+        match display_session::move_display_physical(&id, origin_x_mm, origin_y_mm, 12.0) {
+            Ok(()) => {
+                self.as_mut()
+                    .set_status_text("Updated display position".into());
+                self.as_mut().publish_layout();
+                // Re-read snapped coordinates into the numeric editors.
+                self.select_display(QString::from(id.as_str()));
+            }
+            Err(error) => {
+                self.as_mut()
+                    .set_status_text(format!("Move failed: {error}").into());
+            }
+        }
+    }
+
+    fn apply_selected_size(mut self: Pin<&mut Self>, width_mm: f64, height_mm: f64) {
+        let id = self.selected_display_id().to_string();
+        if id.trim().is_empty() {
+            return;
+        }
+        match display_session::override_display_size(&id, width_mm, height_mm) {
+            Ok(()) => {
+                self.as_mut().set_selected_width_mm(width_mm);
+                self.as_mut().set_selected_height_mm(height_mm);
+                self.as_mut()
+                    .set_status_text("Updated physical size override".into());
+                self.publish_layout();
+            }
+            Err(error) => {
+                self.as_mut()
+                    .set_status_text(format!("Size update failed: {error}").into());
+            }
+        }
+    }
+
+    fn apply_selected_bezel(mut self: Pin<&mut Self>, bezel_mm: f64) {
+        let id = self.selected_display_id().to_string();
+        if id.trim().is_empty() {
+            return;
+        }
+        match display_session::set_display_bezel(&id, bezel_mm) {
+            Ok(()) => {
+                self.as_mut().set_selected_bezel_mm(bezel_mm);
+                self.as_mut().set_status_text("Updated bezel insets".into());
+                self.publish_layout();
+            }
+            Err(error) => {
+                self.as_mut()
+                    .set_status_text(format!("Bezel update failed: {error}").into());
+            }
+        }
+    }
+
     fn publish_layout(mut self: Pin<&mut Self>) {
-        self.as_mut().set_layout_model(layout_qstring_list());
+        let physical = *self.as_ref().physical_preview();
+        self.as_mut()
+            .set_layout_model(layout_qstring_list(physical));
     }
 }
 
-fn layout_qstring_list() -> QStringList {
+fn layout_qstring_list(physical: bool) -> QStringList {
     let mut list = QStringList::default();
-    for row in display_session::layout_preview_model() {
+    for row in display_session::layout_preview_model_mode(physical) {
         list.append_clone(&QString::from(row.as_str()));
     }
     list

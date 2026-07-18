@@ -4,14 +4,17 @@
 
 //! Shared display session state, Qt probe ingestion, and arrangement persistence.
 
+#![allow(clippy::similar_names)]
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, OnceLock};
 
 use easel_core::{
-    Display, DisplayArrangement, DisplayEvidence, LogicalRect, Millimeters, NativePixelSize,
-    ObservedDisplay, PhysicalSize, ScaleFactor, approximate_physical_origin, match_displays,
+    BezelInsets, Display, DisplayArrangement, DisplayEvidence, DisplayId, LogicalRect, Millimeters,
+    NativePixelSize, ObservedDisplay, PhysicalPoint, PhysicalSize, ScaleFactor,
+    approximate_physical_origin, content_bounds, match_displays, panel_rect,
 };
 
 use crate::fixtures::dev_displays;
@@ -89,12 +92,47 @@ pub fn current_preview_displays() -> Vec<Display> {
         .collect()
 }
 
-/// Normalized layout rows for MonitorPreview: `xFactor|yFactor|wFactor|hFactor|label`.
+/// Layout preview using physical millimeters (`physical == true`) or logical desktop space.
+///
+/// Encoded as
+/// `id|xFactor|yFactor|wFactor|hFactor|originXmm|originYmm|widthMm|heightMm|bezelMm|label`
+/// so the trailing label may contain `|`.
 #[must_use]
-pub fn layout_preview_model() -> Vec<String> {
+pub fn layout_preview_model_mode(physical: bool) -> Vec<String> {
     let displays = current_displays();
     if displays.is_empty() {
         return Vec::new();
+    }
+
+    let margin = 0.04;
+    let usable_w = 1.0 - margin * 2.0;
+    let usable_h = 1.0 - margin * 2.0;
+
+    if physical {
+        let mut bounds = panel_rect(&displays[0]);
+        for display in displays.iter().skip(1) {
+            bounds = bounds.union(panel_rect(display));
+        }
+        if let Ok(content) = content_bounds(&displays) {
+            bounds = content.union(bounds);
+        }
+        if !bounds.is_valid() {
+            return Vec::new();
+        }
+        let span_x = bounds.width.0.max(1.0);
+        let span_y = bounds.height.0.max(1.0);
+
+        return displays
+            .iter()
+            .map(|display| {
+                let rect = panel_rect(display);
+                let x = margin + usable_w * (rect.x.0 - bounds.x.0) / span_x;
+                let y = margin + usable_h * (rect.y.0 - bounds.y.0) / span_y;
+                let w = usable_w * rect.width.0 / span_x;
+                let h = usable_h * rect.height.0 / span_y;
+                encode_layout_row(display, x, y, w, h)
+            })
+            .collect();
     }
 
     let min_x = displays
@@ -123,9 +161,6 @@ pub fn layout_preview_model() -> Vec<String> {
         .unwrap_or(1);
     let span_x = f64::from((max_x - min_x).max(1));
     let span_y = f64::from((max_y - min_y).max(1));
-    let margin = 0.04;
-    let usable_w = 1.0 - margin * 2.0;
-    let usable_h = 1.0 - margin * 2.0;
 
     displays
         .iter()
@@ -134,18 +169,88 @@ pub fn layout_preview_model() -> Vec<String> {
             let y = margin + usable_h * f64::from(display.logical_rect.y - min_y) / span_y;
             let w = usable_w * f64::from(display.logical_rect.width) / span_x;
             let h = usable_h * f64::from(display.logical_rect.height) / span_y;
-            let name = display
-                .connector_name
-                .clone()
-                .or_else(|| display.model.clone())
-                .unwrap_or_else(|| "Display".into());
-            let label = format!(
-                "{name} · {}×{}",
-                display.native_pixels.width, display.native_pixels.height
-            );
-            format!("{x:.5}|{y:.5}|{w:.5}|{h:.5}|{label}")
+            encode_layout_row(display, x, y, w, h)
         })
         .collect()
+}
+
+fn encode_layout_row(display: &Display, x: f64, y: f64, w: f64, h: f64) -> String {
+    let name = display
+        .connector_name
+        .clone()
+        .or_else(|| display.model.clone())
+        .unwrap_or_else(|| "Display".into());
+    let label = format!(
+        "{name} · {}×{}",
+        display.native_pixels.width, display.native_pixels.height
+    );
+    format!(
+        "{}|{x:.5}|{y:.5}|{w:.5}|{h:.5}|{:.2}|{:.2}|{:.2}|{:.2}|{:.2}|{label}",
+        display.id.to_hyphenated_string(),
+        display.physical_origin.x.0,
+        display.physical_origin.y.0,
+        display.physical_size.width.0,
+        display.physical_size.height.0,
+        display.bezel.left.0,
+    )
+}
+
+/// Moves a display in physical space with edge snapping and persists the arrangement.
+pub fn move_display_physical(
+    id: &str,
+    origin_x_mm: f64,
+    origin_y_mm: f64,
+    snap_threshold_mm: f64,
+) -> Result<(), String> {
+    let display_id = parse_display_id(id)?;
+    let mut guard = session().lock().expect("display session lock");
+    guard
+        .arrangement
+        .move_display(
+            display_id,
+            PhysicalPoint {
+                x: Millimeters(origin_x_mm),
+                y: Millimeters(origin_y_mm),
+            },
+            Some(snap_threshold_mm),
+        )
+        .map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Overrides physical size (mm) for a display and persists the arrangement.
+pub fn override_display_size(id: &str, width_mm: f64, height_mm: f64) -> Result<(), String> {
+    let display_id = parse_display_id(id)?;
+    let mut guard = session().lock().expect("display session lock");
+    guard
+        .arrangement
+        .override_physical_size(
+            display_id,
+            PhysicalSize {
+                width: Millimeters(width_mm),
+                height: Millimeters(height_mm),
+            },
+        )
+        .map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Sets a uniform bezel for a display and persists the arrangement.
+pub fn set_display_bezel(id: &str, bezel_mm: f64) -> Result<(), String> {
+    let display_id = parse_display_id(id)?;
+    let mut guard = session().lock().expect("display session lock");
+    guard
+        .arrangement
+        .set_bezel(display_id, BezelInsets::uniform(bezel_mm))
+        .map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+fn parse_display_id(id: &str) -> Result<DisplayId, String> {
+    DisplayId::parse(id).map_err(|error| error.to_string())
 }
 
 /// One screen observation reported from Qt Quick.

@@ -47,6 +47,17 @@ pub enum FitMode {
     Native,
 }
 
+/// Whether composition uses physical layout space or per-display digital fitting.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum LayoutMode {
+    /// Span one image across physical content rectangles with PPI and bezel correction.
+    #[default]
+    PhysicalSpan,
+    /// Fit the source independently into each display's native pixels.
+    Digital,
+}
+
 /// How a finite live asset behaves when its playback reaches the end.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]
@@ -117,6 +128,9 @@ pub struct Profile {
     pub playback: PlaybackPolicy,
     /// Scaling behavior.
     pub fit_mode: FitMode,
+    /// Physical span versus per-display digital fitting.
+    #[serde(default)]
+    pub layout_mode: LayoutMode,
     /// Zoom multiplier; values below one are rejected.
     pub zoom: f64,
     /// Horizontal focal point from zero through one.
@@ -138,6 +152,7 @@ impl Profile {
             presentation: PresentationMode::Static,
             playback: PlaybackPolicy::default(),
             fit_mode: FitMode::Cover,
+            layout_mode: LayoutMode::PhysicalSpan,
             zoom: 1.0,
             focal_x: 0.5,
             focal_y: 0.5,

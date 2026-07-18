@@ -13,7 +13,7 @@ use std::thread;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use easel_core::{FitMode, Profile};
+use easel_core::{FitMode, LayoutMode, Profile};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
@@ -36,6 +36,7 @@ mod qobject {
         #[qproperty(QString, preview_status)]
         #[qproperty(QStringList, display_previews)]
         #[qproperty(i32, fit_mode_index)]
+        #[qproperty(i32, layout_mode_index)]
         #[qproperty(f64, zoom)]
         #[qproperty(f64, focal_x)]
         #[qproperty(f64, focal_y)]
@@ -65,6 +66,7 @@ pub struct ComposeControllerRust {
     preview_status: QString,
     display_previews: QStringList,
     fit_mode_index: i32,
+    layout_mode_index: i32,
     zoom: f64,
     focal_x: f64,
     focal_y: f64,
@@ -82,6 +84,7 @@ impl Default for ComposeControllerRust {
             preview_status: QString::from("Open a local image to render previews"),
             display_previews: QStringList::default(),
             fit_mode_index: 0,
+            layout_mode_index: 0,
             zoom: 1.0,
             focal_x: 0.5,
             focal_y: 0.5,
@@ -186,6 +189,7 @@ fn build_request(
 ) -> RenderRequest {
     let mut profile = Profile::new("Compose");
     profile.fit_mode = fit_mode_from_index(*controller.fit_mode_index());
+    profile.layout_mode = layout_mode_from_index(*controller.layout_mode_index());
     profile.zoom = if controller.zoom().is_finite() {
         (*controller.zoom()).max(1.0)
     } else {
@@ -369,6 +373,13 @@ fn fit_mode_from_index(index: i32) -> FitMode {
         2 => FitMode::Stretch,
         3 => FitMode::Native,
         _ => FitMode::Cover,
+    }
+}
+
+fn layout_mode_from_index(index: i32) -> LayoutMode {
+    match index {
+        1 => LayoutMode::Digital,
+        _ => LayoutMode::PhysicalSpan,
     }
 }
 

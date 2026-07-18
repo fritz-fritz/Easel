@@ -8,6 +8,8 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
+use crate::physical::{BezelInsets, PhysicalSizeSource};
+
 /// Stable Easel identity for a physical display.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
@@ -24,6 +26,11 @@ impl DisplayId {
     #[must_use]
     pub fn from_u128(value: u128) -> Self {
         Self(Uuid::from_u128(value))
+    }
+
+    /// Parses a hyphenated UUID string into a display identity.
+    pub fn parse(value: &str) -> Result<Self, uuid::Error> {
+        Ok(Self(Uuid::parse_str(value.trim())?))
     }
 
     /// Returns the canonical hyphenated UUID string.
@@ -107,7 +114,7 @@ const fn gcd(mut left: u32, mut right: u32) -> u32 {
 }
 
 /// Distance in millimeters.
-#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Copy, Debug, Default, PartialEq, Serialize, Deserialize)]
 #[serde(transparent)]
 pub struct Millimeters(pub f64);
 
@@ -150,8 +157,14 @@ pub struct Display {
     pub scale_factor: ScaleFactor,
     /// Detected or user-overridden physical dimensions.
     pub physical_size: PhysicalSize,
+    /// Provenance for [`Self::physical_size`].
+    #[serde(default)]
+    pub physical_size_source: PhysicalSizeSource,
     /// User-calibrated physical origin.
     pub physical_origin: PhysicalPoint,
+    /// Bezel thickness around the active panel area.
+    #[serde(default)]
+    pub bezel: BezelInsets,
     /// Clockwise rotation in degrees.
     pub rotation_degrees: u16,
 }
@@ -171,6 +184,24 @@ impl Display {
             || self.physical_size.height.0 <= 0.0
         {
             return Err(DisplayValidationError::InvalidPhysicalSize);
+        }
+        for edge in [
+            self.bezel.left.0,
+            self.bezel.top.0,
+            self.bezel.right.0,
+            self.bezel.bottom.0,
+        ] {
+            if !edge.is_finite() || edge < 0.0 {
+                return Err(DisplayValidationError::InvalidBezel);
+            }
+        }
+        let content_w = self.physical_size.width.0 - self.bezel.left.0 - self.bezel.right.0;
+        let content_h = self.physical_size.height.0 - self.bezel.top.0 - self.bezel.bottom.0;
+        if content_w <= 0.0 || content_h <= 0.0 {
+            return Err(DisplayValidationError::BezelExceedsPanel);
+        }
+        if !self.physical_origin.x.0.is_finite() || !self.physical_origin.y.0.is_finite() {
+            return Err(DisplayValidationError::InvalidPhysicalOrigin);
         }
         if !matches!(self.rotation_degrees, 0 | 90 | 180 | 270) {
             return Err(DisplayValidationError::UnsupportedRotation(
@@ -193,6 +224,15 @@ pub enum DisplayValidationError {
     /// Physical dimensions are zero, negative, or not finite.
     #[error("physical dimensions must be positive finite values")]
     InvalidPhysicalSize,
+    /// Physical origin coordinates must be finite.
+    #[error("physical origin coordinates must be finite")]
+    InvalidPhysicalOrigin,
+    /// Bezel insets must be finite and non-negative.
+    #[error("bezel insets must be finite and non-negative")]
+    InvalidBezel,
+    /// Bezels consume the entire panel.
+    #[error("bezel insets exceed the panel size")]
+    BezelExceedsPanel,
     /// Scale factors must be positive ratios.
     #[error("scale factor numerator and denominator must be non-zero")]
     InvalidScaleFactor,
