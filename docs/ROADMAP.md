@@ -54,6 +54,13 @@ correction remains Stage 7.
 
 Exit: users can discover and set high-quality online images while retaining required provenance.
 
+**Status:** Implemented for still images (SQLite library index + folder watch, Openverse search
+with license filters and provenance retention, acquisition cache with host allowlist, favorites/
+history/collections persistence, suitability scoring against the active display group, Discover
+and Library wired into Compose). Direct Wikimedia Commons and NASA adapters remain deferred while
+Openverse covers those sources; dedicated adapters can land when they add metadata Openverse does
+not expose.
+
 ## Stage 4 — Profiles and automation
 
 - Profile editor and reusable display-group assignments.

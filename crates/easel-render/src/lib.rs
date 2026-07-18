@@ -10,6 +10,7 @@ mod decode;
 mod fit;
 mod plan;
 mod raster;
+mod resize;
 
 pub use decode::{DecodeError, DecodedImage, MAX_EDGE_PIXELS, MAX_TOTAL_PIXELS, decode_still};
 pub use plan::{

@@ -21,5 +21,7 @@ provider-required use-reporting action.
 
 - Openverse is the initial discovery candidate.
 - Unsplash remains disabled until written authorization is obtained for Easel.
-- Pexels is not implemented under its currently published API rules.
+- Pexels and Pixabay are not implemented under currently published wallpaper/standalone rules.
+- Extremely large stills should prefer open-access / government / museum APIs (NASA, Wikimedia
+  Commons, Smithsonian, Met, LOC, Europeana) over stock-photo platforms.
 - Terms review becomes part of release readiness.

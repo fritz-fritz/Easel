@@ -10,10 +10,15 @@ Frame {
     id: root
     required property string title
     required property string creator
-    required property color accent
+    property string subtitle: ""
+    property string imageSource: ""
+    property color accent: "#48604F"
+    property bool meetsMinimum: true
+    signal activated()
+    signal favoriteRequested()
 
     padding: 0
-    implicitHeight: 190
+    implicitHeight: 210
 
     background: Rectangle {
         radius: 9
@@ -30,12 +35,38 @@ Frame {
             Layout.fillHeight: true
             color: root.accent
             radius: 9
+            clip: true
+
+            Image {
+                id: previewImage
+                anchors.fill: parent
+                source: root.imageSource
+                fillMode: Image.PreserveAspectCrop
+                asynchronous: true
+                visible: root.imageSource.length > 0 && status === Image.Ready
+            }
 
             Label {
                 anchors.centerIn: parent
+                visible: root.imageSource.length === 0 || previewImage.status !== Image.Ready
                 text: qsTr("Image preview")
                 color: "white"
                 opacity: 0.82
+            }
+
+            Label {
+                anchors.right: parent.right
+                anchors.top: parent.top
+                anchors.margins: 8
+                visible: !root.meetsMinimum
+                text: qsTr("Low res")
+                color: "white"
+                padding: 4
+                background: Rectangle {
+                    color: "#AA000000"
+                    radius: 4
+                }
+                font.pixelSize: 11
             }
         }
 
@@ -43,8 +74,38 @@ Frame {
             Layout.fillWidth: true
             Layout.margins: 10
             spacing: 2
-            Label { text: root.title; font.weight: Font.DemiBold; Layout.fillWidth: true; elide: Text.ElideRight }
-            Label { text: root.creator; opacity: 0.62; font.pixelSize: 12; Layout.fillWidth: true; elide: Text.ElideRight }
+            Label {
+                text: root.title
+                font.weight: Font.DemiBold
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            Label {
+                text: root.creator
+                opacity: 0.62
+                font.pixelSize: 12
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+            Label {
+                visible: root.subtitle.length > 0
+                text: root.subtitle
+                opacity: 0.55
+                font.pixelSize: 11
+                Layout.fillWidth: true
+                elide: Text.ElideRight
+            }
+        }
+    }
+
+    MouseArea {
+        anchors.fill: parent
+        acceptedButtons: Qt.LeftButton | Qt.RightButton
+        onClicked: (mouse) => {
+            if (mouse.button === Qt.RightButton)
+                root.favoriteRequested()
+            else
+                root.activated()
         }
     }
 }

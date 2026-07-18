@@ -89,6 +89,10 @@ classifies ±1 LSB channel drift as `match-tolerant`. That is **diagnostic only*
 compare gate still fails because the goal is byte-identical output across runners. Larger
 drift is `content-mismatch`.
 
+Still-image resampling uses a portable Lanczos-3 implementation (`easel-render::resize`) backed
+by the pure-Rust `libm` crate instead of the `image` crate's platform `sin`, so MSVC and Unix
+runners produce matching apply-payload bytes.
+
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
 | `apply-payload` | [`crates/easel-render/tests/visual_artifacts.rs`](../crates/easel-render/tests/visual_artifacts.rs) | `EASEL_VISUAL_OUTDIR` set (CI only) | `apply-display-*.png` | `ci-visual` |

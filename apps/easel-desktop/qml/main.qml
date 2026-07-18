@@ -28,6 +28,35 @@ ApplicationWindow {
         id: compose
     }
 
+    DiscoverController {
+        id: discover
+
+        onAcquired_file_urlChanged: {
+            if (acquired_file_url && acquired_file_url.length > 0) {
+                compose.setSourcePathFromUrl(acquired_file_url)
+                pageStack.currentIndex = 0
+            }
+        }
+    }
+
+    LibraryController {
+        id: library
+
+        onSelected_file_urlChanged: {
+            if (selected_file_url && selected_file_url.length > 0) {
+                compose.setSourcePathFromUrl(selected_file_url)
+                pageStack.currentIndex = 0
+            }
+        }
+    }
+
+    Timer {
+        interval: 1500
+        running: pageStack.currentIndex === 2
+        repeat: true
+        onTriggered: library.pollWatch()
+    }
+
     function probeScreens() {
         controller.beginScreenProbe()
         var screens = Qt.application.screens
@@ -108,6 +137,12 @@ ApplicationWindow {
         onAccepted: compose.setSourcePathFromUrl(selectedFile)
     }
 
+    FolderDialog {
+        id: folderDialog
+        title: qsTr("Add library folder")
+        onAccepted: library.addFolderFromUrl(selectedFolder)
+    }
+
     header: ToolBar {
         RowLayout {
             anchors.fill: parent
@@ -122,7 +157,15 @@ ApplicationWindow {
             }
 
             Label {
-                text: pageStack.currentIndex === 0 ? compose.preview_status : controller.status_text
+                text: {
+                    if (pageStack.currentIndex === 0)
+                        return compose.preview_status
+                    if (pageStack.currentIndex === 1)
+                        return discover.status_text
+                    if (pageStack.currentIndex === 2)
+                        return library.status_text
+                    return controller.status_text
+                }
                 opacity: 0.65
                 Layout.fillWidth: true
                 elide: Text.ElideRight
@@ -476,22 +519,39 @@ ApplicationWindow {
                         font.weight: Font.DemiBold
                     }
 
-                    RowLayout {
-                        Layout.fillWidth: true
-                        TextField {
-                            placeholderText: qsTr("Search openly licensed images")
-                            Layout.fillWidth: true
-                        }
-                        ComboBox { model: [qsTr("All licenses"), qsTr("Public domain"), qsTr("Commercial use")] }
-                        Button { text: qsTr("Search"); highlighted: true }
-                    }
-
                     Label {
-                        visible: !controller.online_sources_available
-                        text: qsTr("Online providers are represented in the architecture but are not connected in this scaffold.")
+                        text: qsTr("Openverse results keep creator, license, and source links. Metadata accuracy is not guaranteed — open the work page before applying.")
                         wrapMode: Text.WordWrap
                         opacity: 0.7
                         Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        TextField {
+                            id: discoverQuery
+                            placeholderText: qsTr("Search openly licensed images")
+                            Layout.fillWidth: true
+                            onAccepted: {
+                                discover.query_text = text
+                                discover.search()
+                            }
+                        }
+                        ComboBox {
+                            id: licenseFilter
+                            model: [qsTr("All licenses"), qsTr("Public domain"), qsTr("Commercial use")]
+                            currentIndex: discover.license_filter_index
+                            onActivated: discover.license_filter_index = currentIndex
+                        }
+                        Button {
+                            text: discover.busy ? qsTr("Searching…") : qsTr("Search")
+                            highlighted: true
+                            enabled: !discover.busy
+                            onClicked: {
+                                discover.query_text = discoverQuery.text
+                                discover.search()
+                            }
+                        }
                     }
 
                     GridLayout {
@@ -501,20 +561,148 @@ ApplicationWindow {
                         rowSpacing: 14
 
                         Repeater {
-                            model: 6
+                            model: discover.result_model
                             PhotoCard {
                                 required property int index
+                                required property string modelData
+                                readonly property var payload: JSON.parse(modelData)
                                 Layout.fillWidth: true
-                                title: ["Mountain light", "Coastal dusk", "Deep space", "Forest mist", "Desert lines", "City rain"][index]
-                                creator: qsTr("Provider preview placeholder")
-                                accent: ["#776B5D", "#40566A", "#3B3553", "#48604F", "#9A6D4A", "#3F5260"][index]
+                                title: payload.title
+                                creator: payload.creator
+                                subtitle: payload.license + " · " + payload.width + "×" + payload.height
+                                            + (payload.meetsMinimum ? "" : qsTr(" · may upscale"))
+                                imageSource: payload.preview
+                                meetsMinimum: payload.meetsMinimum
+                                accent: ["#776B5D", "#40566A", "#3B3553", "#48604F", "#9A6D4A", "#3F5260"][index % 6]
+                                onActivated: discover.useResult(index)
+                                onFavoriteRequested: discover.favoriteResult(index)
+                            }
+                        }
+                    }
+
+                    Button {
+                        visible: discover.has_more
+                        text: qsTr("Load more")
+                        enabled: !discover.busy
+                        Layout.alignment: Qt.AlignHCenter
+                        onClicked: discover.loadMore()
+                    }
+                }
+            }
+
+            ScrollView {
+                contentWidth: availableWidth
+
+                ColumnLayout {
+                    x: 24
+                    y: 20
+                    width: parent.width - 48
+                    spacing: 18
+
+                    Label {
+                        text: qsTr("Library")
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                    }
+
+                    Label {
+                        text: library.status_text
+                        wrapMode: Text.WordWrap
+                        opacity: 0.7
+                        Layout.fillWidth: true
+                    }
+
+                    RowLayout {
+                        Layout.fillWidth: true
+                        Button {
+                            text: qsTr("Add folder")
+                            highlighted: true
+                            onClicked: folderDialog.open()
+                        }
+                        Button {
+                            text: qsTr("Rescan")
+                            onClicked: library.rescan()
+                        }
+                        Button {
+                            text: qsTr("Refresh")
+                            onClicked: library.refresh()
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("Indexed folders")
+                        font.weight: Font.DemiBold
+                    }
+
+                    Repeater {
+                        model: library.folder_model
+                        Label {
+                            required property string modelData
+                            text: "• " + modelData
+                            opacity: 0.8
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("Favorites")
+                        font.weight: Font.DemiBold
+                        visible: library.favorite_model.length > 0
+                    }
+
+                    GridLayout {
+                        columns: width > 850 ? 3 : 2
+                        Layout.fillWidth: true
+                        columnSpacing: 14
+                        rowSpacing: 14
+                        visible: library.favorite_model.length > 0
+
+                        Repeater {
+                            model: library.favorite_model
+                            PhotoCard {
+                                required property int index
+                                required property string modelData
+                                readonly property var payload: JSON.parse(modelData)
+                                Layout.fillWidth: true
+                                title: payload.title
+                                creator: payload.creator
+                                subtitle: payload.license
+                                imageSource: payload.preview
+                                meetsMinimum: payload.meetsMinimum
+                                accent: "#40566A"
+                            }
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("Recent indexed media")
+                        font.weight: Font.DemiBold
+                    }
+
+                    GridLayout {
+                        columns: width > 850 ? 3 : 2
+                        Layout.fillWidth: true
+                        columnSpacing: 14
+                        rowSpacing: 14
+
+                        Repeater {
+                            model: library.asset_model
+                            PhotoCard {
+                                required property int index
+                                required property string modelData
+                                readonly property var payload: JSON.parse(modelData)
+                                Layout.fillWidth: true
+                                title: payload.title
+                                creator: payload.creator
+                                subtitle: payload.source + " · score " + payload.score
+                                imageSource: payload.preview
+                                meetsMinimum: payload.meetsMinimum
+                                accent: ["#776B5D", "#48604F", "#9A6D4A", "#3F5260"][index % 4]
+                                onActivated: library.useAsset(index)
                             }
                         }
                     }
                 }
             }
-
-            PlaceholderPage { title: qsTr("Library"); description: qsTr("Indexed local media and approved remote still images.") }
             PlaceholderPage { title: qsTr("Profiles"); description: qsTr("Reusable compositions and display groups.") }
             PlaceholderPage { title: qsTr("Automation"); description: qsTr("Intervals, schedules, sunrise, and time-of-day rules.") }
         }

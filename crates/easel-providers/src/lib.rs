@@ -6,9 +6,13 @@
 
 #![forbid(unsafe_code)]
 
+mod openverse;
+
 use async_trait::async_trait;
 use easel_core::MediaAsset;
 use thiserror::Error;
+
+pub use openverse::{OpenverseClient, OpenverseConfig};
 
 /// Whether current published terms allow an adapter to be enabled.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -36,6 +40,38 @@ pub struct ProviderMetadata {
     pub terms_url: &'static str,
 }
 
+/// License filter presets exposed by discovery UI.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum LicenseFilter {
+    /// No license_type restriction beyond provider defaults.
+    #[default]
+    All,
+    /// Public-domain style works (`pdm`, `cc0`).
+    PublicDomain,
+    /// Licenses that permit commercial use.
+    Commercial,
+}
+
+impl LicenseFilter {
+    /// Openverse `license_type` query value, when any.
+    #[must_use]
+    pub const fn openverse_license_type(self) -> Option<&'static str> {
+        match self {
+            Self::Commercial => Some("commercial"),
+            Self::All | Self::PublicDomain => None,
+        }
+    }
+
+    /// Explicit Openverse `license` CSV for public-domain filtering.
+    #[must_use]
+    pub const fn openverse_licenses(self) -> Option<&'static str> {
+        match self {
+            Self::PublicDomain => Some("cc0,pdm"),
+            Self::All | Self::Commercial => None,
+        }
+    }
+}
+
 /// Search filters shared by compatible providers.
 #[derive(Clone, Debug, Default, Eq, PartialEq)]
 pub struct SearchQuery {
@@ -45,8 +81,14 @@ pub struct SearchQuery {
     pub minimum_width: Option<u32>,
     /// Minimum image height.
     pub minimum_height: Option<u32>,
-    /// Provider cursor from the previous page.
+    /// License filter preset.
+    pub license: LicenseFilter,
+    /// Optional upstream source keys such as `flickr` or `wikimedia`.
+    pub sources: Vec<String>,
+    /// Provider cursor from the previous page (`page` for Openverse).
     pub cursor: Option<String>,
+    /// Preferred page size when the provider supports it.
+    pub page_size: Option<u32>,
 }
 
 /// One normalized provider page.
@@ -56,6 +98,8 @@ pub struct SearchPage {
     pub assets: Vec<MediaAsset>,
     /// Opaque cursor for the next page.
     pub next_cursor: Option<String>,
+    /// Total result estimate when the provider reports one.
+    pub result_count: Option<u32>,
 }
 
 /// Online catalog adapter.
@@ -93,6 +137,21 @@ impl ProviderRegistry {
         Ok(())
     }
 
+    /// Returns enabled providers in registration order.
+    #[must_use]
+    pub fn providers(&self) -> &[Box<dyn ImageProvider>] {
+        &self.providers
+    }
+
+    /// Returns the first provider matching `id`.
+    #[must_use]
+    pub fn get(&self, id: &str) -> Option<&dyn ImageProvider> {
+        self.providers
+            .iter()
+            .map(AsRef::as_ref)
+            .find(|provider| provider.metadata().id == id)
+    }
+
     /// Returns the number of enabled providers.
     #[must_use]
     pub fn len(&self) -> usize {
@@ -123,6 +182,9 @@ pub enum ProviderError {
     /// Provider response was not valid for the normalized contract.
     #[error("provider response was invalid: {0}")]
     InvalidResponse(String),
+    /// Provider rate-limited the client.
+    #[error("provider rate limited the request")]
+    RateLimited,
 }
 
 /// Reviewed metadata for planned built-in providers.

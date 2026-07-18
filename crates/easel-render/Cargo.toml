@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 image = { workspace = true }
+libm = { workspace = true }
 thiserror.workspace = true
 easel-core = { path = "../easel-core" }
 

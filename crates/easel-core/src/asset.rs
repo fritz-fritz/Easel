@@ -19,6 +19,17 @@ impl AssetId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Returns the canonical hyphenated UUID string.
+    #[must_use]
+    pub fn to_hyphenated_string(self) -> String {
+        self.0.hyphenated().to_string()
+    }
+
+    /// Parses a hyphenated UUID string into an asset identity.
+    pub fn parse(value: &str) -> Result<Self, uuid::Error> {
+        Ok(Self(Uuid::parse_str(value.trim())?))
+    }
 }
 
 impl Default for AssetId {
@@ -150,6 +161,19 @@ impl MediaMetadata {
     }
 }
 
+/// Content-safety classification retained from the provider or local policy.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ContentSafety {
+    /// Provider marked the work as generally safe for browsing.
+    #[default]
+    Safe,
+    /// Provider marked the work as mature or sensitive.
+    Mature,
+    /// Classification was not supplied.
+    Unknown,
+}
+
 /// Media plus immutable provenance used by discovery, selection, and history.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct MediaAsset {
@@ -167,4 +191,16 @@ pub struct MediaAsset {
     pub license: Option<AssetLicense>,
     /// Required or recommended attribution.
     pub attribution: Option<Attribution>,
+    /// Provider or policy content-safety classification.
+    #[serde(default)]
+    pub content_safety: ContentSafety,
+    /// Upstream catalog source key such as `flickr` or `wikimedia`.
+    #[serde(default)]
+    pub source: Option<String>,
+    /// Provider-required use-reporting endpoint when present.
+    #[serde(default)]
+    pub use_reporting_url: Option<Url>,
+    /// Unix timestamp when provider metadata was retrieved.
+    #[serde(default)]
+    pub retrieved_at_unix: Option<u64>,
 }

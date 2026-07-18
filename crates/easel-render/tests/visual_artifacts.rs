@@ -108,3 +108,41 @@ fn write_apply_payload_visual_artifacts() {
         assert!(named.is_file());
     }
 }
+
+#[test]
+fn apply_payload_fixture_digests_are_stable() {
+    // Locks the portable Lanczos path to known digests so cross-OS drift cannot return
+    // unnoticed in unit tests (CI still compares OS digests in the visual gallery).
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");
+    let out_dir = std::env::temp_dir().join(format!("easel-visual-digest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir).expect("outdir");
+
+    let displays = fixture_displays();
+    let mut profile = Profile::new("visual");
+    profile.fit_mode = FitMode::Cover;
+    profile.layout_mode = LayoutMode::PhysicalSpan;
+    profile.displays = displays.iter().map(|display| display.id).collect();
+
+    let outputs = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition: CompositionSettings::from_profile(&profile),
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir,
+    }
+    .execute()
+    .expect("raster");
+
+    let digests: Vec<u32> = outputs
+        .iter()
+        .map(|output| {
+            let bytes = std::fs::read(&output.path).expect("read png");
+            crc32fast::hash(&bytes)
+        })
+        .collect();
+
+    assert_eq!(digests, [0x93a6_71f4, 0xc5e4_1d19, 0xb393_529c,]);
+}

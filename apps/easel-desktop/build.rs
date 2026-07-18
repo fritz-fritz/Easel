@@ -15,6 +15,11 @@ fn main() {
                 "qml/components/PhotoCard.qml",
             ]),
     )
-    .files(["src/app_controller.rs", "src/compose_controller.rs"])
+    .files([
+        "src/app_controller.rs",
+        "src/compose_controller.rs",
+        "src/discover_controller.rs",
+        "src/library_controller.rs",
+    ])
     .build();
 }

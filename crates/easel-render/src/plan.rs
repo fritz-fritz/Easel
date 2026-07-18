@@ -15,7 +15,7 @@ use thiserror::Error;
 use crate::fit::plan_fit;
 
 /// Version token included in cache keys when raster semantics change.
-pub const RENDERER_VERSION: &str = "2";
+pub const RENDERER_VERSION: &str = "3";
 
 /// Why a deterministic raster output is being produced.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

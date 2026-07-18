@@ -8,25 +8,30 @@
 
 mod arrangement;
 mod asset;
+mod collection;
 mod display;
 mod display_group;
+mod history;
 mod layout_fixtures;
 mod physical;
 mod profile;
+mod suitability;
 
 pub use arrangement::{
     ARRANGEMENT_SCHEMA_VERSION, ArrangementError, DisplayArrangement, DisplayEvidence,
     ObservedDisplay, approximate_physical_origin, match_displays,
 };
 pub use asset::{
-    AssetId, AssetLicense, AssetLocation, Attribution, FrameRate, MediaAsset, MediaDimensions,
-    MediaMetadata, ProviderAssetId,
+    AssetId, AssetLicense, AssetLocation, Attribution, ContentSafety, FrameRate, MediaAsset,
+    MediaDimensions, MediaMetadata, ProviderAssetId,
 };
+pub use collection::{Collection, CollectionError, CollectionId};
 pub use display::{
     Display, DisplayId, DisplayValidationError, LogicalRect, Millimeters, NativePixelSize,
     PhysicalPoint, PhysicalSize, ScaleFactor,
 };
 pub use display_group::{DisplayGroup, DisplayGroupError, DisplayGroupId};
+pub use history::{HistoryAction, HistoryEvent, HistoryEventId};
 pub use layout_fixtures::{
     all_layout_fixtures, asymmetric_bezels, different_physical_same_resolution,
     mixed_scale_factors, negative_logical_origin, one_display, portrait_plus_landscape,
@@ -40,3 +45,4 @@ pub use profile::{
     FitMode, LayoutMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode,
     Profile, ProfileId, ProfileValidationError,
 };
+pub use suitability::{PixelBudget, SuitabilityAssessment, assess_suitability};

@@ -3,12 +3,14 @@ resolver = "2"
 members = [
     "apps/easel-desktop",
     "crates/easel-core",
+    "crates/easel-library",
     "crates/easel-platform",
     "crates/easel-providers",
     "crates/easel-render",
 ]
 default-members = [
     "crates/easel-core",
+    "crates/easel-library",
     "crates/easel-platform",
     "crates/easel-providers",
     "crates/easel-render",
@@ -36,11 +38,16 @@ image = { version = "=0.25.8", default-features = false, features = [
     "tiff",
     "webp",
 ] }
+libm = "0.2"
+notify = "7"
 reqwest = { version = "0.12", default-features = false, features = [
+    "blocking",
     "json",
     "rustls-tls",
 ] }
+rusqlite = { version = "0.32", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
 toml = "0.8"
