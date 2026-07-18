@@ -56,6 +56,22 @@ per-display apply-payload raster PNGs for visual review. Full packaging and code
 separate later stages. Live wallpaper Apply against a real desktop session is still a manual
 matrix item; CI never mutates an operator wallpaper.
 
+### Path filters
+
+[`ci.yml`](../.github/workflows/ci.yml) uses `dorny/paths-filter` so expensive jobs only run when
+the diff can affect them:
+
+| Output | Runs | Typical paths |
+| --- | --- | --- |
+| `rust` | Core matrix (fmt/test/clippy + apply-payload visuals) | `crates/**`, `apps/**`, `Cargo.*`, rust toolchain/fmt config |
+| `desktop` | Qt desktop smoke matrix + gui-smoke visuals | `apps/easel-desktop/**`, `crates/**`, `Cargo.*`, `.github/actions/ci-visual/**` |
+| `gallery_tooling` | Gallery builder unit tests | `.github/ci-visual/**`, gallery/action workflows, `ci.yml` |
+
+Docs-only or unrelated `.github` docs changes skip core and desktop. With no visual artifacts, the
+`workflow_run` gallery publisher exits early (and still posts a successful
+`CI Visual Gallery / OS compare` status). Prefer requiring the aggregate **`CI gate`** check in
+branch protection rather than individual matrix legs, so skipped jobs do not block merges.
+
 Media CI adds only short, project-owned, silent fixtures. Codec assertions are capability-aware so
 the suite distinguishes an unavailable runtime decoder from an incorrect compositor result.
 
@@ -108,10 +124,12 @@ PR check produced by the PR head workflow file.
 
 To still require the visual OS compare before merge:
 
-1. Keep producer jobs in [`ci.yml`](../.github/workflows/ci.yml) as required checks (they already
-   run on `pull_request`)
+1. Require the aggregate **`CI gate`** check from [`ci.yml`](../.github/workflows/ci.yml)
+   (path filters may skip core/desktop; the gate stays green when those jobs are intentionally
+   skipped)
 2. In branch protection / rulesets, also require the commit status context
-   **`CI Visual Gallery / OS compare`** (posted by the gallery workflow onto the PR head SHA)
+   **`CI Visual Gallery / OS compare`** (posted by the gallery workflow onto the PR head SHA;
+   succeeds immediately when the CI run produced no visual artifacts)
 
 A **`workflow_dispatch`-only** workflow cannot be a meaningful required PR check: it does not run
 automatically on each PR push, so branch protection cannot rely on it. Optional manual
