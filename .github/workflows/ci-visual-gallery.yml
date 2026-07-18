@@ -228,6 +228,7 @@ jobs:
           STRICT_FAILED: ${{ steps.gallery.outputs.strict_failed }}
           STRICT_TOTAL: ${{ steps.gallery.outputs.strict_total }}
           STRICT_MATCH: ${{ steps.gallery.outputs.strict_match }}
+          STRICT_TOLERANT: ${{ steps.gallery.outputs.strict_tolerant }}
           STRICT_WARNINGS: ${{ steps.gallery.outputs.strict_warnings }}
           PAGES_BASE: ${{ steps.meta.outputs.pages_base }}
           PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
@@ -241,6 +242,7 @@ jobs:
             const failed = Number(process.env.STRICT_FAILED || '0');
             const total = Number(process.env.STRICT_TOTAL || '0');
             const matched = Number(process.env.STRICT_MATCH || '0');
+            const tolerant = Number(process.env.STRICT_TOLERANT || '0');
             const warnings = Number(process.env.STRICT_WARNINGS || '0');
             const deployed = process.env.DEPLOYED === 'true';
             const galleryUrl = deployed
@@ -253,17 +255,26 @@ jobs:
               description = 'gallery build failed';
             } else if (!gateOk) {
               state = 'failure';
-              description = `apply-payload OS mismatch: ${failed}/${total} asset(s)`;
+              const hard = failed - tolerant;
+              if (tolerant > 0 && hard <= 0) {
+                description =
+                  `apply-payload near-match (±1 LSB): ${tolerant}/${total} (want byte-identical)`;
+              } else if (tolerant > 0) {
+                description =
+                  `apply-payload OS mismatch: ${hard} hard, ${tolerant} near-match / ${total}`;
+              } else {
+                description = `apply-payload OS mismatch: ${failed}/${total} asset(s)`;
+              }
             } else if (total === 0) {
               state = 'success';
               description = 'no strict-stage assets to compare';
             } else if (warnings > 0) {
               state = 'success';
               description =
-                `apply-payload gate ok (${matched}/${total} full match, ${warnings} incomplete)`;
+                `apply-payload gate ok (${matched}/${total} byte-identical, ${warnings} incomplete)`;
             } else {
               state = 'success';
-              description = `apply-payload identical across OS (${matched} asset(s))`;
+              description = `apply-payload byte-identical across OS (${matched} asset(s))`;
             }
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
