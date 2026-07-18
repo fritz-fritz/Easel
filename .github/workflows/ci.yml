@@ -95,8 +95,9 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo install cargo-vcpkg --locked
-          cargo vcpkg -v build
+          cargo install cargo-vcpkg
+          # cargo-vcpkg cannot run against a virtual workspace manifest.
+          cargo vcpkg -v build -p easel-dynamic
       - uses: Swatinem/rust-cache@v2
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
@@ -194,8 +195,8 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo install cargo-vcpkg --locked
-          cargo vcpkg -v build
+          cargo install cargo-vcpkg
+          cargo vcpkg -v build -p easel-dynamic
 
       - name: Install Qt + libheif (macOS)
         if: runner.os == 'macOS'
