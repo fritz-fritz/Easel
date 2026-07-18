@@ -7,7 +7,6 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
-import Qt.labs.platform as Platform
 
 import net.fritztech.easel
 import "components"
@@ -73,51 +72,9 @@ ApplicationWindow {
         onTriggered: automation.pollDueSchedules()
     }
 
-    Platform.SystemTrayIcon {
-        id: tray
-        visible: true
-        tooltip: qsTr("Easel")
-        onActivated: function(reason) {
-            if (reason === Platform.SystemTrayIcon.Trigger) {
-                window.visible = true
-                window.raise()
-                window.requestActivate()
-            }
-        }
-
-        menu: Platform.Menu {
-            Platform.MenuItem {
-                text: automation.paused ? qsTr("Resume rotation") : qsTr("Pause rotation")
-                onTriggered: automation.setRotationPaused(!automation.paused)
-            }
-            Platform.MenuItem {
-                text: qsTr("Skip next")
-                onTriggered: automation.skipNext()
-            }
-            Platform.MenuItem {
-                text: qsTr("Show status")
-                onTriggered: {
-                    automation.refresh()
-                    window.visible = true
-                    pageStack.currentIndex = 4
-                    window.raise()
-                }
-            }
-            Platform.MenuSeparator {}
-            Platform.MenuItem {
-                text: qsTr("Open Easel")
-                onTriggered: {
-                    window.visible = true
-                    window.raise()
-                    window.requestActivate()
-                }
-            }
-            Platform.MenuItem {
-                text: qsTr("Quit")
-                onTriggered: Qt.quit()
-            }
-        }
-    }
+    // Native SystemTrayIcon needs QApplication (Qt Widgets); cxx-qt-lib exposes
+    // QGuiApplication only. Pause/skip/status are available on the Automation
+    // page and via `easel` CLI until a Widgets host is wired.
 
     function probeScreens() {
         controller.beginScreenProbe()

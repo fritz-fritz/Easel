@@ -32,9 +32,10 @@ output. Dynamic stills (Stage 5) and live media (Stage 6) both assume a schedule
    returns, or apply using all currently connected displays. The saved arrangement is never
    rewritten by a missing-output decision.
 
-5. **Tray and CLI share the same store.** Pause, resume, skip, and status mutate or read the
-   same TOML/SQLite documents. The desktop tray uses `Qt.labs.platform.SystemTrayIcon`; the
-   CLI binary is `easel`.
+5. **Tray-equivalent controls and CLI share the same store.** Pause, resume, skip, and status
+   mutate or read the same TOML/SQLite documents. The Automation page and `easel` CLI expose
+   those actions. A native `SystemTrayIcon` is deferred until the desktop host can construct a
+   Qt Widgets `QApplication` (`cxx-qt-lib` currently provides `QGuiApplication` only).
 
 ## Consequences
 
