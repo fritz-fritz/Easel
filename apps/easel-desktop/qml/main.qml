@@ -23,6 +23,14 @@ ApplicationWindow {
     // instead of a fully transparent framebuffer (markdown vs HTML disagree).
     color: palette.window
 
+    // Design sizes for smoke captures. Full-window grabs always request this
+    // target size so PNGs are comparable across OS even when the host screen
+    // cannot fit a locked 1220×780 window.
+    readonly property int smokeWindowWidth: 1220
+    readonly property int smokeWindowHeight: 780
+    readonly property int smokePreviewWidth: 900
+    readonly property int smokePreviewHeight: 330
+
     AppController {
         id: controller
     }
@@ -166,22 +174,56 @@ ApplicationWindow {
         property bool failed: false
         property string phase: ""
         property string activeView: ""
+        property bool windowPrepared: false
+
+        function hostScreenSize() {
+            var screen = window.screen
+            if (!screen)
+                return Qt.size(0, 0)
+            // Prefer the usable desktop geometry; fall back to full screen size.
+            var availW = screen.desktopAvailableWidth
+            var availH = screen.desktopAvailableHeight
+            if (availW < 2 || availH < 2) {
+                availW = screen.width
+                availH = screen.height
+            }
+            return Qt.size(availW, availH)
+        }
+
+        function prepareSmokeWindow() {
+            if (windowPrepared)
+                return
+            windowPrepared = true
+            var host = hostScreenSize()
+            var canLock = host.width >= window.smokeWindowWidth
+                    && host.height >= window.smokeWindowHeight
+            if (canLock) {
+                window.minimumWidth = window.smokeWindowWidth
+                window.maximumWidth = window.smokeWindowWidth
+                window.minimumHeight = window.smokeWindowHeight
+                window.maximumHeight = window.smokeWindowHeight
+                window.width = window.smokeWindowWidth
+                window.height = window.smokeWindowHeight
+                console.log("Smoke window locked to",
+                            window.smokeWindowWidth, "x", window.smokeWindowHeight,
+                            "(host", host.width, "x", host.height, ")")
+            } else {
+                // Keep defaults so a small virtual display does not get an
+                // impossible minimumSize; grabToImage still uses design size.
+                console.warn("Smoke host screen too small to lock window (",
+                             host.width, "x", host.height, "); grabbing at design size",
+                             window.smokeWindowWidth, "x", window.smokeWindowHeight)
+                window.width = Math.min(window.smokeWindowWidth, Math.max(window.minimumWidth, host.width || window.width))
+                window.height = Math.min(window.smokeWindowHeight, Math.max(window.minimumHeight, host.height || window.height))
+            }
+        }
 
         function startNext() {
             if (index >= queue.length) {
                 controller.forceSmokeExit(failed ? 1 : 0)
                 return
             }
-            // Lock the window to the smoke design size when the host screen allows it
-            // so full-window grabs share a stable aspect across runners.
-            if (index === 0) {
-                window.minimumWidth = 1220
-                window.maximumWidth = 1220
-                window.minimumHeight = 780
-                window.maximumHeight = 780
-                window.width = 1220
-                window.height = 780
-            }
+            prepareSmokeWindow()
             activeView = queue[index]
             smokeTimer.ticks = 0
             if (activeView === "preview") {
@@ -209,7 +251,7 @@ ApplicationWindow {
             smokeTimer.start()
         }
 
-        function grabTarget(item, path, done) {
+        function grabTarget(item, path, done, targetWidth, targetHeight) {
             if (!item || item.width < 2 || item.height < 2) {
                 console.error("Smoke grab target not ready for", path,
                               "item=", item, "w=", item ? item.width : -1,
@@ -218,6 +260,8 @@ ApplicationWindow {
                 done()
                 return
             }
+            var grabW = targetWidth > 0 ? targetWidth : Math.max(2, Math.round(item.width))
+            var grabH = targetHeight > 0 ? targetHeight : Math.max(2, Math.round(item.height))
             item.grabToImage(function(result) {
                 var ok = false
                 try {
@@ -226,11 +270,13 @@ ApplicationWindow {
                     console.error("Smoke grabToImage save threw", path, error)
                 }
                 console.log("Smoke grabToImage save", path, "ok=", ok,
-                            "size=", result.width, "x", result.height)
+                            "size=", result.width, "x", result.height,
+                            "target=", grabW, "x", grabH,
+                            "item=", Math.round(item.width), "x", Math.round(item.height))
                 if (!ok)
                     failed = true
                 done()
-            }, Qt.size(Math.max(2, Math.round(item.width)), Math.max(2, Math.round(item.height))))
+            }, Qt.size(grabW, grabH))
         }
 
         function finishCurrent() {
@@ -259,7 +305,7 @@ ApplicationWindow {
                     }
                     smokeCapture.grabTarget(monitorPreview, path, function() {
                         smokeCapture.finishCurrent()
-                    })
+                    }, window.smokePreviewWidth, window.smokePreviewHeight)
                 }
                 return
             }
@@ -274,7 +320,7 @@ ApplicationWindow {
                     }
                     smokeCapture.grabTarget(uiChrome, path, function() {
                         smokeCapture.finishCurrent()
-                    })
+                    }, window.smokeWindowWidth, window.smokeWindowHeight)
                 }
                 return
             }
@@ -285,7 +331,7 @@ ApplicationWindow {
                     stop()
                     smokeCapture.grabTarget(uiChrome, path, function() {
                         smokeCapture.finishCurrent()
-                    })
+                    }, window.smokeWindowWidth, window.smokeWindowHeight)
                 }
             }
         }

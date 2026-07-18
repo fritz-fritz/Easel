@@ -209,7 +209,8 @@ jobs:
           CC: gcc
         run: |
           mkdir -p "${{ runner.temp }}/easel-gui"
-          xvfb-run -a cargo run -p easel-desktop -- \
+          # Fixed virtual screen so the smoke window can lock to 1220×780.
+          xvfb-run -a -s "-screen 0 1400x900x24" cargo run -p easel-desktop -- \
             --smoke-screenshot "${{ runner.temp }}/easel-gui" \
             --smoke-views "${{ steps.smoke_views.outputs.views }}"
 
