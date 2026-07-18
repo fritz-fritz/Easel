@@ -265,10 +265,9 @@ impl qobject::AppController {
             Ok(()) => {
                 self.as_mut()
                     .set_status_text("Updated display position".into());
-                self.publish_layout();
+                self.as_mut().publish_layout();
                 // Re-read snapped coordinates into the numeric editors.
-                let selected = QString::from(id.as_str());
-                self.select_display(selected);
+                self.select_display(QString::from(id.as_str()));
             }
             Err(error) => {
                 self.as_mut()
