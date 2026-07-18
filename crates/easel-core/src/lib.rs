@@ -12,9 +12,12 @@ mod collection;
 mod display;
 mod display_group;
 mod history;
+mod hotplug;
 mod layout_fixtures;
 mod physical;
 mod profile;
+mod rotation;
+mod schedule;
 mod suitability;
 
 pub use arrangement::{
@@ -32,6 +35,7 @@ pub use display::{
 };
 pub use display_group::{DisplayGroup, DisplayGroupError, DisplayGroupId};
 pub use history::{HistoryAction, HistoryEvent, HistoryEventId};
+pub use hotplug::{HotplugResolution, MissingOutputPolicy, filter_displays, resolve_hotplug};
 pub use layout_fixtures::{
     all_layout_fixtures, asymmetric_bezels, different_physical_same_resolution,
     mixed_scale_factors, negative_logical_origin, one_display, portrait_plus_landscape,
@@ -44,5 +48,13 @@ pub use physical::{
 pub use profile::{
     FitMode, LayoutMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode,
     Profile, ProfileId, ProfileValidationError,
+};
+pub use rotation::{
+    AUTOMATION_STATE_SCHEMA_VERSION, AutomationState, AutomationStateError,
+    ROTATION_QUEUE_SCHEMA_VERSION, RotationQueue, RotationQueueError, RotationQueueId,
+};
+pub use schedule::{
+    CalendarRule, GeoLocation, MinutesOfDay, SCHEDULE_SCHEMA_VERSION, Schedule, ScheduleId,
+    ScheduleKind, ScheduleValidationError, TimeWindow, WeekdayMask,
 };
 pub use suitability::{PixelBudget, SuitabilityAssessment, assess_suitability};

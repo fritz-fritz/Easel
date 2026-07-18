@@ -8,7 +8,7 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{AssetId, DisplayId};
+use crate::{AssetId, DisplayGroupId, DisplayId, RotationQueueId, ScheduleId};
 
 /// Current serialized profile schema.
 pub const PROFILE_SCHEMA_VERSION: u16 = 1;
@@ -23,6 +23,17 @@ impl ProfileId {
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    /// Returns the canonical hyphenated UUID string.
+    #[must_use]
+    pub fn to_hyphenated_string(self) -> String {
+        self.0.hyphenated().to_string()
+    }
+
+    /// Parses a hyphenated UUID string.
+    pub fn parse(value: &str) -> Result<Self, uuid::Error> {
+        Ok(Self(Uuid::parse_str(value.trim())?))
     }
 }
 
@@ -120,6 +131,15 @@ pub struct Profile {
     pub name: String,
     /// Displays participating in the initial group.
     pub displays: Vec<DisplayId>,
+    /// Optional reusable display-group assignment.
+    #[serde(default)]
+    pub display_group_id: Option<DisplayGroupId>,
+    /// Optional rotation queue for automated still selection.
+    #[serde(default)]
+    pub rotation_queue_id: Option<RotationQueueId>,
+    /// Optional schedule driving unattended rotation.
+    #[serde(default)]
+    pub schedule_id: Option<ScheduleId>,
     /// Current image selection, if fixed.
     pub selected_asset: Option<AssetId>,
     /// Static, scheduled-still, or persistent live presentation.
@@ -148,6 +168,9 @@ impl Profile {
             id: ProfileId::new(),
             name: name.into(),
             displays: Vec::new(),
+            display_group_id: None,
+            rotation_queue_id: None,
+            schedule_id: None,
             selected_asset: None,
             presentation: PresentationMode::Static,
             playback: PlaybackPolicy::default(),

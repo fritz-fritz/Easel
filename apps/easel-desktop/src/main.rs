@@ -11,12 +11,17 @@
 )]
 
 mod app_controller;
+mod apply_service;
+mod automation_controller;
+mod automation_session;
+mod cli;
 mod compose_controller;
 mod discover_controller;
 mod display_session;
 mod fixtures;
 mod library_controller;
 mod library_session;
+mod profile_controller;
 
 use std::env;
 use std::path::PathBuf;
@@ -26,6 +31,10 @@ use cxx_qt_lib::{QGuiApplication, QQmlApplicationEngine, QUrl};
 
 fn main() {
     let args: Vec<String> = env::args().collect();
+    if cli::maybe_run(&args) {
+        return;
+    }
+
     let smoke = parse_smoke_outdir(&args);
     if let Some(outdir) = &smoke {
         let image_path = smoke_sample_image();

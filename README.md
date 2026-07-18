@@ -5,11 +5,13 @@ desktops. It combines physically correct spanning with a modern Qt 6 interface a
 policy-aware catalog of high-quality, reusable images. Its architecture also distinguishes
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
-This repository contains the Stage 1–3 still-image vertical slice: decode/fit/raster with
+This repository contains the Stage 1–4 still-image vertical slice: decode/fit/raster with
 physical multi-display composition, Compose previews, Qt display enumeration with arrangement
-persistence, Plasma 6 / Windows still apply backends, local library indexing, and Openverse
-discovery with retained provenance. Use Compose → Open image → Apply, or Discover/Library to
-select an image first. CI captures only apply-payload rasters and Qt GUI smoke screenshots for
+persistence, Plasma 6 / Windows still apply backends, local library indexing, Openverse
+discovery with retained provenance, reusable profiles/display groups, scheduled rotation with
+pause/skip/CLI/tray controls, and hotplug missing-output policy. Use Compose → Open image →
+Apply, or Discover/Library to select an image first; save a profile and configure Automation for
+unattended rotation. CI captures only apply-payload rasters and Qt GUI smoke screenshots for
 review. Animated/live media hosts and additional Linux desktops remain deliberately unimplemented.
 
 ## Product direction
@@ -37,6 +39,7 @@ crates/easel-library/   Local folder index, SQLite library store, acquisition ca
 crates/easel-render/    Display-space planning, raster output, and live frame plans
 crates/easel-providers/ Online image provider contracts and adapters
 crates/easel-platform/  Static wallpaper and persistent live-host contracts
+crates/easel-scheduler/ Schedule evaluation, rotation selection, automation catalog
 docs/                   Product, architecture, provider, and delivery plans
 ```
 

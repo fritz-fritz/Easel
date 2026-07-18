@@ -23,6 +23,17 @@ impl DisplayGroupId {
     pub fn new() -> Self {
         Self(Uuid::new_v4())
     }
+
+    /// Returns the canonical hyphenated UUID string.
+    #[must_use]
+    pub fn to_hyphenated_string(self) -> String {
+        self.0.hyphenated().to_string()
+    }
+
+    /// Parses a hyphenated UUID string.
+    pub fn parse(value: &str) -> Result<Self, uuid::Error> {
+        Ok(Self(Uuid::parse_str(value.trim())?))
+    }
 }
 
 impl Default for DisplayGroupId {

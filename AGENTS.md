@@ -34,6 +34,17 @@ workspace. It has two distinct build scopes:
   ```
 
   Output: `<outdir>/gui-linux.png`.
-- Interactive: an XFCE desktop is available on `DISPLAY=:1`. Launch the full app with
+-   Interactive: an XFCE desktop is available on `DISPLAY=:1`. Launch the full app with
   `DISPLAY=:1 QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc cargo run -p easel-desktop`.
   It enumerates the live X screen (the VNC display) rather than the smoke fixture layout.
+- Headless automation CLI (no Qt event loop):
+
+  ```
+  cargo run -p easel-desktop -- --cli status
+  cargo run -p easel-desktop -- --cli pause
+  cargo run -p easel-desktop -- --cli resume
+  cargo run -p easel-desktop -- --cli skip
+  cargo run -p easel-desktop -- --cli tick
+  cargo run -p easel-desktop -- --cli set-interval 3600
+  cargo run -p easel-desktop -- --cli set-policy skip-missing
+  ```

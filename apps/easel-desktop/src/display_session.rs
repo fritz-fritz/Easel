@@ -359,6 +359,26 @@ pub fn replace_from_probes(probes: Vec<ScreenProbe>) -> Result<DisplayArrangemen
     save_arrangement(&matched).map_err(|error| error.to_string())?;
     guard.arrangement = matched.clone();
     guard.from_probe = true;
+    drop(guard);
+
+    if let Ok(mut catalog) = crate::automation_session::lock() {
+        if let Some(profile_id) = catalog.state.active_profile_id {
+            if let Some(profile) = catalog.profile(profile_id).cloned() {
+                if let Some(group_id) = profile.display_group_id {
+                    if let Some(group) = catalog.display_group(group_id).cloned() {
+                        let resolution = easel_core::resolve_hotplug(
+                            &group,
+                            &matched.displays,
+                            catalog.missing_output_policy,
+                        );
+                        catalog.state.last_decision = format!("hotplug: {}", resolution.reason);
+                        let _ = crate::automation_session::save(&catalog);
+                    }
+                }
+            }
+        }
+    }
+
     Ok(matched)
 }
 

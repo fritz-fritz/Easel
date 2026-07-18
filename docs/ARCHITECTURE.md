@@ -97,6 +97,14 @@ portable guarantee.
 favorites/history persistence, and the HTTPS acquisition cache used when a remote still is opened
 in Compose. Domain types remain in `easel-core`; this crate only adds IO, watching, and storage.
 
+## Scheduler
+
+`easel-scheduler` owns deterministic schedule evaluation (interval, time-of-day, sunrise/sunset,
+calendar rules), avoid-repeat rotation selection, and the versioned TOML automation catalog shape
+(profiles, display groups, queues, schedules, runtime state). The desktop app persists the catalog
+under the user config directory and exposes pause/skip/tick through the UI, system tray, and
+`--cli` commands.
+
 ## Image providers
 
 `easel-providers` normalizes approved still-image sources into a common result while preserving
@@ -147,7 +155,7 @@ Do not expose filesystem, network, or platform objects directly to QML.
 
 ## Persistence
 
-- Human-readable, versioned TOML for profiles and display arrangements.
+- Human-readable, versioned TOML for profiles, display arrangements, and the automation catalog.
 - SQLite is reserved for indexed local/remote asset metadata, history, and cache bookkeeping.
 - OS credential storage holds provider secrets.
 - Writes use temporary files plus atomic replacement.

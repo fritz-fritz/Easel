@@ -428,6 +428,7 @@ dependencies = [
  "easel-platform",
  "easel-providers",
  "easel-render",
+ "easel-scheduler",
  "serde",
  "serde_json",
  "tokio",
@@ -483,6 +484,16 @@ dependencies = [
  "easel-core",
  "image",
  "libm",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "easel-scheduler"
+version = "0.1.0"
+dependencies = [
+ "easel-core",
+ "libm",
+ "serde",
  "thiserror 2.0.18",
 ]
 
