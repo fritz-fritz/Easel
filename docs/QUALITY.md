@@ -79,15 +79,45 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 
 1. Lists visual artifacts on the triggering CI run; if none, exits success (skips publish)
 2. Downloads visual artifacts + manifests (`download-artifact@v8` for `archive: false`)
-3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
+3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py),
+   including per-asset metadata (dimensions, bytes, SHA-256) and a **cross-OS comparison**
 4. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
    `EASEL_CI_VISUAL_TOKEN` is configured)
-5. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery
-   (thumbnails from `raw.githubusercontent.com` so camo does not race Pages) and a link to
-   the hosted HTML gallery
+5. Upserts a sticky PR comment with inline thumbnails, metadata, comparison summary, and a
+   link to the hosted HTML gallery (`raw.githubusercontent.com` embeds so camo does not race Pages)
+6. Posts a commit status **`CI Visual Gallery / OS compare`** on the PR head SHA (and fails the
+   gallery job when `apply-payload` assets content/size-mismatch across OS)
+
+**Cross-OS compare rules**
+
+| Stage | Expectation | Gate |
+| --- | --- | --- |
+| `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail status + job on content/size mismatch |
+| `gui-smoke` | Platform chrome differs | Informational only (hashes/dims still shown) |
+
+Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
 
 CI visual PNGs/HTML must not be committed to branches of this source repository. Setup details:
 [ci-visual-assets-repo.md](ci-visual-assets-repo.md).
+
+#### Required checks vs `workflow_run` / `workflow_dispatch`
+
+The gallery publisher is **`workflow_run`-driven** (not a `pull_request` job and not
+`workflow_dispatch`). That means GitHub will not list the gallery workflow itself as a classic
+PR check produced by the PR head workflow file.
+
+To still require the visual OS compare before merge:
+
+1. Keep producer jobs in [`ci.yml`](../.github/workflows/ci.yml) as required checks (they already
+   run on `pull_request`)
+2. In branch protection / rulesets, also require the commit status context
+   **`CI Visual Gallery / OS compare`** (posted by the gallery workflow onto the PR head SHA)
+
+A **`workflow_dispatch`-only** workflow cannot be a meaningful required PR check: it does not run
+automatically on each PR push, so branch protection cannot rely on it. Optional manual
+`workflow_dispatch` is fine for republish/backfill helpers (see the archive workflow), but the
+merge gate should stay on automatic `pull_request` jobs and/or commit statuses from
+`workflow_run`.
 
 Cursor Cloud Agent **Demo** artifacts are complementary and agent-scoped; Actions cannot write
 into Demo. Prefer CI galleries for every PR.

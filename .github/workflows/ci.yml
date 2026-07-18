@@ -14,6 +14,14 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  gallery-tooling:
+    name: Gallery tooling
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - name: Unit-test ci-visual gallery builder
+        run: python3 .github/ci-visual/test_build_gallery.py
+
   core:
     name: Core (${{ matrix.os }})
     strategy:
