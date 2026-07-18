@@ -8,7 +8,7 @@ use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
-use easel_core::DisplayId;
+use easel_core::{DisplayId, LayoutMode};
 use image::imageops::{self, FilterType};
 use image::{Rgba, RgbaImage};
 use thiserror::Error;
@@ -201,7 +201,10 @@ fn cache_file_name(
     )
 }
 
-/// Fingerprint of arrangement geometry that affects physical-span output.
+/// Fingerprint of arrangement fields that affect the current layout mode.
+///
+/// Digital mode only depends on native output size per display id. Physical span
+/// also fingerprints origins, sizes, bezels, and rotation.
 fn arrangement_cache_token(
     displays: &[easel_core::Display],
     composition: &CompositionSettings,
@@ -209,23 +212,38 @@ fn arrangement_cache_token(
     use std::fmt::Write as _;
     let mut material = String::new();
     let _ = write!(material, "{:?}", composition.layout_mode);
-    for display in displays {
-        let _ = write!(
-            material,
-            "|{}:{:.3},{:.3}:{:.3}x{:.3}:b{:.2},{:.2},{:.2},{:.2}:r{}:{}x{}",
-            display.id.to_hyphenated_string(),
-            display.physical_origin.x.0,
-            display.physical_origin.y.0,
-            display.physical_size.width.0,
-            display.physical_size.height.0,
-            display.bezel.left.0,
-            display.bezel.top.0,
-            display.bezel.right.0,
-            display.bezel.bottom.0,
-            display.rotation_degrees,
-            display.native_pixels.width,
-            display.native_pixels.height,
-        );
+    match composition.layout_mode {
+        LayoutMode::Digital => {
+            for display in displays {
+                let _ = write!(
+                    material,
+                    "|{}:{}x{}",
+                    display.id.to_hyphenated_string(),
+                    display.native_pixels.width,
+                    display.native_pixels.height,
+                );
+            }
+        }
+        LayoutMode::PhysicalSpan => {
+            for display in displays {
+                let _ = write!(
+                    material,
+                    "|{}:{:.3},{:.3}:{:.3}x{:.3}:b{:.2},{:.2},{:.2},{:.2}:r{}:{}x{}",
+                    display.id.to_hyphenated_string(),
+                    display.physical_origin.x.0,
+                    display.physical_origin.y.0,
+                    display.physical_size.width.0,
+                    display.physical_size.height.0,
+                    display.bezel.left.0,
+                    display.bezel.top.0,
+                    display.bezel.right.0,
+                    display.bezel.bottom.0,
+                    display.rotation_degrees,
+                    display.native_pixels.width,
+                    display.native_pixels.height,
+                );
+            }
+        }
     }
     format!("{:016x}", fnv1a64(material.as_bytes()))
 }

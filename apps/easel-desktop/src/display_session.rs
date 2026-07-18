@@ -94,7 +94,9 @@ pub fn current_preview_displays() -> Vec<Display> {
 
 /// Layout preview using physical millimeters (`physical == true`) or logical desktop space.
 ///
-/// Encoded as `id|xFactor|yFactor|wFactor|hFactor|label|originXmm|originYmm|widthMm|heightMm|bezelMm`.
+/// Encoded as
+/// `id|xFactor|yFactor|wFactor|hFactor|originXmm|originYmm|widthMm|heightMm|bezelMm|label`
+/// so the trailing label may contain `|`.
 #[must_use]
 pub fn layout_preview_model_mode(physical: bool) -> Vec<String> {
     let displays = current_displays();
@@ -183,7 +185,7 @@ fn encode_layout_row(display: &Display, x: f64, y: f64, w: f64, h: f64) -> Strin
         display.native_pixels.width, display.native_pixels.height
     );
     format!(
-        "{}|{x:.5}|{y:.5}|{w:.5}|{h:.5}|{label}|{:.2}|{:.2}|{:.2}|{:.2}|{:.2}",
+        "{}|{x:.5}|{y:.5}|{w:.5}|{h:.5}|{:.2}|{:.2}|{:.2}|{:.2}|{:.2}|{label}",
         display.id.to_hyphenated_string(),
         display.physical_origin.x.0,
         display.physical_origin.y.0,

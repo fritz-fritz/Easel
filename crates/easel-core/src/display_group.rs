@@ -4,6 +4,8 @@
 
 //! Named subsets of displays that share one composition.
 
+use std::collections::HashSet;
+
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
@@ -59,12 +61,11 @@ impl DisplayGroup {
         if self.displays.is_empty() {
             return Err(DisplayGroupError::EmptyMembership);
         }
-        let mut seen = Vec::with_capacity(self.displays.len());
+        let mut seen = HashSet::with_capacity(self.displays.len());
         for id in &self.displays {
-            if seen.contains(id) {
+            if !seen.insert(*id) {
                 return Err(DisplayGroupError::DuplicateDisplay(*id));
             }
-            seen.push(*id);
         }
         Ok(())
     }

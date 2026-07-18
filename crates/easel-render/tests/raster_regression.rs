@@ -311,3 +311,55 @@ fn arrangement_change_produces_distinct_cache_names() {
         "cache key must include arrangement geometry"
     );
 }
+
+#[test]
+fn digital_cache_ignores_physical_origin_changes() {
+    let source = fixture_path("quadrants_32.png");
+    let out_dir = std::env::temp_dir().join("easel-regression-digital-cache");
+    let _ = fs::remove_dir_all(&out_dir);
+
+    let mut displays = vec![display(60, 32, 32)];
+    let first = RasterJob {
+        request: RenderRequest {
+            source_path: source.clone(),
+            displays: displays.clone(),
+            composition: CompositionSettings {
+                fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::Digital,
+                zoom: 1.0,
+                focal_x: 0.5,
+                focal_y: 0.5,
+            },
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir.join("a"),
+    }
+    .execute()
+    .expect("first");
+
+    displays[0].physical_origin.x = Millimeters(40.0);
+    displays[0].bezel = BezelInsets::uniform(12.0);
+    let second = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition: CompositionSettings {
+                fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::Digital,
+                zoom: 1.0,
+                focal_x: 0.5,
+                focal_y: 0.5,
+            },
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir.join("b"),
+    }
+    .execute()
+    .expect("second");
+
+    assert_eq!(
+        first[0].path.file_name(),
+        second[0].path.file_name(),
+        "digital cache key must ignore physical arrangement fields"
+    );
+}

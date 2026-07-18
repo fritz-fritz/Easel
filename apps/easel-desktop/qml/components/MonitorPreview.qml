@@ -34,8 +34,10 @@ Frame {
         property var parsedRows: {
             var rows = []
             for (var i = 0; i < root.layoutModel.length; ++i) {
+                // Fixed fields first; label is the trailing join so it may contain "|".
+                // id|x|y|w|h|ox|oy|wMm|hMm|bezel|label...
                 var parts = String(root.layoutModel[i]).split("|")
-                if (parts.length < 6)
+                if (parts.length < 10)
                     continue
                 rows.push({
                     id: parts[0],
@@ -43,12 +45,12 @@ Frame {
                     yFactor: Number(parts[2]),
                     wFactor: Number(parts[3]),
                     hFactor: Number(parts[4]),
-                    label: parts[5],
-                    originXmm: parts.length > 6 ? Number(parts[6]) : 0,
-                    originYmm: parts.length > 7 ? Number(parts[7]) : 0,
-                    widthMm: parts.length > 8 ? Number(parts[8]) : 1,
-                    heightMm: parts.length > 9 ? Number(parts[9]) : 1,
-                    bezelMm: parts.length > 10 ? Number(parts[10]) : 0,
+                    originXmm: Number(parts[5]),
+                    originYmm: Number(parts[6]),
+                    widthMm: Number(parts[7]),
+                    heightMm: Number(parts[8]),
+                    bezelMm: Number(parts[9]),
+                    label: parts.length > 10 ? parts.slice(10).join("|") : "",
                     index: i
                 })
             }
