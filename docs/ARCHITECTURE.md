@@ -42,11 +42,18 @@ Connector names and geometry are fallbacks, never sole long-term identifiers.
 - displays and arrangements;
 - still, animated-image, and video assets with licenses and attribution;
 - wallpaper profiles and display groups;
-- schedules and selection rules;
+- schedules, dynamic still sets (time / solar-position / appearance), and selection rules;
 - presentation and playback policy;
 - validation errors.
 
 It has no Qt, HTTP, image-decoder, or OS dependency.
+
+## Dynamic still packages
+
+`easel-dynamic` imports Apple Dynamic Desktop HEIC (and Plasma-compatible packages): XMP
+`apple_desktop` metadata, binary plist schedules, and per-frame decode via libheif. It also
+plans per-display native re-encodes so physical spanning can ship one OS-hosted package per
+output. See ADR 0006.
 
 ## Renderer
 
