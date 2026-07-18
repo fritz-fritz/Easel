@@ -130,7 +130,7 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 | Stage | Expectation | Gate |
 | --- | --- | --- |
 | `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail on digest/pixel mismatch (including ±1 LSB near-matches, which are labeled `match-tolerant` for debugging) or size mismatch |
-| `gui-smoke` | Platform chrome differs | Informational only (hashes/dims still shown) |
+| `gui-smoke` | Platform chrome differs; sticky comment + HTML show a **View × OS** matrix (fixture `preview` plus selected full-window pages) | Informational only (hashes/dims still shown) |
 
 Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
 
