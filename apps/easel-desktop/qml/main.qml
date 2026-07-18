@@ -19,6 +19,9 @@ ApplicationWindow {
     minimumHeight: 640
     visible: true
     title: qsTr("Easel")
+    // Opaque window fill so grabToImage composites against palette.window
+    // instead of a fully transparent framebuffer (markdown vs HTML disagree).
+    color: palette.window
 
     AppController {
         id: controller
@@ -169,6 +172,16 @@ ApplicationWindow {
                 controller.forceSmokeExit(failed ? 1 : 0)
                 return
             }
+            // Lock the window to the smoke design size when the host screen allows it
+            // so full-window grabs share a stable aspect across runners.
+            if (index === 0) {
+                window.minimumWidth = 1220
+                window.maximumWidth = 1220
+                window.minimumHeight = 780
+                window.maximumHeight = 780
+                window.width = 1220
+                window.height = 780
+            }
             activeView = queue[index]
             smokeTimer.ticks = 0
             if (activeView === "preview") {
@@ -305,6 +318,14 @@ ApplicationWindow {
     Item {
         id: uiChrome
         anchors.fill: parent
+
+        // grabToImage composites onto a transparent buffer; paint an opaque
+        // window fill first so empty page regions are not see-through.
+        Rectangle {
+            anchors.fill: parent
+            color: window.color
+            z: -1
+        }
 
         ColumnLayout {
             anchors.fill: parent

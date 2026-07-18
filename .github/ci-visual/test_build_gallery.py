@@ -272,10 +272,49 @@ class BuildGalleryTests(unittest.TestCase):
         self.assertEqual(extract_gui_view_label("gui-preview"), "preview")
         self.assertEqual(extract_gui_view_label("gui-compose"), "compose")
         self.assertEqual(
+            extract_gui_view_label("gui-smoke-ubuntu-latest-gui-preview"),
+            "preview",
+        )
+        self.assertEqual(
+            extract_gui_view_label("gui-smoke-windows-latest-gui-discover"),
+            "discover",
+        )
+        self.assertEqual(
             asset_key({"stage": "gui-smoke", "stem": "gui-discover"}),
             "discover",
         )
+        self.assertEqual(
+            asset_key(
+                {
+                    "stage": "gui-smoke",
+                    "stem": "gui-smoke-macos-latest-gui-automation",
+                }
+            ),
+            "automation",
+        )
         self.assertEqual(extract_display_label("apply-display-2"), "2")
+
+    def test_staged_manifest_stems_group_across_os(self) -> None:
+        """Older manifests stored the full staged stem; rows must still group."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            for os_name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+                name = f"gui-smoke-{os_name}-gui-compose.png"
+                write_png(root / name, 32, 24, (20, 20, 20))
+                # Simulate legacy write-manifest stem = full staged basename.
+                write_manifest(root, "gui-smoke", os_name, [name])
+                manifest_path = root / f"ci-visual-manifest-gui-smoke-{os_name}.json"
+                payload = json.loads(manifest_path.read_text(encoding="utf8"))
+                for image in payload["images"]:
+                    image["stem"] = Path(image["filename"]).stem
+                manifest_path.write_text(json.dumps(payload), encoding="utf8")
+
+            images = collect_images(root, load_manifests(root))
+            comparisons = build_comparisons(images)
+            self.assertEqual(len(comparisons), 1)
+            self.assertEqual(comparisons[0]["asset"], "compose")
+            self.assertEqual(len(comparisons[0]["os"]), 3)
+            self.assertNotEqual(comparisons[0]["status"], "single-os")
 
     def test_fail_on_mismatch_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:

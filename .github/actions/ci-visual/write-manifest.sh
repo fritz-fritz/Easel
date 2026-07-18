@@ -44,15 +44,22 @@ attempt = os.environ.get("GITHUB_RUN_ATTEMPT", "1")
 bundle_name = os.environ.get("BUNDLE_NAME", "")
 
 images = []
+stage = os.environ["INPUT_STAGE"]
+runner_os = os.environ["INPUT_RUNNER_OS"]
+prefix = "%s-%s-" % (stage, runner_os)
 for index in range(count):
     file_path = os.environ.get("STAGED_FILE_%d" % index, "")
     if not file_path:
         continue
     path = Path(file_path)
+    # Logical producer stem (e.g. gui-preview), not the staged
+    # gui-smoke-<os>-gui-preview name — so gallery rows group across OS.
+    name = path.stem
+    logical = name[len(prefix):] if name.startswith(prefix) else name
     images.append(
         {
             "filename": path.name,
-            "stem": path.stem,
+            "stem": logical,
         }
     )
 

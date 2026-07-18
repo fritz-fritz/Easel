@@ -435,12 +435,21 @@ def collect_images(
             if src is None:
                 continue
             meta = png_meta(src)
+            # Prefer the filename-inferred producer stem when present so older
+            # manifests that stored the full staged name still group across OS.
+            _stage, _os_name, inferred = infer_from_filename(filename)
+            manifest_stem = str(image.get("stem", Path(filename).stem))
+            stem = (
+                inferred
+                if inferred and inferred != Path(filename).stem
+                else manifest_stem
+            )
             images.append(
                 {
                     "stage": str(manifest["stage"]),
                     "os": str(manifest["os"]),
                     "filename": filename,
-                    "stem": str(image.get("stem", Path(filename).stem)),
+                    "stem": stem,
                     "src_path": src,
                     **meta,
                 }
@@ -1184,9 +1193,16 @@ def extract_display_label(stem: str) -> str:
 
 
 def extract_gui_view_label(stem: str) -> str:
-    """Map producer stem `gui-preview` → gallery row label `preview`."""
-    m = re.match(r"^gui-(.+)$", stem)
-    return m.group(1) if m else stem
+    """Map producer/staged stems to a stable view id.
+
+    Accepts both producer stems (`gui-preview`) and older staged stems
+    (`gui-smoke-ubuntu-latest-gui-preview`) so rows group across OS.
+    """
+    # Prefer the trailing `gui-<view>` segment (staged rename or producer name).
+    matches = list(re.finditer(r"(?:^|-)gui-(?!smoke(?:-|$))(?P<view>.+)$", stem))
+    if matches:
+        return matches[-1].group("view")
+    return stem
 
 
 def display_sort_key(label: str) -> tuple[int, str]:
