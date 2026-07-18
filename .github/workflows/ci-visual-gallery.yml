@@ -56,12 +56,15 @@ jobs:
             core.setOutput('pages_base', pagesBase);
             core.info(`PR #${prNumber} sha=${run.head_sha}`);
 
-      - name: Check out triggering commit
+      # workflow_run is a privileged context (secrets + write tokens). Never check out
+      # the PR head SHA here — that would execute untrusted code with those privileges.
+      # Gallery tooling always comes from the default branch; keep build_gallery.py
+      # backward-compatible with older ci-visual manifests.
+      - name: Check out default branch (trusted gallery tooling)
         uses: actions/checkout@v7
         with:
-          # Match the CI run that produced the artifacts so gallery tooling
-          # and manifest schema stay in sync with that commit.
-          ref: ${{ steps.meta.outputs.sha }}
+          ref: ${{ github.event.repository.default_branch }}
+          persist-credentials: false
 
       - name: Download CI visual artifacts
         continue-on-error: true

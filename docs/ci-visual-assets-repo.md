@@ -45,6 +45,9 @@ inline Markdown image embeds and the hosted HTML gallery are skipped.
    link to the HTML gallery
 
 Generator code lives in this repo under [`.github/ci-visual/`](../.github/ci-visual/).
+The privileged `workflow_run` publisher always checks out the **default branch** for that
+tooling (never the PR head) so untrusted PR code cannot run with deploy secrets.
+Keep `build_gallery.py` backward-compatible with older `ci-visual` manifests.
 
 ## Cursor Demo
 
