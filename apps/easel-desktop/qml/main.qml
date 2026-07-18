@@ -7,6 +7,7 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
+import Qt.labs.platform as Platform
 
 import net.fritztech.easel
 import "components"
@@ -50,11 +51,72 @@ ApplicationWindow {
         }
     }
 
+    ProfileController {
+        id: profiles
+    }
+
+    AutomationController {
+        id: automation
+    }
+
     Timer {
         interval: 1500
         running: pageStack.currentIndex === 2
         repeat: true
         onTriggered: library.pollWatch()
+    }
+
+    Timer {
+        interval: 30000
+        running: true
+        repeat: true
+        onTriggered: automation.pollDueSchedules()
+    }
+
+    Platform.SystemTrayIcon {
+        id: tray
+        visible: true
+        tooltip: qsTr("Easel")
+        onActivated: function(reason) {
+            if (reason === Platform.SystemTrayIcon.Trigger) {
+                window.visible = true
+                window.raise()
+                window.requestActivate()
+            }
+        }
+
+        menu: Platform.Menu {
+            Platform.MenuItem {
+                text: automation.paused ? qsTr("Resume rotation") : qsTr("Pause rotation")
+                onTriggered: automation.setRotationPaused(!automation.paused)
+            }
+            Platform.MenuItem {
+                text: qsTr("Skip next")
+                onTriggered: automation.skipNext()
+            }
+            Platform.MenuItem {
+                text: qsTr("Show status")
+                onTriggered: {
+                    automation.refresh()
+                    window.visible = true
+                    pageStack.currentIndex = 4
+                    window.raise()
+                }
+            }
+            Platform.MenuSeparator {}
+            Platform.MenuItem {
+                text: qsTr("Open Easel")
+                onTriggered: {
+                    window.visible = true
+                    window.raise()
+                    window.requestActivate()
+                }
+            }
+            Platform.MenuItem {
+                text: qsTr("Quit")
+                onTriggered: Qt.quit()
+            }
+        }
     }
 
     function probeScreens() {
@@ -77,6 +139,7 @@ ApplicationWindow {
                         physical ? physical.height : 0)
         }
         controller.commitScreenProbe()
+        automation.evaluateHotplug()
         compose.refreshPreview()
     }
 
@@ -485,7 +548,19 @@ ApplicationWindow {
                                 }
                             }
                             Label { text: qsTr("Schedule") }
-                            ComboBox { model: [qsTr("Manual"), qsTr("Every hour"), qsTr("Time of day")] }
+                            ComboBox {
+                                id: scheduleMode
+                                model: [qsTr("Manual"), qsTr("Every hour"), qsTr("Time of day")]
+                                currentIndex: compose.schedule_index
+                                onActivated: compose.schedule_index = currentIndex
+                            }
+                            Label { text: qsTr("Profile name") }
+                            TextField {
+                                id: profileNameField
+                                text: compose.profile_name
+                                Layout.fillWidth: true
+                                onEditingFinished: compose.profile_name = text
+                            }
                         }
                     }
 
@@ -493,7 +568,17 @@ ApplicationWindow {
                         Layout.alignment: Qt.AlignRight
                         Layout.rightMargin: 24
                         Layout.bottomMargin: 20
-                        Button { text: qsTr("Save profile") }
+                        Button {
+                            text: qsTr("Save profile")
+                            enabled: compose.source_path && compose.source_path.length > 0
+                            onClicked: {
+                                compose.profile_name = profileNameField.text
+                                compose.schedule_index = scheduleMode.currentIndex
+                                compose.saveProfile()
+                                profiles.refresh()
+                                automation.refresh()
+                            }
+                        }
                         Button {
                             text: qsTr("Apply")
                             highlighted: true
@@ -703,20 +788,158 @@ ApplicationWindow {
                     }
                 }
             }
-            PlaceholderPage { title: qsTr("Profiles"); description: qsTr("Reusable compositions and display groups.") }
-            PlaceholderPage { title: qsTr("Automation"); description: qsTr("Intervals, schedules, sunrise, and time-of-day rules.") }
-        }
-    }
+            ScrollView {
+                contentWidth: availableWidth
+                Component.onCompleted: profiles.refresh()
 
-    component PlaceholderPage: Pane {
-        id: placeholderPage
-        required property string title
-        required property string description
-        ColumnLayout {
-            anchors.centerIn: parent
-            spacing: 8
-            Label { text: placeholderPage.title; font.pixelSize: 28; font.weight: Font.DemiBold }
-            Label { text: placeholderPage.description; opacity: 0.68 }
+                ColumnLayout {
+                    x: 24
+                    y: 20
+                    width: parent.width - 48
+                    spacing: 18
+
+                    Label {
+                        text: qsTr("Profiles")
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        text: profiles.status_text
+                        opacity: 0.7
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    RowLayout {
+                        TextField {
+                            id: groupNameField
+                            placeholderText: qsTr("Display group name")
+                            Layout.fillWidth: true
+                        }
+                        Button {
+                            text: qsTr("Save current displays as group")
+                            onClicked: {
+                                profiles.saveGroupFromCurrent(groupNameField.text || qsTr("Desk"))
+                                groupNameField.text = ""
+                            }
+                        }
+                        Button {
+                            text: qsTr("Refresh")
+                            onClicked: profiles.refresh()
+                        }
+                    }
+
+                    Label { text: qsTr("Saved profiles"); font.weight: Font.DemiBold }
+                    Repeater {
+                        model: profiles.profile_model
+                        delegate: RowLayout {
+                            required property int index
+                            required property string modelData
+                            readonly property var payload: JSON.parse(modelData)
+                            Layout.fillWidth: true
+                            Label {
+                                text: payload.name + " · " + payload.displays + " display(s)"
+                                    + (payload.hasSchedule ? qsTr(" · scheduled") : "")
+                                Layout.fillWidth: true
+                            }
+                            Button {
+                                text: qsTr("Delete")
+                                onClicked: profiles.deleteProfileAt(index)
+                            }
+                        }
+                    }
+
+                    Label { text: qsTr("Display groups"); font.weight: Font.DemiBold }
+                    Repeater {
+                        model: profiles.group_model
+                        delegate: Label {
+                            required property string modelData
+                            readonly property var payload: JSON.parse(modelData)
+                            text: payload.name + " · " + payload.displays + " display(s)"
+                        }
+                    }
+                }
+            }
+
+            ScrollView {
+                contentWidth: availableWidth
+                Component.onCompleted: automation.refresh()
+
+                ColumnLayout {
+                    x: 24
+                    y: 20
+                    width: parent.width - 48
+                    spacing: 18
+
+                    Label {
+                        text: qsTr("Automation")
+                        font.pixelSize: 28
+                        font.weight: Font.DemiBold
+                    }
+                    Label {
+                        text: automation.status_text
+                        opacity: 0.7
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    RowLayout {
+                        Switch {
+                            text: qsTr("Pause rotation")
+                            checked: automation.paused
+                            onToggled: automation.setRotationPaused(checked)
+                        }
+                        Button {
+                            text: qsTr("Skip next")
+                            onClicked: automation.skipNext()
+                        }
+                        Button {
+                            text: qsTr("Check due schedules")
+                            onClicked: automation.pollDueSchedules()
+                        }
+                        Button {
+                            text: qsTr("Evaluate hotplug")
+                            onClicked: automation.evaluateHotplug()
+                        }
+                    }
+
+                    Label {
+                        text: qsTr("Next fire: ") + automation.next_fire_hint
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+                    Label {
+                        text: qsTr("Last apply: ") + automation.last_apply_reason
+                        Layout.fillWidth: true
+                        wrapMode: Text.WordWrap
+                    }
+
+                    Label { text: qsTr("Missing-output policy"); font.weight: Font.DemiBold }
+                    ComboBox {
+                        model: [
+                            qsTr("Skip missing displays"),
+                            qsTr("Defer until complete"),
+                            qsTr("Use all connected")
+                        ]
+                        currentIndex: automation.hotplug_policy_index
+                        onActivated: automation.applyHotplugPolicyIndex(currentIndex)
+                        Layout.fillWidth: true
+                    }
+
+                    Label { text: qsTr("Schedules"); font.weight: Font.DemiBold }
+                    Repeater {
+                        model: automation.schedule_model
+                        delegate: Label {
+                            required property string modelData
+                            readonly property var payload: JSON.parse(modelData)
+                            text: payload.name + (payload.enabled ? qsTr(" · enabled") : qsTr(" · disabled"))
+                                + " · " + payload.rule
+                            Layout.fillWidth: true
+                            wrapMode: Text.WordWrap
+                        }
+                    }
+                }
+            }
         }
     }
 }

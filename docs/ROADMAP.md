@@ -71,6 +71,13 @@ not expose.
 
 Exit: unattended, explainable wallpaper rotation survives restart and topology changes.
 
+**Status:** Implemented for still images (`easel-scheduler` TOML profile/group/schedule/queue
+store + SQLite rotation history, domain schedule/rotation/hotplug evaluators, Compose Save
+profile with Manual/Hourly/Time-of-day schedules, Profiles and Automation pages, system tray
+pause/skip/status, `easel` CLI, missing-output policy with arrangement rematch). Background
+poller records due selections and history; Compose remains the full render/apply path for the
+chosen still.
+
 ## Stage 5 — Dynamic stills
 
 - Time-of-day and solar-keyed still sets with deterministic fallback frames.

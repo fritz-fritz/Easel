@@ -42,6 +42,8 @@ mod qobject {
         #[qproperty(f64, focal_y)]
         #[qproperty(QString, source_path)]
         #[qproperty(bool, apply_busy)]
+        #[qproperty(i32, schedule_index)]
+        #[qproperty(QString, profile_name)]
         type ComposeController = super::ComposeControllerRust;
 
         #[qinvokable]
@@ -55,6 +57,10 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "apply_wallpaper"]
         fn applyWallpaper(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[rust_name = "save_profile"]
+        fn saveProfile(self: Pin<&mut Self>);
     }
 
     impl cxx_qt::Threading for ComposeController {}
@@ -72,6 +78,8 @@ pub struct ComposeControllerRust {
     focal_y: f64,
     source_path: QString,
     apply_busy: bool,
+    schedule_index: i32,
+    profile_name: QString,
     job_generation: AtomicU64,
     apply_generation: AtomicU64,
     job_tx: Sender<WorkerJob>,
@@ -90,6 +98,8 @@ impl Default for ComposeControllerRust {
             focal_y: 0.5,
             source_path: QString::default(),
             apply_busy: false,
+            schedule_index: 0,
+            profile_name: QString::from("Compose"),
             job_generation: AtomicU64::new(0),
             apply_generation: AtomicU64::new(0),
             job_tx: worker_sender(),
@@ -178,6 +188,54 @@ impl qobject::ComposeController {
             self.as_mut().set_preview_status(QString::from(
                 "Apply failed: background worker is unavailable",
             ));
+        }
+    }
+
+    fn save_profile(mut self: Pin<&mut Self>) {
+        let source = self.source_path().to_string();
+        if source.trim().is_empty() {
+            self.as_mut()
+                .set_preview_status(QString::from("Open a local image before saving a profile"));
+            return;
+        }
+        let name = {
+            let value = self.profile_name().to_string();
+            if value.trim().is_empty() {
+                "Compose".to_owned()
+            } else {
+                value
+            }
+        };
+        let schedule_index = *self.schedule_index();
+        match crate::profile_controller::save_compose_profile(
+            &name,
+            &source,
+            fit_mode_from_index(*self.fit_mode_index()),
+            layout_mode_from_index(*self.layout_mode_index()),
+            if self.zoom().is_finite() {
+                (*self.zoom()).max(1.0)
+            } else {
+                1.0
+            },
+            (*self.focal_x()).clamp(0.0, 1.0),
+            (*self.focal_y()).clamp(0.0, 1.0),
+            schedule_index,
+        ) {
+            Ok(profile) => {
+                self.as_mut().set_preview_status(QString::from(
+                    format!(
+                        "Saved profile '{}' ({})",
+                        profile.name,
+                        profile.id.to_hyphenated_string()
+                    )
+                    .as_str(),
+                ));
+            }
+            Err(error) => {
+                self.as_mut().set_preview_status(QString::from(
+                    format!("Save profile failed: {error}").as_str(),
+                ));
+            }
         }
     }
 }

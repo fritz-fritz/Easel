@@ -22,6 +22,7 @@ easel-library = { path = "../../crates/easel-library" }
 easel-platform = { path = "../../crates/easel-platform" }
 easel-providers = { path = "../../crates/easel-providers" }
 easel-render = { path = "../../crates/easel-render" }
+easel-scheduler = { path = "../../crates/easel-scheduler" }
 
 [build-dependencies]
 cxx-qt-build = { workspace = true, features = ["link_qt_object_files"] }

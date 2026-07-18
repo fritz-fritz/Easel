@@ -17,9 +17,11 @@ fn main() {
     )
     .files([
         "src/app_controller.rs",
+        "src/automation_controller.rs",
         "src/compose_controller.rs",
         "src/discover_controller.rs",
         "src/library_controller.rs",
+        "src/profile_controller.rs",
     ])
     .build();
 }

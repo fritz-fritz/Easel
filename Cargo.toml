@@ -1,12 +1,14 @@
 [workspace]
 resolver = "2"
 members = [
+    "apps/easel-cli",
     "apps/easel-desktop",
     "crates/easel-core",
     "crates/easel-library",
     "crates/easel-platform",
     "crates/easel-providers",
     "crates/easel-render",
+    "crates/easel-scheduler",
 ]
 default-members = [
     "crates/easel-core",
@@ -14,6 +16,7 @@ default-members = [
     "crates/easel-platform",
     "crates/easel-providers",
     "crates/easel-render",
+    "crates/easel-scheduler",
 ]
 
 [workspace.package]
@@ -26,6 +29,7 @@ repository = "https://github.com/fritz-fritz/easel"
 
 [workspace.dependencies]
 async-trait = "0.1"
+clap = { version = "4.5", features = ["derive"] }
 cxx = "1.0.176"
 cxx-qt = "0.9.1"
 cxx-qt-build = "0.9.1"
