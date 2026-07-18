@@ -8,6 +8,7 @@
 //! existing raster planner → encode Apple/Plasma HEIC with schedule XMP.
 
 use std::collections::HashMap;
+use std::fs;
 use std::path::{Path, PathBuf};
 
 use easel_core::{Display, DisplayId, DynamicStillSet};
@@ -19,14 +20,38 @@ use image::RgbaImage;
 use thiserror::Error;
 
 use crate::encode::{HeicEncodeError, encode_still_set_heic};
+use crate::plasma_day_night::{
+    PlasmaDayNightError, appearance_frames_from_set, write_plasma_day_night_package,
+};
 
 /// Native container a backend can host without Easel polling frames.
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NativeDynamicFormat {
     /// Apple Dynamic Desktop HEIC (`apple_desktop` XMP).
     AppleHeic,
-    /// Plasma dynamic wallpaper HEIC/AVIF package (same Apple XMP interchange today).
+    /// Community Plasma solar plugin package (zzag HEIC/AVIF interchange).
     PlasmaHeic,
+    /// Built-in Plasma day/night wallpaper package (`images` + `images_dark`).
+    PlasmaDayNight,
+}
+
+/// Chooses the best native package format for a still set on a given host family.
+#[must_use]
+pub fn preferred_native_format(
+    set: &DynamicStillSet,
+    host: NativeDynamicFormat,
+) -> NativeDynamicFormat {
+    match host {
+        NativeDynamicFormat::PlasmaDayNight | NativeDynamicFormat::PlasmaHeic => {
+            if set.schedule_kind == easel_core::DynamicScheduleKind::Appearance {
+                NativeDynamicFormat::PlasmaDayNight
+            } else {
+                // Dense solar/h24 needs the community plugin or still-poller fallback.
+                NativeDynamicFormat::PlasmaHeic
+            }
+        }
+        NativeDynamicFormat::AppleHeic => NativeDynamicFormat::AppleHeic,
+    }
 }
 
 /// One planned native package for a single display.
@@ -147,12 +172,34 @@ pub fn encode_per_display_bundles(
         let images = crops.remove(&target.display_id).ok_or_else(|| {
             BundleEncodeError::MissingCrop(target.display_id.to_hyphenated_string())
         })?;
-        let file_name = format!(
-            "v{RENDERER_VERSION}_{}.heic",
-            target.file_stem.replace('-', "")
-        );
-        let out_path = output_dir.join(file_name);
-        encode_still_set_heic(set, &images, &out_path)?;
+        let out_path = match target.format {
+            NativeDynamicFormat::AppleHeic | NativeDynamicFormat::PlasmaHeic => {
+                let file_name = format!(
+                    "v{RENDERER_VERSION}_{}.heic",
+                    target.file_stem.replace('-', "")
+                );
+                let out_path = output_dir.join(file_name);
+                encode_still_set_heic(set, &images, &out_path)?;
+                out_path
+            }
+            NativeDynamicFormat::PlasmaDayNight => {
+                let (light, dark) = appearance_frames_from_set(set, &images)?;
+                let pkg_dir = output_dir.join(format!(
+                    "v{RENDERER_VERSION}_{}",
+                    target.file_stem.replace('-', "")
+                ));
+                let package = write_plasma_day_night_package(
+                    &pkg_dir,
+                    format!("easel.{}", target.file_stem.replace('-', ".")),
+                    &set.name,
+                    &light,
+                    &dark,
+                    set.request_cross_fade,
+                )?;
+                // Apply path uses the light image; Plasma discovers images_dark beside it.
+                package.image_path
+            }
+        };
         encoded.push(EncodedDynamicBundle {
             display_id: target.display_id,
             path: out_path,
@@ -168,17 +215,31 @@ pub fn cached_bundle_path(
     set: &DynamicStillSet,
     display_id: DisplayId,
     output_dir: &Path,
+    format: NativeDynamicFormat,
 ) -> Option<PathBuf> {
     let stem = format!(
         "{}-{}",
         set.id.to_hyphenated_string(),
         display_id.to_hyphenated_string()
     );
-    let path = output_dir.join(format!(
-        "v{RENDERER_VERSION}_{}.heic",
-        stem.replace('-', "")
-    ));
-    path.is_file().then_some(path)
+    let token = stem.replace('-', "");
+    match format {
+        NativeDynamicFormat::AppleHeic | NativeDynamicFormat::PlasmaHeic => {
+            let path = output_dir.join(format!("v{RENDERER_VERSION}_{token}.heic"));
+            path.is_file().then_some(path)
+        }
+        NativeDynamicFormat::PlasmaDayNight => {
+            let images = output_dir.join(format!("v{RENDERER_VERSION}_{token}/contents/images"));
+            if !images.is_dir() {
+                return None;
+            }
+            fs::read_dir(images)
+                .ok()?
+                .filter_map(Result::ok)
+                .map(|entry| entry.path())
+                .find(|path| path.extension().is_some_and(|ext| ext == "png"))
+        }
+    }
 }
 
 /// Bundle planning failures.
@@ -221,6 +282,9 @@ pub enum BundleEncodeError {
     /// HEIC encode failure.
     #[error(transparent)]
     Encode(#[from] HeicEncodeError),
+    /// Plasma day/night package failure.
+    #[error(transparent)]
+    PlasmaDayNight(#[from] PlasmaDayNightError),
     /// Filesystem failure.
     #[error(transparent)]
     Io(#[from] std::io::Error),
@@ -291,6 +355,9 @@ mod tests {
         .expect("encode bundles");
         assert_eq!(encoded.len(), 1);
         assert!(encoded[0].path.is_file());
-        assert!(cached_bundle_path(&set, displays[0].id, &out).is_some());
+        assert!(
+            cached_bundle_path(&set, displays[0].id, &out, NativeDynamicFormat::AppleHeic)
+                .is_some()
+        );
     }
 }

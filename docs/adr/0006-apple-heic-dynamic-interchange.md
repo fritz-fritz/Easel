@@ -58,8 +58,8 @@ evaluate.
   correct; pre-render/cache keys include arrangement geometry and renderer version.
 - Windows users still get dynamic behavior via Easel's poller; they do not get a native HEIC
   host until Microsoft exposes one.
-- Plasma hosts native packages when a dynamic wallpaper plugin is installed
-  (`native_dynamic_bundle`); otherwise still-frame apply remains the safe default.
+- Plasma hosting is split (ADR 0007): built-in day/night packages for Appearance sets;
+  community zzag HEIC for dense solar when installed; still poller otherwise.
 - Encode + per-display crop cache keys include arrangement geometry and renderer version.
 
 ## References

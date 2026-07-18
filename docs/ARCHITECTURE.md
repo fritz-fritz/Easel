@@ -52,8 +52,8 @@ It has no Qt, HTTP, image-decoder, or OS dependency.
 
 `easel-dynamic` imports and exports Apple Dynamic Desktop HEIC (and Plasma-compatible
 packages): XMP `apple_desktop` metadata, binary plist schedules, per-frame decode/encode via
-libheif, and per-display crop→encode so physical spanning can ship one OS-hosted package per
-output. See ADR 0006.
+libheif, per-display crop→encode, and Plasma day/night wallpaper packages for Appearance
+sets. See ADR 0006 and ADR 0007.
 
 ## Renderer
 

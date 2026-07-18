@@ -97,8 +97,9 @@ topology changes on every supported static backend.
 cache, TOML persistence, SQLite last-applied catch-up, still-frame poller with atomic
 pre-render, Compose Import HEIC + timeline evaluation against the loaded set,
 `easel stills` / `inspect-heic` / `import-heic`). Apply prefers native dynamic bundles when
-`BackendCapabilities::native_dynamic_bundle` is true (macOS; Plasma when a dynamic wallpaper
-plugin is installed), otherwise the still poller. Windows remains still-poller-only.
+`BackendCapabilities::native_dynamic_bundle` is true: macOS HEIC; Plasma built-in day/night
+packages for Appearance sets (KNightTime) and community zzag HEIC for dense solar when
+present (ADR 0007); otherwise the still poller. Windows remains still-poller-only.
 
 ## Stage 6 — Live media
 

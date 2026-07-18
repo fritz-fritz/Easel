@@ -7,7 +7,9 @@
 use std::path::{Path, PathBuf};
 
 use easel_core::{DynamicStillSet, Profile, resolve_displays};
-use easel_dynamic::{NativeDynamicFormat, cached_bundle_path, encode_per_display_bundles};
+use easel_dynamic::{
+    NativeDynamicFormat, cached_bundle_path, encode_per_display_bundles, preferred_native_format,
+};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{
     CompositionSettings, RENDERER_VERSION, RasterJob, RenderPurpose, RenderRequest,
@@ -122,12 +124,28 @@ pub fn apply_native_dynamic(
     let stored = last_host_fingerprint
         .map(str::to_owned)
         .or_else(|| read_native_host_fingerprint(set));
+    let host_hint = native_format_for_backend();
+    let format = preferred_native_format(set, host_hint);
     if stored.as_deref() == Some(fingerprint.as_str())
         && displays
             .iter()
-            .all(|display| cached_bundle_path(set, display.id, &output_dir).is_some())
+            .all(|display| cached_bundle_path(set, display.id, &output_dir, format).is_some())
     {
         return Ok(NativeDynamicApply::AlreadyHosting { fingerprint });
+    }
+
+    // Dense solar/h24 on Plasma without the community plugin cannot be OS-hosted.
+    if matches!(format, NativeDynamicFormat::PlasmaHeic)
+        && !plasma_solar_plugin_available()
+        && matches!(
+            host_hint,
+            NativeDynamicFormat::PlasmaDayNight | NativeDynamicFormat::PlasmaHeic
+        )
+    {
+        return Err(
+            "Plasma solar/h24 native host requires com.github.zzag.dynamic; use still poller"
+                .into(),
+        );
     }
 
     let encoded = encode_per_display_bundles(
@@ -135,7 +153,7 @@ pub fn apply_native_dynamic(
         frame_paths,
         &displays,
         &composition,
-        NativeDynamicFormat::AppleHeic,
+        format,
         &output_dir,
     )
     .map_err(|error| error.to_string())?;
@@ -232,6 +250,18 @@ fn write_native_host_fingerprint(set: &DynamicStillSet, fingerprint: &str) -> Re
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
     std::fs::write(path, fingerprint).map_err(|error| error.to_string())
+}
+
+fn native_format_for_backend() -> NativeDynamicFormat {
+    match easel_platform::select_wallpaper_backend() {
+        Ok(backend) if backend.id() == "plasma6" => NativeDynamicFormat::PlasmaDayNight,
+        Ok(backend) if backend.id() == "macos" => NativeDynamicFormat::AppleHeic,
+        _ => NativeDynamicFormat::AppleHeic,
+    }
+}
+
+fn plasma_solar_plugin_available() -> bool {
+    easel_platform::plasma_dynamic_plugin_id().is_some()
 }
 
 #[cfg(test)]

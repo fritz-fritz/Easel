@@ -30,8 +30,10 @@ impl WallpaperBackend for PlasmaBackend {
             activities: false,
             workspaces: false,
             lock_screen: false,
+            // Built-in Plasma day/night packages (KNightTime) always qualify; dense solar HEIC
+            // additionally needs the community dynamic plugin (see ADR 0006).
+            native_dynamic_bundle: true,
             cross_fade: false,
-            native_dynamic_bundle: plasma_dynamic_plugin_id().is_some(),
         }
     }
 
@@ -48,8 +50,21 @@ impl WallpaperBackend for PlasmaBackend {
                 for wallpaper in displays {
                     self.validate_output_path(&wallpaper.path)?;
                 }
-                let plugin = plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?;
-                let script = build_plasma_native_dynamic_script(displays, plugin)?;
+                let uses_heic = displays.iter().any(|wallpaper| {
+                    wallpaper.path.extension().is_some_and(|ext| {
+                        ext.eq_ignore_ascii_case("heic") || ext.eq_ignore_ascii_case("avif")
+                    })
+                });
+                let (plugin, sunrise_mode) = if uses_heic {
+                    (
+                        plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?,
+                        false,
+                    )
+                } else {
+                    // Built-in day/night wallpaper packages via org.kde.image + KNightTime.
+                    ("org.kde.image", true)
+                };
+                let script = build_plasma_native_dynamic_script(displays, plugin, sunrise_mode)?;
                 evaluate_plasma_script(&script)
             }
             WallpaperOutput::VirtualDesktop(_) => Err(BackendError::UnsupportedOutput),
@@ -104,20 +119,25 @@ fn plasma_wallpaper_roots() -> Vec<PathBuf> {
 pub fn build_plasma_wallpaper_script(
     displays: &[DisplayWallpaper],
 ) -> Result<String, BackendError> {
-    build_plasma_plugin_script(displays, "org.kde.image")
+    build_plasma_plugin_script(displays, "org.kde.image", false)
 }
 
-/// Builds a Plasma script that hosts native dynamic HEIC packages per display.
+/// Builds a Plasma script that hosts native dynamic packages per display.
+///
+/// When `sunrise_mode` is true, also requests Plasma's built-in day/night schedule
+/// (`DynamicMode = 1` = sunrise/sunset via KNightTime).
 pub fn build_plasma_native_dynamic_script(
     displays: &[DisplayWallpaper],
     plugin_id: &str,
+    sunrise_mode: bool,
 ) -> Result<String, BackendError> {
-    build_plasma_plugin_script(displays, plugin_id)
+    build_plasma_plugin_script(displays, plugin_id, sunrise_mode)
 }
 
 fn build_plasma_plugin_script(
     displays: &[DisplayWallpaper],
     plugin_id: &str,
+    sunrise_mode: bool,
 ) -> Result<String, BackendError> {
     let mut assignments = String::new();
     for wallpaper in displays {
@@ -134,6 +154,13 @@ setForGeometry({left}, {top}, {width}, {height}, "{url}");
             url = escape_js_string(&file_url),
         ));
     }
+
+    let dynamic_mode_line = if sunrise_mode {
+        // 0 = follow color scheme, 1 = sunrise/sunset (KNightTime).
+        "            try { desktop.writeConfig(\"DynamicMode\", 1); } catch (e) {}\n"
+    } else {
+        ""
+    };
 
     Ok(format!(
         r#"
@@ -161,7 +188,7 @@ function setForGeometry(left, top, width, height, imageUrl) {{
             desktop.wallpaperPlugin = "{plugin}";
             desktop.currentConfigGroup = ["Wallpaper", "{plugin}", "General"];
             desktop.writeConfig("Image", imageUrl);
-            desktop.reloadConfig();
+{dynamic_mode}            desktop.reloadConfig();
             return;
         }}
     }}
@@ -170,6 +197,7 @@ function setForGeometry(left, top, width, height, imageUrl) {{
 {assignments}
 "#,
         plugin = escape_js_string(plugin_id),
+        dynamic_mode = dynamic_mode_line,
     ))
 }
 
@@ -336,9 +364,29 @@ mod tests {
             },
         );
         let script =
-            build_plasma_native_dynamic_script(&[wallpaper], "com.github.zzag.dynamic").unwrap();
+            build_plasma_native_dynamic_script(&[wallpaper], "com.github.zzag.dynamic", false)
+                .unwrap();
         assert!(script.contains("com.github.zzag.dynamic"));
         assert!(script.contains("writeConfig(\"Image\""));
+        assert!(!script.contains("DynamicMode"));
+    }
+
+    #[test]
+    fn day_night_script_requests_sunrise_mode() {
+        let path = std::env::temp_dir().join("easel-plasma-daynight/contents/images/32x24.png");
+        let wallpaper = sample_wallpaper(
+            path.to_str().expect("temp path is UTF-8"),
+            LogicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        );
+        let script =
+            build_plasma_native_dynamic_script(&[wallpaper], "org.kde.image", true).unwrap();
+        assert!(script.contains("org.kde.image"));
+        assert!(script.contains("DynamicMode"));
     }
 
     #[test]

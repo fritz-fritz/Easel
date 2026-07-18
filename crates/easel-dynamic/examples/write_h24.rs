@@ -32,5 +32,5 @@ fn main() {
         },
     ];
     encode_dynamic_heic(&frames, AppleMetadataFlavor::H24, &path).expect("encode");
-    println!("{}", path);
+    println!("{path}");
 }

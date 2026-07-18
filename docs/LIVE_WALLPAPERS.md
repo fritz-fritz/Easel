@@ -26,7 +26,7 @@ live-host problem (Stage 6).
 
 | Platform/session | Dynamic stills | Animated/video host | Initial position |
 | --- | --- | --- | --- |
-| KDE Plasma 6 | Still-frame poller; native HEIC host when a dynamic wallpaper plugin is installed (`native_dynamic_bundle`). | Documented QML wallpaper plugin model. | First supported live target. |
+| KDE Plasma 6 | Appearance sets → built-in day/night packages (`org.kde.image` + KNightTime). Dense solar → still poller, or community zzag HEIC when installed. See ADR 0007. | Documented QML wallpaper plugin model. | First supported live target. |
 | Other Linux desktops | Static settings backend applies each frame. | Desktop/compositor-specific; no universal Wayland attachment. | Probe individually; poster fallback. |
 | Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | Public wallpaper API does not expose video playback. | Feasibility spike; experimental if safe. |
 | macOS | Native Dynamic Desktop HEIC host (`native_dynamic_bundle`); System Events still apply as fallback. | Public `setDesktopImageURL` contract is still-image oriented. | Feasibility spike; experimental if safe. |

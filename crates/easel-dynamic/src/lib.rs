@@ -13,11 +13,12 @@ mod encode;
 mod heic;
 mod metadata;
 mod persist;
+mod plasma_day_night;
 
 pub use bundle::{
     BundleEncodeError, BundlePlanError, DynamicBundlePlan, DynamicBundleTarget,
     EncodedDynamicBundle, NativeDynamicFormat, cached_bundle_path, encode_per_display_bundles,
-    plan_per_display_bundles,
+    plan_per_display_bundles, preferred_native_format,
 };
 pub use encode::{EncodeFrame, HeicEncodeError, encode_dynamic_heic, encode_still_set_heic};
 pub use heic::{
@@ -29,3 +30,7 @@ pub use metadata::{
     parse_apple_desktop_plist, scrape_xmp_packet,
 };
 pub use persist::{PersistError, PersistedDynamicImport, persist_imported_desktop};
+pub use plasma_day_night::{
+    PlasmaDayNightError, PlasmaDayNightPackage, appearance_frames_from_set,
+    write_plasma_day_night_package,
+};
