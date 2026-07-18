@@ -4,6 +4,8 @@
 
 //! Shared display session state, Qt probe ingestion, and arrangement persistence.
 
+#![allow(clippy::similar_names)]
+
 use std::fs;
 use std::io::Write;
 use std::path::{Path, PathBuf};
@@ -90,15 +92,9 @@ pub fn current_preview_displays() -> Vec<Display> {
         .collect()
 }
 
-/// Normalized layout rows for MonitorPreview.
+/// Layout preview using physical millimeters (`physical == true`) or logical desktop space.
 ///
 /// Encoded as `id|xFactor|yFactor|wFactor|hFactor|label|originXmm|originYmm|widthMm|heightMm|bezelMm`.
-#[must_use]
-pub fn layout_preview_model() -> Vec<String> {
-    layout_preview_model_mode(true)
-}
-
-/// Layout preview using physical millimeters (`physical == true`) or logical desktop space.
 #[must_use]
 pub fn layout_preview_model_mode(physical: bool) -> Vec<String> {
     let displays = current_displays();
