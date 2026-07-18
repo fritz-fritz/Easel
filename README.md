@@ -9,7 +9,7 @@ This repository contains the Stage 1–4 still-image vertical slice: decode/fit/
 physical multi-display composition, Compose previews, Qt display enumeration with arrangement
 persistence, Plasma 6 / Windows still apply backends, local library indexing, Openverse
 discovery with retained provenance, reusable profiles/display groups, scheduled rotation with
-pause/skip/CLI/tray controls, and hotplug missing-output policy. Use Compose → Open image →
+pause/skip/CLI/toolbar controls, and hotplug missing-output policy. Use Compose → Open image →
 Apply, or Discover/Library to select an image first; save a profile and configure Automation for
 unattended rotation. CI captures only apply-payload rasters and Qt GUI smoke screenshots for
 review. Animated/live media hosts and additional Linux desktops remain deliberately unimplemented.

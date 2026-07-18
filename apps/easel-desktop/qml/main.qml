@@ -7,7 +7,6 @@ import QtQuick.Controls
 import QtQuick.Dialogs
 import QtQuick.Layouts
 import QtQuick.Window
-import Qt.labs.platform as Labs
 
 import net.fritztech.easel
 import "components"
@@ -71,41 +70,6 @@ ApplicationWindow {
         running: controller.smoke_out_dir.length === 0
         repeat: true
         onTriggered: automation.runTick()
-    }
-
-    Labs.SystemTrayIcon {
-        id: tray
-        visible: available && controller.smoke_out_dir.length === 0
-        tooltip: qsTr("Easel")
-        onActivated: window.show()
-
-        menu: Labs.Menu {
-            Labs.MenuItem {
-                text: automation.paused ? qsTr("Resume rotation") : qsTr("Pause rotation")
-                onTriggered: automation.setAutomationPaused(!automation.paused)
-            }
-            Labs.MenuItem {
-                text: qsTr("Skip to next")
-                onTriggered: automation.skipNext()
-            }
-            Labs.MenuItem {
-                text: qsTr("Run schedule tick")
-                onTriggered: automation.runTick()
-            }
-            Labs.MenuSeparator {}
-            Labs.MenuItem {
-                text: qsTr("Show Easel")
-                onTriggered: {
-                    window.show()
-                    window.raise()
-                    window.requestActivate()
-                }
-            }
-            Labs.MenuItem {
-                text: qsTr("Quit")
-                onTriggered: Qt.quit()
-            }
-        }
     }
 
     function probeScreens() {

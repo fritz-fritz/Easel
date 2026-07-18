@@ -102,8 +102,9 @@ in Compose. Domain types remain in `easel-core`; this crate only adds IO, watchi
 `easel-scheduler` owns deterministic schedule evaluation (interval, time-of-day, sunrise/sunset,
 calendar rules), avoid-repeat rotation selection, and the versioned TOML automation catalog shape
 (profiles, display groups, queues, schedules, runtime state). The desktop app persists the catalog
-under the user config directory and exposes pause/skip/tick through the UI, system tray, and
-`--cli` commands.
+under the user config directory and exposes pause/skip/tick through the UI toolbar, Automation
+page, and `--cli` commands. A native OS system tray icon is deferred until the desktop host uses
+Qt Widgets/`QApplication` (Qt Labs Platform requirement).
 
 ## Image providers
 

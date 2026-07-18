@@ -74,8 +74,9 @@ Exit: unattended, explainable wallpaper rotation survives restart and topology c
 **Status:** Implemented for still images (TOML automation catalog with profiles, display
 groups, rotation queues, and schedules; `easel-scheduler` interval / time-of-day /
 sunrise-sunset / calendar evaluation with avoid-repeat selection; pause / skip / tick CLI;
-system-tray and toolbar controls; hotplug missing-output policy applied on Compose automation
-and display rematch). Dynamic-still authoring remains Stage 5.
+toolbar tray-equivalent pause/skip controls; hotplug missing-output policy applied on Compose
+automation and display rematch). Native `SystemTrayIcon` awaits a Qt Widgets/`QApplication`
+host; dynamic-still authoring remains Stage 5.
 
 ## Stage 5 — Dynamic stills
 
