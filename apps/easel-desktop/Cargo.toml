@@ -13,10 +13,14 @@ cxx-qt.workspace = true
 cxx-qt-lib = { workspace = true, features = ["qt_full"] }
 directories = "6.0.0"
 serde = { workspace = true, features = ["derive"] }
+serde_json.workspace = true
+tokio.workspace = true
 toml.workspace = true
 url.workspace = true
 easel-core = { path = "../../crates/easel-core" }
+easel-library = { path = "../../crates/easel-library" }
 easel-platform = { path = "../../crates/easel-platform" }
+easel-providers = { path = "../../crates/easel-providers" }
 easel-render = { path = "../../crates/easel-render" }
 
 [build-dependencies]

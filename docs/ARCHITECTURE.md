@@ -91,6 +91,12 @@ is not acceptable because decode latency creates visible drift at bezels. Source
 discarded. Hardware decoding is preferred but treated as a probed capability rather than a
 portable guarantee.
 
+## Library store
+
+`easel-library` owns the local folder index, filesystem watching, SQLite asset/collection/
+favorites/history persistence, and the HTTPS acquisition cache used when a remote still is opened
+in Compose. Domain types remain in `easel-core`; this crate only adds IO, watching, and storage.
+
 ## Image providers
 
 `easel-providers` normalizes approved still-image sources into a common result while preserving

@@ -129,7 +129,7 @@ impl Default for AppControllerRust {
         Self {
             status_text: "Ready".into(),
             display_count: count,
-            online_sources_available: false,
+            online_sources_available: true,
             layout_model: layout,
             smoke_out_dir: smoke_out.into(),
             smoke_image_path: smoke_image.into(),
