@@ -49,6 +49,12 @@ The privileged `workflow_run` publisher always checks out the **default branch**
 tooling (never the PR head) so untrusted PR code cannot run with deploy secrets.
 Keep `build_gallery.py` backward-compatible with older `ci-visual` manifests.
 
+CI visual PNGs are uploaded with `actions/upload-artifact@v7` and `archive: false`. The
+gallery workflow must use `actions/download-artifact@v8` to fetch them; v7 treats the
+raw files as zip archives and fails after retries. When the triggering CI run has no
+visual artifacts, the gallery job exits early as success (no empty Pages site or sticky
+comment).
+
 ## Cursor Demo
 
 Cursor Cloud Agent **Demo** artifacts are a separate, agent-scoped surface. GitHub Actions
