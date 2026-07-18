@@ -130,7 +130,7 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 | Stage | Expectation | Gate |
 | --- | --- | --- |
 | `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail on digest/pixel mismatch (including ±1 LSB near-matches, which are labeled `match-tolerant` for debugging) or size mismatch |
-| `gui-smoke` | Platform chrome differs; sticky comment + HTML show a **View × OS** matrix (fixture `preview` plus selected full-window pages) | Informational only (hashes/dims still shown) |
+| `gui-smoke` | Platform chrome can differ; sticky comment + HTML show a **View × OS** matrix (fixture `preview` plus selected full-window pages). Gallery tooling runs from `main` (privileged `workflow_run`); producer manifests must store OS-independent stems so rows group across runners. Full-window grabs target a fixed **1220×780** design size (preview **900×330**) so dimensions match across OS when the host screen allows a locked window. | Informational only (hashes still shown; pixel-identical output is not required while Fusion/platform chrome varies) |
 
 Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
 

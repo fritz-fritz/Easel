@@ -98,7 +98,8 @@ jobs:
             }
 
       # workflow_run is a privileged context (secrets + write tokens). Never check out
-      # the PR head SHA here — that would execute untrusted code with those privileges.
+      # the PR head SHA here — that would execute untrusted code with those privileges
+      # (CodeQL: actions/checkout-of-untrusted-code-in-privileged-context).
       # Gallery tooling always comes from the default branch; keep build_gallery.py
       # backward-compatible with older ci-visual manifests (filename/stem fields).
       - name: Check out default branch (trusted gallery tooling)
