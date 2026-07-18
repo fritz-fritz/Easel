@@ -294,7 +294,6 @@ def collect_images(
                     "os": str(manifest["os"]),
                     "filename": filename,
                     "stem": str(image.get("stem", Path(filename).stem)),
-                    "artifact_url": str(image.get("artifact_url", "")),
                     "src_path": src,
                     **meta,
                 }
@@ -316,7 +315,6 @@ def collect_images(
                 "os": os_name,
                 "filename": filename,
                 "stem": stem,
-                "artifact_url": "",
                 "src_path": src,
                 **meta,
             }
@@ -495,7 +493,6 @@ def build_comparisons(images: list[dict]) -> list[dict]:
                         "bytes": by_os[os_name]["bytes"],
                         "width": by_os[os_name].get("width"),
                         "height": by_os[os_name].get("height"),
-                        "artifact_url": by_os[os_name].get("artifact_url", ""),
                     }
                     for os_name in all_os
                 },
@@ -869,8 +866,8 @@ def markdown_os_table(
     cache_buster: str = "",
 ) -> list[str]:
     lines = [
-        "| OS | Preview | Size | SHA-256 (12) | Artifact |",
-        "| --- | --- | --- | --- | --- |",
+        "| OS | Preview | Size | SHA-256 (12) |",
+        "| --- | --- | --- | --- |",
     ]
     for image in sorted(images, key=lambda i: i["os"]):
         preview = (
@@ -885,12 +882,9 @@ def markdown_os_table(
             if deployed
             else "_deploy pending_"
         )
-        artifact = (
-            f"[open]({image['artifact_url']})" if image.get("artifact_url") else "—"
-        )
         lines.append(
             f"| `{image['os']}` | {preview} | {dim_label(image)} · {image['bytes']}B | "
-            f"`{short_hash(image.get('sha256'))}` | {artifact} |"
+            f"`{short_hash(image.get('sha256'))}` |"
         )
     return lines
 

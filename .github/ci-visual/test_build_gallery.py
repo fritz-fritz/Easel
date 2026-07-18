@@ -51,12 +51,11 @@ def write_manifest(root: Path, stage: str, os_name: str, filenames: list[str]) -
         "run_id": "1",
         "run_attempt": "1",
         "repository": "fritz-fritz/Easel",
+        "bundle": f"ci-visual-{stage}-{os_name}",
         "images": [
             {
                 "filename": name,
                 "stem": Path(name).stem.split(f"{stage}-{os_name}-", 1)[-1],
-                "artifact_id": None,
-                "artifact_url": "",
             }
             for name in filenames
         ],

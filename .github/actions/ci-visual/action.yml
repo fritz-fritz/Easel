@@ -1,7 +1,7 @@
 name: ci-visual
 description: >
-  Stage, rename, and upload harness visual PNGs as non-archived artifacts,
-  emit a JSON manifest, and append a step-summary section.
+  Stage, rename, and upload harness visual PNGs as one zip artifact per
+  stage×OS (manifest included), and append a step-summary section.
 
 inputs:
   stage:
@@ -13,8 +13,8 @@ inputs:
   pattern:
     description: >
       Glob of files to publish relative to source-dir (e.g. apply-display-*.png).
-      At most 12 matches are uploaded (upload-artifact archive:false limit); extras
-      are dropped with a warning in stage.sh.
+      Staged files are uploaded together in one zip (no per-file archive:false cap).
+      A soft warning fires above 64 matches; the step errors above 256.
     required: true
   name-template:
     description: >
@@ -44,6 +44,9 @@ outputs:
   staged-dir:
     description: Directory containing staged files
     value: ${{ steps.stage.outputs.staged-dir }}
+  bundle-name:
+    description: Upload artifact name for this stage×OS zip
+    value: ${{ steps.stage.outputs.bundle-name }}
 
 runs:
   using: composite
@@ -61,130 +64,7 @@ runs:
         INPUT_SUMMARY_TITLE: ${{ inputs.summary-title }}
       run: bash "${{ github.action_path }}/stage.sh"
 
-    # upload-artifact must be a real `uses:` step so ACTIONS_RUNTIME_TOKEN is available.
-    # archive:false accepts a single file per step; support up to 12 staged PNGs.
-    # Consumers must download with actions/download-artifact@v8 (v7 cannot extract raw artifacts).
-    - name: Upload visual file 0
-      id: up0
-      if: steps.stage.outputs.file_0 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_0 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 1
-      id: up1
-      if: steps.stage.outputs.file_1 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_1 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 2
-      id: up2
-      if: steps.stage.outputs.file_2 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_2 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 3
-      id: up3
-      if: steps.stage.outputs.file_3 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_3 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 4
-      id: up4
-      if: steps.stage.outputs.file_4 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_4 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 5
-      id: up5
-      if: steps.stage.outputs.file_5 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_5 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 6
-      id: up6
-      if: steps.stage.outputs.file_6 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_6 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 7
-      id: up7
-      if: steps.stage.outputs.file_7 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_7 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 8
-      id: up8
-      if: steps.stage.outputs.file_8 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_8 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 9
-      id: up9
-      if: steps.stage.outputs.file_9 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_9 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 10
-      id: up10
-      if: steps.stage.outputs.file_10 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_10 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Upload visual file 11
-      id: up11
-      if: steps.stage.outputs.file_11 != ''
-      uses: actions/upload-artifact@v7
-      with:
-        path: ${{ steps.stage.outputs.file_11 }}
-        archive: false
-        retention-days: ${{ inputs.retention-days }}
-        if-no-files-found: error
-
-    - name: Write and upload manifest
+    - name: Write manifest
       if: steps.stage.outputs.count != '0'
       id: manifest
       shell: bash
@@ -193,38 +73,18 @@ runs:
         INPUT_STAGE: ${{ inputs.stage }}
         INPUT_RUNNER_OS: ${{ inputs.runner-os }}
         FILE_COUNT: ${{ steps.stage.outputs.count }}
-        UP0_ID: ${{ steps.up0.outputs.artifact-id }}
-        UP0_URL: ${{ steps.up0.outputs.artifact-url }}
-        UP1_ID: ${{ steps.up1.outputs.artifact-id }}
-        UP1_URL: ${{ steps.up1.outputs.artifact-url }}
-        UP2_ID: ${{ steps.up2.outputs.artifact-id }}
-        UP2_URL: ${{ steps.up2.outputs.artifact-url }}
-        UP3_ID: ${{ steps.up3.outputs.artifact-id }}
-        UP3_URL: ${{ steps.up3.outputs.artifact-url }}
-        UP4_ID: ${{ steps.up4.outputs.artifact-id }}
-        UP4_URL: ${{ steps.up4.outputs.artifact-url }}
-        UP5_ID: ${{ steps.up5.outputs.artifact-id }}
-        UP5_URL: ${{ steps.up5.outputs.artifact-url }}
-        UP6_ID: ${{ steps.up6.outputs.artifact-id }}
-        UP6_URL: ${{ steps.up6.outputs.artifact-url }}
-        UP7_ID: ${{ steps.up7.outputs.artifact-id }}
-        UP7_URL: ${{ steps.up7.outputs.artifact-url }}
-        UP8_ID: ${{ steps.up8.outputs.artifact-id }}
-        UP8_URL: ${{ steps.up8.outputs.artifact-url }}
-        UP9_ID: ${{ steps.up9.outputs.artifact-id }}
-        UP9_URL: ${{ steps.up9.outputs.artifact-url }}
-        UP10_ID: ${{ steps.up10.outputs.artifact-id }}
-        UP10_URL: ${{ steps.up10.outputs.artifact-url }}
-        UP11_ID: ${{ steps.up11.outputs.artifact-id }}
-        UP11_URL: ${{ steps.up11.outputs.artifact-url }}
+        BUNDLE_NAME: ${{ steps.stage.outputs.bundle-name }}
       run: bash "${{ github.action_path }}/write-manifest.sh"
 
-    - name: Upload manifest
+    # One zip per stage×OS (default upload-artifact archiving). Gallery downloads
+    # and unpacks these bundles — no per-file archive:false / 12-step limit.
+    - name: Upload visual bundle
       if: steps.stage.outputs.count != '0'
+      id: upload
       uses: actions/upload-artifact@v7
       with:
-        path: ${{ steps.manifest.outputs.manifest-path }}
-        archive: false
+        name: ${{ steps.stage.outputs.bundle-name }}
+        path: ${{ steps.stage.outputs.staged-dir }}
         retention-days: ${{ inputs.retention-days }}
         if-no-files-found: error
 
@@ -235,6 +95,7 @@ runs:
         STAGED_DIR: ${{ steps.stage.outputs.staged-dir }}
         SUMMARY_TITLE: ${{ steps.stage.outputs.summary-title }}
         FILE_COUNT: ${{ steps.stage.outputs.count }}
+        BUNDLE_NAME: ${{ steps.stage.outputs.bundle-name }}
       run: |
         set -euo pipefail
         {
@@ -243,6 +104,8 @@ runs:
           if [[ "${FILE_COUNT:-0}" == "0" || ! -d "${STAGED_DIR:-}" ]]; then
             echo "_No visual files_"
           else
+            echo "Bundle \`${BUNDLE_NAME}\` (${FILE_COUNT} file(s))"
+            echo
             ls -la "$STAGED_DIR"
           fi
         } >> "$GITHUB_STEP_SUMMARY"

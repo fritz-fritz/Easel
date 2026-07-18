@@ -23,13 +23,17 @@ matches=("${source_dir}"/${pattern})
 shopt -u nullglob
 
 count=0
-max_files=12
+warn_files=64
+max_files=256
 if ((${#matches[@]} > 0)); then
   for src in "${matches[@]}"; do
     [[ -f "$src" ]] || continue
     if ((count >= max_files)); then
-      echo "::warning::ci-visual: more than ${max_files} files matched; extra files ignored"
-      break
+      echo "::error::ci-visual: more than ${max_files} files matched; refusing runaway upload"
+      exit 1
+    fi
+    if ((count == warn_files)); then
+      echo "::warning::ci-visual: staging more than ${warn_files} files for ${stage}/${runner_os}"
     fi
     base="$(basename "$src")"
     stem="${base%.*}"
@@ -48,7 +52,6 @@ if ((${#matches[@]} > 0)); then
     fi
     dest_path="${staged_dir}/${dest_name}"
     cp "$src" "$dest_path"
-    echo "file_${count}=${dest_path}" >> "$GITHUB_OUTPUT"
     printf '%s\n' "$dest_path" >> "${staged_dir}/files.list"
     count=$((count + 1))
   done
@@ -76,4 +79,5 @@ fi
   echo "staged-dir=${staged_dir}"
   echo "count=${count}"
   echo "summary-title=${summary_title}"
+  echo "bundle-name=ci-visual-${stage}-${runner_os}"
 } >> "$GITHUB_OUTPUT"

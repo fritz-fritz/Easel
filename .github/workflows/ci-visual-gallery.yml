@@ -75,15 +75,14 @@ jobs:
               run_id: runId,
               per_page: 100,
             });
+            // Producers upload one zip per stage×OS named ci-visual-<stage>-<os>.
             const visual = (data.artifacts || []).filter(
-              (a) =>
-                !a.expired &&
-                (a.name.endsWith('.png') || a.name.startsWith('ci-visual-manifest-')),
+              (a) => !a.expired && a.name.startsWith('ci-visual-'),
             );
             core.setOutput('count', String(visual.length));
             if (visual.length === 0) {
               core.info(
-                `No CI visual artifacts on run ${runId}; skipping gallery publish`,
+                `No CI visual bundle artifacts on run ${runId}; skipping gallery publish`,
               );
               await github.rest.repos.createCommitStatus({
                 owner: context.repo.owner,
@@ -101,7 +100,7 @@ jobs:
       # workflow_run is a privileged context (secrets + write tokens). Never check out
       # the PR head SHA here — that would execute untrusted code with those privileges.
       # Gallery tooling always comes from the default branch; keep build_gallery.py
-      # backward-compatible with older ci-visual manifests.
+      # backward-compatible with older ci-visual manifests (filename/stem fields).
       - name: Check out default branch (trusted gallery tooling)
         if: steps.visuals.outputs.count != '0'
         uses: actions/checkout@v7
@@ -109,15 +108,16 @@ jobs:
           ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
-      # ci-visual uploads with upload-artifact@v7 archive:false (raw PNG/JSON).
-      # Those require download-artifact@v8; v7 tries to unzip them and fails after retries.
-      - name: Download CI visual artifacts
+      # Each stage×OS producer uploads one zip (ci-visual-<stage>-<os>). download-artifact
+      # unpacks those zips; merge-multiple flattens unique PNG/manifest names into path.
+      - name: Download CI visual bundles
         if: steps.visuals.outputs.count != '0'
-        uses: actions/download-artifact@v8
+        uses: actions/download-artifact@v7
         with:
           run-id: ${{ steps.meta.outputs.run_id }}
           github-token: ${{ github.token }}
           path: ${{ runner.temp }}/ci-visual-artifacts
+          pattern: ci-visual-*
           merge-multiple: true
 
       - name: Detect deploy credentials

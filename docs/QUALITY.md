@@ -78,11 +78,11 @@ the suite distinguishes an unavailable runtime decoder from an incorrect composi
 ### Visual harness stages
 
 Producers write stage-local PNGs under a temp directory. The composite action
-[`.github/actions/ci-visual`](../.github/actions/ci-visual) renames, uploads (`archive: false`),
-emits a JSON manifest, and summarizes them. Non-zipped uploads require
-`actions/download-artifact@v8` in the gallery publisher (v7 fails extracting raw PNG/JSON).
-New stages only need a producer plus one `uses: ./.github/actions/ci-visual` block with a
-distinct `stage` / `pattern`.
+[`.github/actions/ci-visual`](../.github/actions/ci-visual) renames them, writes a JSON
+manifest, and uploads **one zip artifact per stage×OS** named `ci-visual-<stage>-<os>`.
+The gallery publisher downloads those bundles (`pattern: ci-visual-*`), unpacks them, and
+builds the dual review surfaces. New stages only need a producer plus one
+`uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
 
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
@@ -93,8 +93,8 @@ distinct `stage` / `pattern`.
 
 After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](../.github/workflows/ci-visual-gallery.yml):
 
-1. Lists visual artifacts on the triggering CI run; if none, exits success (skips publish)
-2. Downloads visual artifacts + manifests (`download-artifact@v8` for `archive: false`)
+1. Lists `ci-visual-*` zip bundles on the triggering CI run; if none, exits success (skips publish)
+2. Downloads and unpacks those bundles (`download-artifact` + `merge-multiple`)
 3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py),
    including per-asset metadata (dimensions, bytes, SHA-256) and a **cross-OS comparison**
 4. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when

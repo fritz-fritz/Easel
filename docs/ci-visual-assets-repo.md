@@ -52,13 +52,14 @@ inline Markdown image embeds and the hosted HTML gallery are skipped.
 Generator code lives in this repo under [`.github/ci-visual/`](../.github/ci-visual/).
 The privileged `workflow_run` publisher always checks out the **default branch** for that
 tooling (never the PR head) so untrusted PR code cannot run with deploy secrets.
-Keep `build_gallery.py` backward-compatible with older `ci-visual` manifests.
+Keep `build_gallery.py` backward-compatible with older `ci-visual` manifests that still
+list `filename` / `stem` (per-file Actions artifact URLs are no longer emitted).
 Run `python3 .github/ci-visual/test_build_gallery.py` to exercise the gallery builder locally.
 
-CI visual PNGs are uploaded with `actions/upload-artifact@v7` and `archive: false`. The
-gallery workflow must use `actions/download-artifact@v8` to fetch them; v7 treats the
-raw files as zip archives and fails after retries. When the triggering CI run has no
-visual artifacts, the gallery job exits early as success (no empty Pages site or sticky
+CI visual producers upload one zip per stage×OS via `actions/upload-artifact@v7`
+(`ci-visual-<stage>-<os>`, manifest included). The gallery workflow downloads with
+`pattern: ci-visual-*` and `merge-multiple: true`. When the triggering CI run has no
+visual bundles, the gallery job exits early as success (no empty Pages site or sticky
 comment).
 
 ## Cursor Demo
