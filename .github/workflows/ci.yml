@@ -14,8 +14,46 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
+  # Path filters keep Qt smoke / multi-OS Rust / gallery producers off docs- and
+  # tooling-only diffs. Push and pull_request both use the filter (a docs-only
+  # commit on main should not burn three desktop runners either).
+  changes:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      rust: ${{ steps.filter.outputs.rust }}
+      desktop: ${{ steps.filter.outputs.desktop }}
+      gallery_tooling: ${{ steps.filter.outputs.gallery_tooling }}
+    steps:
+      - uses: actions/checkout@v7
+      - uses: dorny/paths-filter@v3
+        id: filter
+        with:
+          filters: |
+            rust:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'rustfmt.toml'
+              - 'crates/**'
+              - 'apps/**'
+            desktop:
+              - 'Cargo.toml'
+              - 'Cargo.lock'
+              - 'rust-toolchain.toml'
+              - 'crates/**'
+              - 'apps/easel-desktop/**'
+              - '.github/actions/ci-visual/**'
+            gallery_tooling:
+              - '.github/ci-visual/**'
+              - '.github/actions/ci-visual/**'
+              - '.github/workflows/ci-visual-gallery.yml'
+              - '.github/workflows/ci.yml'
+
   gallery-tooling:
     name: Gallery tooling
+    needs: changes
+    if: needs.changes.outputs.gallery_tooling == 'true'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v7
@@ -24,6 +62,8 @@ jobs:
 
   core:
     name: Core (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.rust == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -58,6 +98,8 @@ jobs:
 
   desktop:
     name: Qt desktop smoke (${{ matrix.os }})
+    needs: changes
+    if: needs.changes.outputs.desktop == 'true'
     strategy:
       fail-fast: false
       matrix:
@@ -164,3 +206,43 @@ jobs:
           runner-os: ${{ matrix.os }}
           if-no-files-found: warn
           summary-title: Qt GUI smoke (${{ matrix.os }})
+
+  # Single always-on check for branch protection when matrix jobs are skipped.
+  ci:
+    name: CI gate
+    needs: [changes, gallery-tooling, core, desktop]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Evaluate required jobs
+        env:
+          CHANGES_RESULT: ${{ needs.changes.result }}
+          GALLERY_TOOLING: ${{ needs.gallery-tooling.result }}
+          CORE: ${{ needs.core.result }}
+          DESKTOP: ${{ needs.desktop.result }}
+          WANT_RUST: ${{ needs.changes.outputs.rust }}
+          WANT_DESKTOP: ${{ needs.changes.outputs.desktop }}
+          WANT_GALLERY_TOOLING: ${{ needs.changes.outputs.gallery_tooling }}
+        run: |
+          set -euo pipefail
+          if [[ "$CHANGES_RESULT" != "success" ]]; then
+            echo "Detect changes failed: $CHANGES_RESULT"
+            exit 1
+          fi
+          check() {
+            local want="$1"
+            local result="$2"
+            local name="$3"
+            if [[ "$want" == "true" ]]; then
+              if [[ "$result" != "success" ]]; then
+                echo "$name required but result=$result"
+                exit 1
+              fi
+              echo "$name ok"
+            else
+              echo "$name skipped for this diff"
+            fi
+          }
+          check "$WANT_GALLERY_TOOLING" "$GALLERY_TOOLING" "gallery-tooling"
+          check "$WANT_RUST" "$CORE" "core"
+          check "$WANT_DESKTOP" "$DESKTOP" "desktop"
