@@ -41,8 +41,10 @@ inline Markdown image embeds and the hosted HTML gallery are skipped.
 
 1. **Hosted HTML gallery** — styled Pages site at
    `https://fritz-fritz.github.io/easel-ci-visual/pr/<n>/`
-2. **Sticky PR comment** — Markdown tables with `![]()` thumbnails (same PNG URLs) plus a
-   link to the HTML gallery
+2. **Sticky PR comment** — Markdown tables with HTML `<img>` thumbnails (via
+   `raw.githubusercontent.com/.../gh-pages/...`, cache-busted with the commit SHA so
+   GitHub’s camo proxy does not race or reuse a Pages CDN 404) plus a link to the hosted
+   HTML gallery on `github.io`
 
 Generator code lives in this repo under [`.github/ci-visual/`](../.github/ci-visual/).
 The privileged `workflow_run` publisher always checks out the **default branch** for that

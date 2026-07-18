@@ -82,8 +82,9 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 3. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
 4. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
    `EASEL_CI_VISUAL_TOKEN` is configured)
-5. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery and a
-   link to the hosted HTML gallery
+5. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery
+   (thumbnails from `raw.githubusercontent.com` so camo does not race Pages) and a link to
+   the hosted HTML gallery
 
 CI visual PNGs/HTML must not be committed to branches of this source repository. Setup details:
 [ci-visual-assets-repo.md](ci-visual-assets-repo.md).
