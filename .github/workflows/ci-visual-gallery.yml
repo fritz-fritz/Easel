@@ -98,30 +98,15 @@ jobs:
             }
 
       # workflow_run is a privileged context (secrets + write tokens). Never check out
-      # untrusted fork PR heads — that would execute attacker-controlled gallery tooling
-      # with those privileges. Same-repository PR heads are trusted and may use their
-      # own build_gallery.py so View×OS layout ships before merge. Forks stay on the
-      # default branch (keep build_gallery.py backward-compatible with older manifests).
-      - name: Resolve gallery tooling ref
-        if: steps.visuals.outputs.count != '0'
-        id: tooling
-        uses: actions/github-script@v7
-        with:
-          script: |
-            const run = context.payload.workflow_run;
-            const headRepo = run.head_repository && run.head_repository.full_name;
-            const baseRepo = context.payload.repository.full_name;
-            const sameRepo = Boolean(headRepo && headRepo === baseRepo);
-            const ref = sameRepo ? run.head_sha : context.payload.repository.default_branch;
-            core.setOutput('ref', ref);
-            core.setOutput('same_repo', sameRepo ? 'true' : 'false');
-            core.info(`Gallery tooling ref=${ref} same_repo=${sameRepo}`);
-
-      - name: Check out gallery tooling
+      # the PR head SHA here — that would execute untrusted code with those privileges
+      # (CodeQL: actions/checkout-of-untrusted-code-in-privileged-context).
+      # Gallery tooling always comes from the default branch; keep build_gallery.py
+      # backward-compatible with older ci-visual manifests (filename/stem fields).
+      - name: Check out default branch (trusted gallery tooling)
         if: steps.visuals.outputs.count != '0'
         uses: actions/checkout@v7
         with:
-          ref: ${{ steps.tooling.outputs.ref }}
+          ref: ${{ github.event.repository.default_branch }}
           persist-credentials: false
 
       # Each stage×OS producer uploads one zip (ci-visual-<stage>-<os>). download-artifact

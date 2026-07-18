@@ -130,7 +130,7 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 | Stage | Expectation | Gate |
 | --- | --- | --- |
 | `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail on digest/pixel mismatch (including ±1 LSB near-matches, which are labeled `match-tolerant` for debugging) or size mismatch |
-| `gui-smoke` | Platform chrome / window size can differ; sticky comment + HTML show a **View × OS** matrix (fixture `preview` plus selected full-window pages). Same-repo PRs build the gallery with the PR’s `build_gallery.py`; fork PRs use `main`. | Informational only (hashes/dims still shown; size variance is expected until runners share a display geometry) |
+| `gui-smoke` | Platform chrome / window size can differ; sticky comment + HTML show a **View × OS** matrix (fixture `preview` plus selected full-window pages). Gallery tooling runs from `main` (privileged `workflow_run`); producer manifests must store OS-independent stems so rows group across runners. | Informational only (hashes/dims still shown; size variance is expected until runners share a display geometry) |
 
 Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.
 
