@@ -49,11 +49,44 @@ exempt a backend from the same measurements.
 ## CI policy
 
 The default workspace excludes the Qt application so core checks run on all hosted platforms.
-A dedicated multi-OS desktop job builds `easel-desktop`, runs `--smoke-screenshot`, and
-uploads Qt GUI PNGs as artifacts on Linux (Xvfb), Windows, and macOS. Core jobs also write
+`cargo fmt` runs once on Ubuntu; `cargo test` and `cargo clippy` still run on Linux, Windows, and
+macOS. A dedicated multi-OS desktop job builds `easel-desktop`, runs `--smoke-screenshot`, and
+publishes Qt GUI PNGs as artifacts on Linux (Xvfb), Windows, and macOS. Core jobs also write
 per-display apply-payload raster PNGs for visual review. Full packaging and code signing remain
 separate later stages. Live wallpaper Apply against a real desktop session is still a manual
 matrix item; CI never mutates an operator wallpaper.
 
 Media CI adds only short, project-owned, silent fixtures. Codec assertions are capability-aware so
 the suite distinguishes an unavailable runtime decoder from an incorrect compositor result.
+
+### Visual harness stages
+
+Producers write stage-local PNGs under a temp directory. The composite action
+[`.github/actions/ci-visual`](../.github/actions/ci-visual) renames, uploads (`archive: false`),
+emits a JSON manifest, and summarizes them. New stages only need a producer plus one
+`uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
+
+| Stage id | Producer | Gate | Expected files | Published via |
+| --- | --- | --- | --- | --- |
+| `apply-payload` | [`crates/easel-render/tests/visual_artifacts.rs`](../crates/easel-render/tests/visual_artifacts.rs) | `EASEL_VISUAL_OUTDIR` set (CI only) | `apply-display-*.png` | `ci-visual` |
+| `gui-smoke` | `easel-desktop --smoke-screenshot <dir>` | smoke flag / out dir | `gui-*.png` | `ci-visual` |
+
+### PR gallery (dual surface)
+
+After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](../.github/workflows/ci-visual-gallery.yml):
+
+1. Downloads visual artifacts + manifests
+2. Builds a styled HTML gallery via [`.github/ci-visual/build_gallery.py`](../.github/ci-visual/build_gallery.py)
+3. Publishes it to the separate Pages repo `fritz-fritz/easel-ci-visual` (when
+   `EASEL_CI_VISUAL_TOKEN` is configured)
+4. Upserts a sticky PR comment that includes **both** an inline Markdown table gallery and a
+   link to the hosted HTML gallery
+
+CI visual PNGs/HTML must not be committed to branches of this source repository. Setup details:
+[ci-visual-assets-repo.md](ci-visual-assets-repo.md).
+
+Cursor Cloud Agent **Demo** artifacts are complementary and agent-scoped; Actions cannot write
+into Demo. Prefer CI galleries for every PR.
+
+Public workflow artifacts remain non-installable synthetic review images. See
+[distribution policy](DISTRIBUTION.md).

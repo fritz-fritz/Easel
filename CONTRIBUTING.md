@@ -13,6 +13,8 @@ the Mozilla Public License 2.0, the license covering this repository.
 6. Keep platform mutations behind capability-reporting backend traits.
 7. Record consequential design changes as an ADR under `docs/adr`.
 8. Do not add packaging, signing, publishing, or storefront credentials to public CI.
+9. Do not commit CI visual PNGs or gallery HTML into this repository’s branches. PR galleries
+   publish to the separate `easel-ci-visual` Pages repo (see [docs/ci-visual-assets-repo.md](docs/ci-visual-assets-repo.md)).
 
 ## Pull-request checks
 
