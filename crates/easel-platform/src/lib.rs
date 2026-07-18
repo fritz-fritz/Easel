@@ -6,6 +6,8 @@
 
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
+#[cfg(target_os = "macos")]
+mod macos;
 mod plasma;
 mod probe;
 #[cfg(windows)]
@@ -16,7 +18,12 @@ use std::path::{Path, PathBuf};
 use easel_core::{DisplayId, LogicalRect, PlaybackPolicy};
 use thiserror::Error;
 
-pub use plasma::{PlasmaBackend, build_plasma_wallpaper_script, escape_js_string};
+#[cfg(target_os = "macos")]
+pub use macos::MacosBackend;
+pub use plasma::{
+    PlasmaBackend, build_plasma_native_dynamic_script, build_plasma_wallpaper_script,
+    escape_js_string, plasma_dynamic_plugin_id,
+};
 pub use probe::select_wallpaper_backend;
 #[cfg(windows)]
 pub use windows_desktop::WindowsDesktopBackend;
@@ -56,8 +63,10 @@ pub struct DisplayWallpaper {
 pub enum WallpaperOutput {
     /// One combined image.
     VirtualDesktop(PathBuf),
-    /// Native image for each display.
+    /// Native still image for each display.
     PerDisplay(Vec<DisplayWallpaper>),
+    /// Native dynamic HEIC/AVIF package per display (OS evaluates the schedule).
+    NativeDynamic(Vec<DisplayWallpaper>),
 }
 
 /// Runtime features exposed by a persistent live-wallpaper host.

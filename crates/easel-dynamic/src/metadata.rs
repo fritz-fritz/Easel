@@ -223,6 +223,157 @@ fn parse_h24_plist(value: &Value) -> Result<AppleDesktopMetadata, MetadataError>
     })
 }
 
+/// Builds a base64 binary plist for the given Apple metadata flavor and keyed indices.
+pub fn build_apple_desktop_plist<S: std::hash::BuildHasher>(
+    flavor: AppleMetadataFlavor,
+    keys_by_index: &HashMap<u32, DynamicStillKey, S>,
+) -> Result<String, MetadataError> {
+    let value = match flavor {
+        AppleMetadataFlavor::Solar => build_solar_plist_values(keys_by_index)?,
+        AppleMetadataFlavor::Appearance => build_appearance_plist_values(keys_by_index)?,
+        AppleMetadataFlavor::H24 => build_h24_plist_values(keys_by_index)?,
+    };
+    let mut bytes = Vec::new();
+    value
+        .to_writer_binary(&mut bytes)
+        .map_err(|error| MetadataError::Plist(error.to_string()))?;
+    Ok(BASE64.encode(bytes))
+}
+
+/// Builds a minimal XMP packet carrying one `apple_desktop:{solar,apr,h24}` attribute.
+pub fn build_apple_xmp<S: std::hash::BuildHasher>(
+    flavor: AppleMetadataFlavor,
+    keys_by_index: &HashMap<u32, DynamicStillKey, S>,
+) -> Result<String, MetadataError> {
+    let encoded = build_apple_desktop_plist(flavor, keys_by_index)?;
+    let attr = match flavor {
+        AppleMetadataFlavor::Solar => "solar",
+        AppleMetadataFlavor::Appearance => "apr",
+        AppleMetadataFlavor::H24 => "h24",
+    };
+    Ok(format!(
+        r#"<?xpacket begin="" id="W5M0MpCehiHzreSzNTczkc9d"?><x:xmpmeta xmlns:x="adobe:ns:meta/"><rdf:RDF xmlns:rdf="http://www.w3.org/1999/02/22-rdf-syntax-ns#"><rdf:Description rdf:about="" xmlns:apple_desktop="http://ns.apple.com/namespace/1.0/" apple_desktop:{attr}="{encoded}"/></rdf:RDF></x:xmpmeta><?xpacket end="w"?>"#
+    ))
+}
+
+/// Infers Apple flavor + keyed indices from a domain still set for export.
+pub fn apple_keys_from_still_set(
+    set: &easel_core::DynamicStillSet,
+) -> Result<(AppleMetadataFlavor, HashMap<u32, DynamicStillKey>), MetadataError> {
+    use easel_core::DynamicScheduleKind;
+
+    let flavor = match set.schedule_kind {
+        DynamicScheduleKind::SolarPosition => AppleMetadataFlavor::Solar,
+        DynamicScheduleKind::Appearance => AppleMetadataFlavor::Appearance,
+        DynamicScheduleKind::TimeOfDay => AppleMetadataFlavor::H24,
+    };
+    let mut keys_by_index = HashMap::new();
+    for (order, frame) in set.frames.iter().enumerate() {
+        let index = frame
+            .source_index
+            .unwrap_or_else(|| u32::try_from(order).unwrap_or(u32::MAX));
+        match (flavor, frame.key) {
+            (AppleMetadataFlavor::Solar, DynamicStillKey::SolarPosition { .. })
+            | (AppleMetadataFlavor::Appearance, DynamicStillKey::Appearance { .. })
+            | (AppleMetadataFlavor::H24, DynamicStillKey::TimeOfDay { .. }) => {
+                keys_by_index.insert(index, frame.key);
+            }
+            _ => {
+                return Err(MetadataError::Plist(format!(
+                    "frame {index} key {} is incompatible with {:?} export",
+                    frame.key.label(),
+                    flavor
+                )));
+            }
+        }
+    }
+    if keys_by_index.is_empty() {
+        return Err(MetadataError::EmptySchedule);
+    }
+    Ok((flavor, keys_by_index))
+}
+
+fn build_solar_plist_values<S: std::hash::BuildHasher>(
+    keys_by_index: &HashMap<u32, DynamicStillKey, S>,
+) -> Result<Value, MetadataError> {
+    let mut items = Vec::new();
+    let mut indices: Vec<_> = keys_by_index.keys().copied().collect();
+    indices.sort_unstable();
+    for index in indices {
+        let Some(DynamicStillKey::SolarPosition {
+            altitude_deg,
+            azimuth_deg,
+        }) = keys_by_index.get(&index).copied()
+        else {
+            return Err(MetadataError::Plist(format!(
+                "solar export missing SolarPosition for index {index}"
+            )));
+        };
+        let mut item = plist::Dictionary::new();
+        item.insert("i".into(), Value::Integer(i64::from(index).into()));
+        item.insert("a".into(), Value::Real(altitude_deg));
+        item.insert("z".into(), Value::Real(azimuth_deg));
+        items.push(Value::Dictionary(item));
+    }
+    let mut root = plist::Dictionary::new();
+    root.insert("si".into(), Value::Array(items));
+    Ok(Value::Dictionary(root))
+}
+
+fn build_appearance_plist_values<S: std::hash::BuildHasher>(
+    keys_by_index: &HashMap<u32, DynamicStillKey, S>,
+) -> Result<Value, MetadataError> {
+    let mut light = None;
+    let mut dark = None;
+    for (index, key) in keys_by_index {
+        match key {
+            DynamicStillKey::Appearance {
+                mode: AppearanceMode::Light,
+            } => light = Some(*index),
+            DynamicStillKey::Appearance {
+                mode: AppearanceMode::Dark,
+            } => dark = Some(*index),
+            _ => {
+                return Err(MetadataError::Plist(format!(
+                    "appearance export got non-appearance key at {index}"
+                )));
+            }
+        }
+    }
+    let (Some(l), Some(d)) = (light, dark) else {
+        return Err(MetadataError::Plist(
+            "appearance export requires both light and dark indices".into(),
+        ));
+    };
+    let mut root = plist::Dictionary::new();
+    root.insert("l".into(), Value::Integer(i64::from(l).into()));
+    root.insert("d".into(), Value::Integer(i64::from(d).into()));
+    Ok(Value::Dictionary(root))
+}
+
+fn build_h24_plist_values<S: std::hash::BuildHasher>(
+    keys_by_index: &HashMap<u32, DynamicStillKey, S>,
+) -> Result<Value, MetadataError> {
+    let mut items = Vec::new();
+    let mut indices: Vec<_> = keys_by_index.keys().copied().collect();
+    indices.sort_unstable();
+    for index in indices {
+        let Some(DynamicStillKey::TimeOfDay { time }) = keys_by_index.get(&index).copied() else {
+            return Err(MetadataError::Plist(format!(
+                "h24 export missing TimeOfDay for index {index}"
+            )));
+        };
+        let fraction = (f64::from(time.hour) * 60.0 + f64::from(time.minute)) / (24.0 * 60.0);
+        let mut item = plist::Dictionary::new();
+        item.insert("i".into(), Value::Integer(i64::from(index).into()));
+        item.insert("t".into(), Value::Real(fraction));
+        items.push(Value::Dictionary(item));
+    }
+    let mut root = plist::Dictionary::new();
+    root.insert("ti".into(), Value::Array(items));
+    Ok(Value::Dictionary(root))
+}
+
 fn find_subslice(haystack: &[u8], needle: &[u8]) -> Option<usize> {
     haystack
         .windows(needle.len())

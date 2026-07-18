@@ -40,7 +40,7 @@ apps/easel-cli/         Headless profile/schedule/status/pause/skip controls
 crates/easel-core/      Versioned domain model and validation
 crates/easel-library/   Local folder index, SQLite library store, acquisition cache
 crates/easel-scheduler/ Automation TOML store and SQLite rotation history
-crates/easel-dynamic/   Apple HEIC dynamic import and native bundle planning
+crates/easel-dynamic/   Apple HEIC dynamic import/encode and per-display native bundles
 crates/easel-render/    Display-space planning, raster output, and live frame plans
 crates/easel-providers/ Online image provider contracts and adapters
 crates/easel-platform/  Static wallpaper and persistent live-host contracts
@@ -48,7 +48,7 @@ docs/                   Product, architecture, provider, and delivery plans
 ```
 
 Dynamic still interchange follows Apple Dynamic Desktop HEIC (solar / appearance / h24). Easel
-deconstructs packages into a portable still set, plans per-display native re-encodes for
+deconstructs packages into a portable still set, encodes per-display native HEIC packages for
 platforms that can host them, and falls back to still-frame apply elsewhere (see ADR 0006).
 
 ## Development

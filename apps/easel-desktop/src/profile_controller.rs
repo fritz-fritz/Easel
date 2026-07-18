@@ -272,3 +272,74 @@ pub fn save_compose_profile(
         .map_err(|error| error.to_string())?;
     Ok(profile)
 }
+
+/// Imports an Apple/Plasma dynamic HEIC into the library and saves a dynamic profile.
+pub fn import_dynamic_heic_profile(
+    heic_path: &str,
+    name: &str,
+    fit_mode: easel_core::FitMode,
+    layout_mode: easel_core::LayoutMode,
+    zoom: f64,
+    focal_x: f64,
+    focal_y: f64,
+) -> Result<(Profile, easel_core::DynamicStillSet, String), String> {
+    use std::path::PathBuf;
+
+    use easel_core::{PresentationMode, RotationQueue};
+    use easel_dynamic::{import_dynamic_heic, persist_imported_desktop};
+
+    use crate::library_session::library_store;
+
+    let imported = import_dynamic_heic(heic_path).map_err(|error| error.to_string())?;
+    let displays = current_displays();
+    let mut profile = Profile::new(name);
+    profile.displays = displays.iter().map(|display| display.id).collect();
+    profile.fit_mode = fit_mode;
+    profile.layout_mode = layout_mode;
+    profile.zoom = zoom;
+    profile.focal_x = focal_x;
+    profile.focal_y = focal_y;
+    profile.presentation = PresentationMode::DynamicStills;
+
+    let asset_dir =
+        crate::library_session::dynamic_stills_dir().join(profile.id.to_hyphenated_string());
+
+    let persisted = persist_imported_desktop(&imported, name, profile.id, &asset_dir)
+        .map_err(|error| error.to_string())?;
+    {
+        let library = library_store()?;
+        for asset in &persisted.assets {
+            library
+                .upsert_asset(asset)
+                .map_err(|error| error.to_string())?;
+        }
+    }
+
+    let first_path = persisted
+        .frame_paths
+        .first()
+        .map(PathBuf::as_path)
+        .map(|path| path.display().to_string())
+        .ok_or_else(|| "imported HEIC produced no frames".to_string())?;
+
+    profile.selected_asset = Some(persisted.still_set.fallback_asset_id);
+    profile.still_set_id = Some(persisted.still_set.id);
+    let queue = RotationQueue::from_assets(
+        format!("{name} queue"),
+        persisted.assets.iter().map(|asset| asset.id).collect(),
+    );
+    profile.rotation_queue_id = Some(queue.id);
+
+    let mut store = automation_store()?;
+    store
+        .upsert_queue(queue)
+        .map_err(|error| error.to_string())?;
+    store
+        .upsert_still_set(persisted.still_set.clone())
+        .map_err(|error| error.to_string())?;
+    store
+        .upsert_profile(profile.clone())
+        .map_err(|error| error.to_string())?;
+
+    Ok((profile, persisted.still_set, first_path))
+}

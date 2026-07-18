@@ -294,6 +294,13 @@ ApplicationWindow {
         onAccepted: compose.setSourcePathFromUrl(selectedFile)
     }
 
+    FileDialog {
+        id: heicDialog
+        title: qsTr("Import dynamic HEIC")
+        nameFilters: [qsTr("Dynamic desktop (*.heic *.heif)"), qsTr("All files (*)")]
+        onAccepted: compose.importDynamicHeicFromUrl(selectedFile)
+    }
+
     FolderDialog {
         id: folderDialog
         title: qsTr("Add library folder")
@@ -460,6 +467,11 @@ ApplicationWindow {
                             text: qsTr("Open image")
                             Accessible.name: text
                             onClicked: imageDialog.open()
+                        }
+                        Button {
+                            text: qsTr("Import HEIC")
+                            Accessible.name: text
+                            onClicked: heicDialog.open()
                         }
 
                         ComboBox {

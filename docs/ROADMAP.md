@@ -91,14 +91,14 @@ available (`cxx-qt-lib` exposes `QGuiApplication` only).
 Exit: a scheduled still set remains correct across restart, sleep, clock changes, and display
 topology changes on every supported static backend.
 
-**Status:** Implemented for still images with Apple HEIC interchange foundations
+**Status:** Implemented end-to-end for still images with Apple HEIC as interchange
 (`DynamicStillSet` schema v2: `SolarPosition` / dense `TimeOfDay` / `Appearance` keys,
-`easel-dynamic` HEIC XMP+plist import + per-display native bundle planning, TOML persistence,
-SQLite last-applied catch-up, still-frame poller with atomic pre-render, Compose Media=Dynamic
-stills + timeline scrub, `easel stills` / `easel inspect-heic`). Cross-fade and
-`native_dynamic_bundle` are capability-gated; Plasma/Windows still backends report both false
-today (hard-cut still apply). Per-display HEIC/AVIF encode+host apply is the next hardening
-step on macOS/Plasma; Windows remains still-poller-only.
+`easel-dynamic` HEIC XMP+plist import **and** multi-image encode, per-display crop→encode
+cache, TOML persistence, SQLite last-applied catch-up, still-frame poller with atomic
+pre-render, Compose Import HEIC + timeline evaluation against the loaded set,
+`easel stills` / `inspect-heic` / `import-heic`). Apply prefers native dynamic bundles when
+`BackendCapabilities::native_dynamic_bundle` is true (macOS; Plasma when a dynamic wallpaper
+plugin is installed), otherwise the still poller. Windows remains still-poller-only.
 
 ## Stage 6 — Live media
 

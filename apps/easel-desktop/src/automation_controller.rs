@@ -439,9 +439,7 @@ fn sync_dynamic_stills(
 ) -> Result<Vec<String>, String> {
     use std::path::Path;
 
-    use easel_core::AppliedDynamicFrame;
     use easel_platform::select_wallpaper_backend;
-    use easel_scheduler::{RotationHistoryEntry, now_unix_i64};
 
     let due = {
         let store = automation_store()?;
@@ -450,23 +448,25 @@ fn sync_dynamic_stills(
             .map_err(|error| error.to_string())?
     };
     if due.is_empty() {
-        // Still pre-render upcoming transitions for profiles that are already current.
         prerender_upcoming(now, utc_offset_minutes)?;
         return Ok(Vec::new());
     }
 
     let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;
-    let cross_fade_supported = backend.capabilities().cross_fade;
+    let capabilities = backend.capabilities();
     let mut messages = Vec::new();
 
     for item in due {
-        let profile = {
-            let store = automation_store()?;
-            store
-                .profile(item.profile_id)
-                .cloned()
-                .ok_or_else(|| "profile not found".to_string())?
-        };
+        let (profile, still_set) = load_dynamic_profile(&item)?;
+        if capabilities.native_dynamic_bundle {
+            if let Some(message) = try_apply_native_dynamic_due(&profile, &still_set, &item)? {
+                if !message.is_empty() {
+                    messages.push(message);
+                }
+                continue;
+            }
+        }
+
         let path = resolve_asset_path(item.selection.asset_id)?;
         let ready = {
             let store = automation_store()?;
@@ -478,51 +478,136 @@ fn sync_dynamic_stills(
             Path::new(&path).to_path_buf()
         };
         let apply_message = apply_service::apply_still(&apply_path, &profile)?;
-        let fade_note = if item.request_cross_fade && !cross_fade_supported {
+        let fade_note = if item.request_cross_fade && !capabilities.cross_fade {
             "; cross-fade requested but unsupported (hard cut)"
         } else {
             ""
         };
-        let occurred_at = now_unix_i64();
         let reason = format!(
             "dynamic {}; {}{fade_note}",
             item.decision_reason, apply_message
         );
-        let store = automation_store()?;
-        store
-            .history()
-            .record(&RotationHistoryEntry {
-                queue_id: None,
-                profile_id: item.profile_id,
-                schedule_id: profile.schedule_id,
-                asset_id: item.selection.asset_id,
-                reason: reason.clone(),
-                occurred_at,
-            })
-            .map_err(|error| error.to_string())?;
-        store
-            .history()
-            .set_dynamic_still_state(
-                item.profile_id,
-                &AppliedDynamicFrame {
-                    asset_id: item.selection.asset_id,
-                    key_label: item.selection.key_label(),
-                    applied_at: occurred_at,
-                },
-            )
-            .map_err(|error| error.to_string())?;
+        record_dynamic_apply(&profile, &item, &reason)?;
         messages.push(format!(
             "dynamic '{}' → {} ({})",
             profile.name,
             item.selection.key_label(),
             item.selection.asset_id.to_hyphenated_string()
         ));
-
         if let Some(next_asset) = item.next_asset_id {
             let _ = prerender_asset(&profile, next_asset);
         }
     }
     Ok(messages)
+}
+
+fn load_dynamic_profile(
+    item: &easel_scheduler::DueDynamicStill,
+) -> Result<(Profile, easel_core::DynamicStillSet), String> {
+    let store = automation_store()?;
+    let profile = store
+        .profile(item.profile_id)
+        .cloned()
+        .ok_or_else(|| "profile not found".to_string())?;
+    let still_set = store
+        .still_set(item.still_set_id)
+        .cloned()
+        .ok_or_else(|| "still set not found".to_string())?;
+    Ok((profile, still_set))
+}
+
+/// Attempts native HEIC host apply. Returns `Ok(Some(msg))` when handled (skip still poller),
+/// `Ok(None)` when the caller should fall back to still-frame apply.
+///
+/// `AlreadyHosting` updates state silently and returns `Some("")` so the caller skips the
+/// still poller without appending an empty status line.
+fn try_apply_native_dynamic_due(
+    profile: &Profile,
+    still_set: &easel_core::DynamicStillSet,
+    item: &easel_scheduler::DueDynamicStill,
+) -> Result<Option<String>, String> {
+    use std::path::PathBuf;
+
+    use crate::apply_service::{NativeDynamicApply, apply_native_dynamic};
+
+    let Ok(frame_paths) = still_set
+        .frames
+        .iter()
+        .map(|frame| resolve_asset_path(frame.asset_id).map(PathBuf::from))
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return Ok(None);
+    };
+
+    match apply_native_dynamic(still_set, &frame_paths, profile, None) {
+        Ok(NativeDynamicApply::AlreadyHosting { .. }) => {
+            record_dynamic_state_only(item)?;
+            Ok(Some(String::new()))
+        }
+        Ok(NativeDynamicApply::Applied { message, .. }) => {
+            let reason = format!("dynamic native host; {message}");
+            record_dynamic_apply(profile, item, &reason)?;
+            Ok(Some(format!(
+                "dynamic '{}' → native host ({})",
+                profile.name,
+                item.selection.key_label()
+            )))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+fn record_dynamic_state_only(item: &easel_scheduler::DueDynamicStill) -> Result<(), String> {
+    use easel_core::AppliedDynamicFrame;
+    use easel_scheduler::now_unix_i64;
+
+    let occurred_at = now_unix_i64();
+    let store = automation_store()?;
+    store
+        .history()
+        .set_dynamic_still_state(
+            item.profile_id,
+            &AppliedDynamicFrame {
+                asset_id: item.selection.asset_id,
+                key_label: item.selection.key_label(),
+                applied_at: occurred_at,
+            },
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn record_dynamic_apply(
+    profile: &Profile,
+    item: &easel_scheduler::DueDynamicStill,
+    reason: &str,
+) -> Result<(), String> {
+    use easel_core::AppliedDynamicFrame;
+    use easel_scheduler::{RotationHistoryEntry, now_unix_i64};
+
+    let occurred_at = now_unix_i64();
+    let store = automation_store()?;
+    store
+        .history()
+        .record(&RotationHistoryEntry {
+            queue_id: None,
+            profile_id: item.profile_id,
+            schedule_id: profile.schedule_id,
+            asset_id: item.selection.asset_id,
+            reason: reason.to_owned(),
+            occurred_at,
+        })
+        .map_err(|error| error.to_string())?;
+    store
+        .history()
+        .set_dynamic_still_state(
+            item.profile_id,
+            &AppliedDynamicFrame {
+                asset_id: item.selection.asset_id,
+                key_label: item.selection.key_label(),
+                applied_at: occurred_at,
+            },
+        )
+        .map_err(|error| error.to_string())
 }
 
 fn prerender_upcoming(now: InstantSeconds, utc_offset_minutes: i32) -> Result<(), String> {

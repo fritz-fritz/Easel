@@ -6,7 +6,10 @@
 
 use crate::{BackendError, WallpaperBackend};
 
-#[cfg(not(windows))]
+#[cfg(target_os = "macos")]
+use crate::macos::MacosBackend;
+
+#[cfg(all(not(windows), not(target_os = "macos")))]
 use crate::plasma::{PlasmaBackend, plasma_available};
 
 #[cfg(windows)]
@@ -19,7 +22,12 @@ pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendEr
         Ok(Box::new(WindowsDesktopBackend))
     }
 
-    #[cfg(not(windows))]
+    #[cfg(target_os = "macos")]
+    {
+        Ok(Box::new(MacosBackend))
+    }
+
+    #[cfg(all(not(windows), not(target_os = "macos")))]
     {
         if plasma_available() {
             Ok(Box::new(PlasmaBackend))

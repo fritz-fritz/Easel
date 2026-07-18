@@ -4,8 +4,9 @@
 
 //! KDE Plasma 6 still-wallpaper backend via `org.kde.plasmashell`.
 
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::process::Command;
+use std::sync::OnceLock;
 
 use url::Url;
 
@@ -13,7 +14,7 @@ use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
 };
 
-/// Plasma still-image backend using session D-Bus scripting.
+/// Plasma still-image / optional native-dynamic backend using session D-Bus scripting.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PlasmaBackend;
 
@@ -30,22 +31,71 @@ impl WallpaperBackend for PlasmaBackend {
             workspaces: false,
             lock_screen: false,
             cross_fade: false,
-            // Plasma dynamic HEIC/AVIF host planned; still-frame apply remains the safe path.
-            native_dynamic_bundle: false,
+            native_dynamic_bundle: plasma_dynamic_plugin_id().is_some(),
         }
     }
 
     fn apply(&self, output: &WallpaperOutput) -> Result<(), BackendError> {
-        let WallpaperOutput::PerDisplay(displays) = output else {
-            return Err(BackendError::UnsupportedOutput);
-        };
-        for wallpaper in displays {
-            self.validate_output_path(&wallpaper.path)?;
+        match output {
+            WallpaperOutput::PerDisplay(displays) => {
+                for wallpaper in displays {
+                    self.validate_output_path(&wallpaper.path)?;
+                }
+                let script = build_plasma_wallpaper_script(displays)?;
+                evaluate_plasma_script(&script)
+            }
+            WallpaperOutput::NativeDynamic(displays) => {
+                for wallpaper in displays {
+                    self.validate_output_path(&wallpaper.path)?;
+                }
+                let plugin = plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?;
+                let script = build_plasma_native_dynamic_script(displays, plugin)?;
+                evaluate_plasma_script(&script)
+            }
+            WallpaperOutput::VirtualDesktop(_) => Err(BackendError::UnsupportedOutput),
         }
-
-        let script = build_plasma_wallpaper_script(displays)?;
-        evaluate_plasma_script(&script)
     }
+}
+
+/// Returns the installed Plasma dynamic-wallpaper plugin id when present.
+#[must_use]
+pub fn plasma_dynamic_plugin_id() -> Option<&'static str> {
+    static PLUGIN: OnceLock<Option<&'static str>> = OnceLock::new();
+    *PLUGIN.get_or_init(detect_plasma_dynamic_plugin)
+}
+
+fn detect_plasma_dynamic_plugin() -> Option<&'static str> {
+    // Prefer the widely used community dynamic wallpaper plugin; also accept
+    // a few known alternate package ids if installed under plasma wallpapers.
+    const CANDIDATES: &[&str] = &[
+        "com.github.zzag.dynamic",
+        "com.github.zzag.wallpaper.dynamic",
+        "org.kde.plasma.dynamicwallpaper",
+    ];
+    let roots = plasma_wallpaper_roots();
+    for id in CANDIDATES {
+        for root in &roots {
+            if root.join(id).is_dir() {
+                return Some(*id);
+            }
+        }
+    }
+    None
+}
+
+fn plasma_wallpaper_roots() -> Vec<PathBuf> {
+    let mut roots = Vec::new();
+    if let Ok(home) = std::env::var("HOME") {
+        roots.push(PathBuf::from(home).join(".local/share/plasma/wallpapers"));
+    }
+    roots.push(PathBuf::from("/usr/share/plasma/wallpapers"));
+    roots.push(PathBuf::from("/usr/local/share/plasma/wallpapers"));
+    if let Ok(xdg) = std::env::var("XDG_DATA_DIRS") {
+        for dir in xdg.split(':').filter(|part| !part.is_empty()) {
+            roots.push(PathBuf::from(dir).join("plasma/wallpapers"));
+        }
+    }
+    roots
 }
 
 /// Builds the JavaScript payload sent to `PlasmaShell.evaluateScript`.
@@ -53,6 +103,21 @@ impl WallpaperBackend for PlasmaBackend {
 /// Matching uses compositor geometry rather than Desktop index order.
 pub fn build_plasma_wallpaper_script(
     displays: &[DisplayWallpaper],
+) -> Result<String, BackendError> {
+    build_plasma_plugin_script(displays, "org.kde.image")
+}
+
+/// Builds a Plasma script that hosts native dynamic HEIC packages per display.
+pub fn build_plasma_native_dynamic_script(
+    displays: &[DisplayWallpaper],
+    plugin_id: &str,
+) -> Result<String, BackendError> {
+    build_plasma_plugin_script(displays, plugin_id)
+}
+
+fn build_plasma_plugin_script(
+    displays: &[DisplayWallpaper],
+    plugin_id: &str,
 ) -> Result<String, BackendError> {
     let mut assignments = String::new();
     for wallpaper in displays {
@@ -93,8 +158,8 @@ function setForGeometry(left, top, width, height, imageUrl) {{
         }}
         if (geometry.x === left && geometry.y === top &&
             geometry.width === width && geometry.height === height) {{
-            desktop.wallpaperPlugin = "org.kde.image";
-            desktop.currentConfigGroup = ["Wallpaper", "org.kde.image", "General"];
+            desktop.wallpaperPlugin = "{plugin}";
+            desktop.currentConfigGroup = ["Wallpaper", "{plugin}", "General"];
             desktop.writeConfig("Image", imageUrl);
             desktop.reloadConfig();
             return;
@@ -103,7 +168,8 @@ function setForGeometry(left, top, width, height, imageUrl) {{
     throw new Error("No Plasma desktop matched geometry " + left + "," + top + " " + width + "x" + height);
 }}
 {assignments}
-"#
+"#,
+        plugin = escape_js_string(plugin_id),
     ))
 }
 
@@ -255,6 +321,24 @@ mod tests {
         assert!(script.contains("org.kde.image"));
         assert!(script.contains("reloadConfig"));
         assert!(script.contains(expected_url.as_str()));
+    }
+
+    #[test]
+    fn native_dynamic_script_uses_plugin_id() {
+        let path = std::env::temp_dir().join("easel-plasma-dyn.heic");
+        let wallpaper = sample_wallpaper(
+            path.to_str().expect("temp path is UTF-8"),
+            LogicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        );
+        let script =
+            build_plasma_native_dynamic_script(&[wallpaper], "com.github.zzag.dynamic").unwrap();
+        assert!(script.contains("com.github.zzag.dynamic"));
+        assert!(script.contains("writeConfig(\"Image\""));
     }
 
     #[test]

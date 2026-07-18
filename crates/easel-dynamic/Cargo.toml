@@ -11,11 +11,15 @@ description = "Apple HEIC / Plasma dynamic still import and native bundle planni
 [dependencies]
 base64 = "0.22"
 easel-core = { path = "../easel-core" }
+easel-render = { path = "../easel-render" }
 image = { workspace = true }
 libheif-rs = { version = "2.7", default-features = false, features = ["v1_17"] }
 plist = "=1.7.0"
 serde = { workspace = true }
 thiserror.workspace = true
+
+[dev-dependencies]
+tempfile = "3"
 
 [lints]
 workspace = true

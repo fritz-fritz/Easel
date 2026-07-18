@@ -39,6 +39,17 @@ enum Commands {
         /// Path to a `.heic` dynamic wallpaper.
         path: PathBuf,
     },
+    /// Import a dynamic HEIC into the library and attach a still set to a profile.
+    ImportHeic {
+        /// Path to a `.heic` dynamic wallpaper.
+        path: PathBuf,
+        /// Profile id (hyphenated UUID). When omitted, creates a new dynamic profile.
+        #[arg(long)]
+        profile: Option<String>,
+        /// Display name for the still set / profile.
+        #[arg(long)]
+        name: Option<String>,
+    },
     /// Show automation status (pause, next fire, last apply).
     Status,
     /// Pause all rotation queues.
@@ -83,6 +94,11 @@ fn run() -> Result<(), String> {
             Ok(())
         }
         Commands::InspectHeic { path } => inspect_heic(&path),
+        Commands::ImportHeic {
+            path,
+            profile,
+            name,
+        } => import_heic(&mut store, &path, profile.as_deref(), name.as_deref()),
         Commands::Status => show_status(&store, cli.utc_offset_minutes),
         Commands::Pause => {
             store
@@ -189,6 +205,98 @@ fn inspect_heic(path: &std::path::Path) -> Result<(), String> {
         plan.frame_count,
         NativeDynamicFormat::AppleHeic
     );
+    Ok(())
+}
+
+fn import_heic(
+    store: &mut AutomationStore,
+    path: &std::path::Path,
+    profile: Option<&str>,
+    name: Option<&str>,
+) -> Result<(), String> {
+    use easel_core::{PresentationMode, Profile, RotationQueue};
+    use easel_dynamic::{import_dynamic_heic, persist_imported_desktop};
+    use easel_library::LibraryStore;
+
+    let imported = import_dynamic_heic(path).map_err(|error| error.to_string())?;
+    let display_name = name.map_or_else(
+        || {
+            path.file_stem()
+                .and_then(|stem| stem.to_str())
+                .unwrap_or("Dynamic HEIC")
+                .to_owned()
+        },
+        str::to_owned,
+    );
+
+    let mut profile = if let Some(value) = profile {
+        let profile_id = ProfileId::parse(value).map_err(|error| error.to_string())?;
+        store
+            .profile(profile_id)
+            .cloned()
+            .ok_or_else(|| format!("profile not found: {value}"))?
+    } else {
+        Profile::new(display_name.clone())
+    };
+    profile.presentation = PresentationMode::DynamicStills;
+
+    let (_, data_dir) = dirs();
+    let asset_dir = data_dir
+        .join("dynamic-stills")
+        .join(profile.id.to_hyphenated_string());
+    let persisted = persist_imported_desktop(&imported, &display_name, profile.id, &asset_dir)
+        .map_err(|error| error.to_string())?;
+
+    let library =
+        LibraryStore::open(data_dir.join("library.db")).map_err(|error| error.to_string())?;
+    for asset in &persisted.assets {
+        library
+            .upsert_asset(asset)
+            .map_err(|error| error.to_string())?;
+    }
+
+    let fallback = persisted.still_set.fallback_asset_id;
+    profile.selected_asset = Some(fallback);
+    profile.still_set_id = Some(persisted.still_set.id);
+    let queue = RotationQueue::from_assets(
+        format!("{display_name} queue"),
+        persisted
+            .assets
+            .iter()
+            .map(|asset| asset.id)
+            .collect::<Vec<_>>(),
+    );
+    profile.rotation_queue_id = Some(queue.id);
+
+    store
+        .upsert_queue(queue)
+        .map_err(|error| error.to_string())?;
+    store
+        .upsert_still_set(persisted.still_set.clone())
+        .map_err(|error| error.to_string())?;
+    store
+        .upsert_profile(profile.clone())
+        .map_err(|error| error.to_string())?;
+
+    println!("profile:\t{}", profile.id.to_hyphenated_string());
+    println!(
+        "still_set:\t{}",
+        persisted.still_set.id.to_hyphenated_string()
+    );
+    println!("flavor:\t{:?}", imported.flavor);
+    println!("frames:\t{}", persisted.assets.len());
+    for (frame, asset) in persisted
+        .still_set
+        .frames
+        .iter()
+        .zip(persisted.assets.iter())
+    {
+        println!(
+            "\t{}\t{}",
+            frame.key.label(),
+            asset.id.to_hyphenated_string()
+        );
+    }
     Ok(())
 }
 

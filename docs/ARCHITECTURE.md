@@ -50,9 +50,9 @@ It has no Qt, HTTP, image-decoder, or OS dependency.
 
 ## Dynamic still packages
 
-`easel-dynamic` imports Apple Dynamic Desktop HEIC (and Plasma-compatible packages): XMP
-`apple_desktop` metadata, binary plist schedules, and per-frame decode via libheif. It also
-plans per-display native re-encodes so physical spanning can ship one OS-hosted package per
+`easel-dynamic` imports and exports Apple Dynamic Desktop HEIC (and Plasma-compatible
+packages): XMP `apple_desktop` metadata, binary plist schedules, per-frame decode/encode via
+libheif, and per-display crop→encode so physical spanning can ship one OS-hosted package per
 output. See ADR 0006.
 
 ## Renderer

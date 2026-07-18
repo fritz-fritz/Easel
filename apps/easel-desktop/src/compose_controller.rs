@@ -13,7 +13,7 @@ use std::thread;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use easel_core::{FitMode, LayoutMode, Profile};
+use easel_core::{DynamicStillSet, FitMode, LayoutMode, Profile};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
@@ -67,6 +67,10 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "preview_timeline_hour"]
         fn previewTimelineHour(self: Pin<&mut Self>, hour: f64);
+
+        #[qinvokable]
+        #[rust_name = "import_dynamic_heic_from_url"]
+        fn importDynamicHeicFromUrl(self: Pin<&mut Self>, url: QString);
     }
 
     impl cxx_qt::Threading for ComposeController {}
@@ -88,6 +92,8 @@ pub struct ComposeControllerRust {
     profile_name: QString,
     media_mode_index: i32,
     timeline_preview: QString,
+    /// Still set loaded from a HEIC import (drives timeline scrub evaluation).
+    timeline_still_set: Option<DynamicStillSet>,
     job_generation: AtomicU64,
     apply_generation: AtomicU64,
     job_tx: Sender<WorkerJob>,
@@ -110,8 +116,9 @@ impl Default for ComposeControllerRust {
             profile_name: QString::from("Compose"),
             media_mode_index: 0,
             timeline_preview: QString::from(
-                "Select Dynamic stills to scrub the hourly placeholder timeline, or import a HEIC.",
+                "Select Dynamic stills and import a HEIC, or save an hourly placeholder set.",
             ),
+            timeline_still_set: None,
             job_generation: AtomicU64::new(0),
             apply_generation: AtomicU64::new(0),
             job_tx: worker_sender(),
@@ -269,11 +276,93 @@ impl qobject::ComposeController {
         let whole_hour = hour.floor() as u8;
         #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
         let minute = ((hour.fract() * 60.0).floor() as u8).min(59);
-        let label =
-            format!("tod:{whole_hour:02}:00 (hourly placeholder; import a HEIC for solar samples)");
+
+        let still_set = self.as_ref().rust().timeline_still_set.clone();
+        let label = if let Some(set) = still_set.as_ref() {
+            use easel_core::{InstantSeconds, active_frame_at};
+            // Anchor to a fixed UTC day so scrubbing only changes local wall time.
+            let local_minutes = i64::from(whole_hour) * 60 + i64::from(minute);
+            let now = InstantSeconds {
+                unix_seconds: local_minutes * 60,
+            };
+            let selection = active_frame_at(set, now, 0);
+            format!(
+                "{} ({}) · {} frames · {:?}",
+                selection.key_label(),
+                selection.asset_id.to_hyphenated_string(),
+                set.frames.len(),
+                set.schedule_kind
+            )
+        } else {
+            format!(
+                "tod:{whole_hour:02}:{minute:02} (no still set loaded — import a HEIC or save Dynamic stills)"
+            )
+        };
         self.as_mut().set_timeline_preview(QString::from(
             format!("Simulated {whole_hour:02}:{minute:02} → {label}").as_str(),
         ));
+    }
+
+    fn import_dynamic_heic_from_url(mut self: Pin<&mut Self>, url: QString) {
+        let path = path_from_file_url(&url.to_string());
+        let path_str = path.to_string_lossy().to_string();
+        if path_str.trim().is_empty() {
+            self.as_mut()
+                .set_preview_status(QString::from("Choose a dynamic HEIC to import"));
+            return;
+        }
+        let name = {
+            let value = self.profile_name().to_string();
+            if value.trim().is_empty() {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("Dynamic HEIC")
+                    .to_owned()
+            } else {
+                value
+            }
+        };
+        match crate::profile_controller::import_dynamic_heic_profile(
+            &path_str,
+            &name,
+            fit_mode_from_index(*self.fit_mode_index()),
+            layout_mode_from_index(*self.layout_mode_index()),
+            if self.zoom().is_finite() {
+                (*self.zoom()).max(1.0)
+            } else {
+                1.0
+            },
+            (*self.focal_x()).clamp(0.0, 1.0),
+            (*self.focal_y()).clamp(0.0, 1.0),
+        ) {
+            Ok((profile, still_set, first_frame)) => {
+                self.as_mut().rust_mut().timeline_still_set = Some(still_set.clone());
+                self.as_mut().set_media_mode_index(1);
+                self.as_mut()
+                    .set_source_path(QString::from(first_frame.as_str()));
+                self.as_mut()
+                    .set_profile_name(QString::from(profile.name.as_str()));
+                self.as_mut().set_preview_status(QString::from(
+                    format!(
+                        "Imported {} ({} frames, {:?}) as profile '{}'",
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("HEIC"),
+                        still_set.frames.len(),
+                        still_set.schedule_kind,
+                        profile.name
+                    )
+                    .as_str(),
+                ));
+                self.as_mut().preview_timeline_hour(12.0);
+                self.refresh_preview();
+            }
+            Err(error) => {
+                self.as_mut().set_preview_status(QString::from(
+                    format!("HEIC import failed: {error}").as_str(),
+                ));
+            }
+        }
     }
 }
 

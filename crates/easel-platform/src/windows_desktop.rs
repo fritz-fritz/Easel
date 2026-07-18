@@ -53,6 +53,7 @@ impl WallpaperBackend for WindowsDesktopBackend {
                 self.validate_output_path(path)?;
                 apply_virtual_desktop(path)
             }
+            WallpaperOutput::NativeDynamic(_) => Err(BackendError::UnsupportedOutput),
         }
     }
 }
