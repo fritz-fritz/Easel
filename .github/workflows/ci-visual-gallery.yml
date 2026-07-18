@@ -162,6 +162,8 @@ jobs:
           print(f"gate_ok={'true' if cmp.get('gate_ok', True) else 'false'}")
           print(f"strict_failed={cmp.get('strict_failed', 0)}")
           print(f"strict_total={cmp.get('strict_total', 0)}")
+          print(f"strict_match={cmp.get('strict_match', 0)}")
+          print(f"strict_warnings={cmp.get('strict_warnings', 0)}")
           print(f"image_count={summary.get('image_count', 0)}")
           PY
 
@@ -220,9 +222,12 @@ jobs:
         if: always() && steps.visuals.outputs.count != '0'
         uses: actions/github-script@v7
         env:
+          GALLERY_CONCLUSION: ${{ steps.gallery.conclusion }}
           GATE_OK: ${{ steps.gallery.outputs.gate_ok }}
           STRICT_FAILED: ${{ steps.gallery.outputs.strict_failed }}
           STRICT_TOTAL: ${{ steps.gallery.outputs.strict_total }}
+          STRICT_MATCH: ${{ steps.gallery.outputs.strict_match }}
+          STRICT_WARNINGS: ${{ steps.gallery.outputs.strict_warnings }}
           PAGES_BASE: ${{ steps.meta.outputs.pages_base }}
           PR_NUMBER: ${{ steps.meta.outputs.pr_number }}
           SHA: ${{ steps.meta.outputs.sha }}
@@ -230,19 +235,35 @@ jobs:
           DEPLOYED: ${{ steps.deploy.outputs.enabled }}
         with:
           script: |
+            const galleryConclusion = process.env.GALLERY_CONCLUSION || '';
             const gateOk = process.env.GATE_OK === 'true';
             const failed = Number(process.env.STRICT_FAILED || '0');
             const total = Number(process.env.STRICT_TOTAL || '0');
+            const matched = Number(process.env.STRICT_MATCH || '0');
+            const warnings = Number(process.env.STRICT_WARNINGS || '0');
             const deployed = process.env.DEPLOYED === 'true';
             const galleryUrl = deployed
               ? `${process.env.PAGES_BASE.replace(/\/$/, '')}/pr/${process.env.PR_NUMBER}/`
               : process.env.RUN_URL;
-            const state = gateOk ? 'success' : 'failure';
-            const description = gateOk
-              ? (total > 0
-                  ? `apply-payload identical across OS (${total} asset(s))`
-                  : 'no strict-stage assets to compare')
-              : `apply-payload OS mismatch: ${failed}/${total} asset(s)`;
+            let state;
+            let description;
+            if (galleryConclusion !== 'success') {
+              state = 'failure';
+              description = 'gallery build failed';
+            } else if (!gateOk) {
+              state = 'failure';
+              description = `apply-payload OS mismatch: ${failed}/${total} asset(s)`;
+            } else if (total === 0) {
+              state = 'success';
+              description = 'no strict-stage assets to compare';
+            } else if (warnings > 0) {
+              state = 'success';
+              description =
+                `apply-payload gate ok (${matched}/${total} full match, ${warnings} incomplete)`;
+            } else {
+              state = 'success';
+              description = `apply-payload identical across OS (${matched} asset(s))`;
+            }
             await github.rest.repos.createCommitStatus({
               owner: context.repo.owner,
               repo: context.repo.repo,
@@ -263,7 +284,10 @@ jobs:
           retention-days: 7
 
       - name: Fail on strict cross-OS regressions
-        if: steps.visuals.outputs.count != '0' && steps.gallery.outputs.gate_ok != 'true'
+        if: >-
+          steps.visuals.outputs.count != '0' &&
+          steps.gallery.conclusion == 'success' &&
+          steps.gallery.outputs.gate_ok != 'true'
         run: |
           echo "::error::Strict-stage visual assets differ across OS (see sticky comment / HTML gallery)."
           exit 1

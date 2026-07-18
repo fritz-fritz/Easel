@@ -11,7 +11,10 @@ inputs:
     description: Directory where producers wrote visual files
     required: true
   pattern:
-    description: Glob of files to publish relative to source-dir (e.g. apply-display-*.png)
+    description: >
+      Glob of files to publish relative to source-dir (e.g. apply-display-*.png).
+      At most 12 matches are uploaded (upload-artifact archive:false limit); extras
+      are dropped with a warning in stage.sh.
     required: true
   name-template:
     description: >

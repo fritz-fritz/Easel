@@ -44,6 +44,7 @@ jobs:
               - 'crates/**'
               - 'apps/easel-desktop/**'
               - '.github/actions/ci-visual/**'
+            # Include ci.yml so edits to the Gallery tooling job itself are exercised.
             gallery_tooling:
               - '.github/ci-visual/**'
               - '.github/actions/ci-visual/**'

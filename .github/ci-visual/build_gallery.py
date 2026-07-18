@@ -337,9 +337,20 @@ def infer_from_filename(name: str) -> tuple[str, str, str]:
 
 
 def safe_filename(filename: str) -> str:
-    """Return a basename-only filename, rejecting path traversal."""
+    """Return a basename-only filename, rejecting path traversal.
+
+    Also reject Windows-style backslash paths: on POSIX, Path('a\\\\b').name is
+    the full string, so a name!=filename check alone is not enough.
+    """
     name = Path(filename).name
-    if not name or name in {".", ".."} or name != filename:
+    if (
+        not name
+        or name in {".", ".."}
+        or name != filename
+        or "/" in filename
+        or "\\" in filename
+        or "\x00" in filename
+    ):
         raise ValueError(f"unsafe artifact filename: {filename!r}")
     return name
 
@@ -430,7 +441,9 @@ def build_comparisons(images: list[dict]) -> list[dict]:
         grouped[(image["stage"], asset_key(image))][image["os"]] = image
 
     comparisons: list[dict] = []
-    for (stage, key), by_os in sorted(grouped.items()):
+    for (stage, key), by_os in sorted(
+        grouped.items(), key=lambda item: (item[0][0], display_sort_key(item[0][1]))
+    ):
         present = [os_name for os_name in EXPECTED_OS if os_name in by_os]
         extra = sorted(os_name for os_name in by_os if os_name not in EXPECTED_OS)
         all_os = present + extra
@@ -495,6 +508,7 @@ def comparison_totals(comparisons: list[dict]) -> dict:
     strict = [c for c in comparisons if c["gate"] == "strict"]
     informational = [c for c in comparisons if c["gate"] == "informational"]
     strict_bad = [c for c in strict if not c["gate_ok"]]
+    strict_match = [c for c in strict if c["status"] == "match"]
     strict_warn = [
         c
         for c in strict
@@ -507,6 +521,9 @@ def comparison_totals(comparisons: list[dict]) -> dict:
     ]
     return {
         "strict_total": len(strict),
+        # Fully identical with complete OS coverage only.
+        "strict_match": len(strict_match),
+        # Gate-pass count (match + incomplete/single-os warnings).
         "strict_ok": len(strict) - len(strict_bad),
         "strict_failed": len(strict_bad),
         "strict_warnings": len(strict_warn),
@@ -577,15 +594,15 @@ def write_site(
 
     banner_chips: list[str] = []
     if totals["strict_total"]:
-        if totals["gate_ok"]:
-            banner_chips.append(
-                f'<span class="chip match">apply-payload {totals["strict_ok"]}/'
-                f'{totals["strict_total"]} OS-identical</span>'
-            )
-        else:
+        if not totals["gate_ok"]:
             banner_chips.append(
                 f'<span class="chip mismatch">apply-payload '
                 f'{totals["strict_failed"]} OS regression(s)</span>'
+            )
+        if totals["strict_match"]:
+            banner_chips.append(
+                f'<span class="chip match">apply-payload {totals["strict_match"]}/'
+                f'{totals["strict_total"]} fully OS-identical</span>'
             )
         if totals["strict_warnings"]:
             banner_chips.append(
@@ -753,15 +770,15 @@ def write_comment(
         ]
     )
     if totals["strict_total"]:
-        if totals["gate_ok"]:
-            lines.append(
-                f"| Apply-payload OS compare | ✅ {totals['strict_ok']}/"
-                f"{totals['strict_total']} identical across runners |"
-            )
-        else:
+        if not totals["gate_ok"]:
             lines.append(
                 f"| Apply-payload OS compare | ❌ {totals['strict_failed']} "
                 f"regression(s) (content/size mismatch) |"
+            )
+        else:
+            lines.append(
+                f"| Apply-payload OS compare | ✅ {totals['strict_match']}/"
+                f"{totals['strict_total']} fully identical across runners |"
             )
         if totals["strict_warnings"]:
             lines.append(
@@ -852,7 +869,7 @@ def markdown_os_table(
     cache_buster: str = "",
 ) -> list[str]:
     lines = [
-        "| OS | Preview | Size | SHA256 | Artifact |",
+        "| OS | Preview | Size | SHA-256 (12) | Artifact |",
         "| --- | --- | --- | --- | --- |",
     ]
     for image in sorted(images, key=lambda i: i["os"]):

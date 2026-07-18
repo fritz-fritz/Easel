@@ -20,6 +20,7 @@ from build_gallery import (
     main,
     png_meta,
     raw_asset_base,
+    safe_filename,
 )
 
 
@@ -80,6 +81,13 @@ class BuildGalleryTests(unittest.TestCase):
         )
         self.assertEqual(extract_display_label("apply-display-2"), "2")
 
+    def test_safe_filename_rejects_path_separators(self) -> None:
+        self.assertEqual(safe_filename("ok.png"), "ok.png")
+        with self.assertRaises(ValueError):
+            safe_filename("subdir/foo.png")
+        with self.assertRaises(ValueError):
+            safe_filename("subdir\\foo.png")
+
     def test_strict_mismatch_fails_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
@@ -97,6 +105,44 @@ class BuildGalleryTests(unittest.TestCase):
             self.assertEqual(len(comparisons), 1)
             self.assertEqual(comparisons[0]["status"], "content-mismatch")
             self.assertFalse(totals["gate_ok"])
+            self.assertEqual(totals["strict_match"], 0)
+
+    def test_display_numeric_sort_order(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Insert out of numeric order so lexicographic sort would put 10 before 2.
+            for display in ("10", "2", "0"):
+                for os_name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+                    name = f"apply-payload-{os_name}-apply-display-{display}.png"
+                    write_png(root / name, 8, 8, (1, 2, 3))
+            for os_name in ("ubuntu-latest", "windows-latest", "macos-latest"):
+                write_manifest(
+                    root,
+                    "apply-payload",
+                    os_name,
+                    [
+                        f"apply-payload-{os_name}-apply-display-10.png",
+                        f"apply-payload-{os_name}-apply-display-2.png",
+                        f"apply-payload-{os_name}-apply-display-0.png",
+                    ],
+                )
+            comparisons = build_comparisons(collect_images(root, load_manifests(root)))
+            self.assertEqual([c["asset"] for c in comparisons], ["0", "2", "10"])
+
+    def test_strict_match_excludes_incomplete_matrix(self) -> None:
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            # Only ubuntu produces the asset → single-os warning, not a full match.
+            name = "apply-payload-ubuntu-latest-apply-display-0.png"
+            write_png(root / name, 8, 8, (1, 2, 3))
+            write_manifest(root, "apply-payload", "ubuntu-latest", [name])
+            totals = comparison_totals(
+                build_comparisons(collect_images(root, load_manifests(root)))
+            )
+            self.assertTrue(totals["gate_ok"])
+            self.assertEqual(totals["strict_match"], 0)
+            self.assertEqual(totals["strict_warnings"], 1)
+            self.assertEqual(totals["strict_ok"], 1)
 
     def test_strict_match_and_gui_variance(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
@@ -125,14 +171,17 @@ class BuildGalleryTests(unittest.TestCase):
             self.assertEqual(rc, 0)
             summary = json.loads((out / "summary.json").read_text(encoding="utf8"))
             self.assertTrue(summary["comparison"]["gate_ok"])
+            self.assertEqual(summary["comparison"]["strict_match"], 1)
             self.assertGreaterEqual(summary["comparison"]["informational_variance"], 1)
             comment = (out / "comment.md").read_text(encoding="utf8")
             self.assertIn("Apply-payload OS compare", comment)
+            self.assertIn("fully identical across runners", comment)
+            self.assertIn("SHA-256 (12)", comment)
             self.assertIn("Cross-OS metadata", comment)
             html_page = (out / "site" / "index.html").read_text(encoding="utf8")
             self.assertIn("OS compare", html_page)
-            self.assertIn("identical across OS", html_page)
-            self.assertIn("table class=\"compare\"", html_page)
+            self.assertIn("fully OS-identical", html_page)
+            self.assertIn('table class="compare"', html_page)
 
     def test_fail_on_mismatch_exit_code(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
