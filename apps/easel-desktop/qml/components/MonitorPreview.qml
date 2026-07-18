@@ -106,37 +106,15 @@ Frame {
 
         // Uniform mm→px scale letterboxes the arrangement so monitor aspects stay
         // physical regardless of the preview frame's width/height (CI window sizes differ).
-        property real mmPerPixel: {
-            var usableW = width * (1.0 - margin * 2.0)
-            var usableH = height * (1.0 - margin * 2.0)
-            var scale = Math.min(usableW / spanXmm, usableH / spanYmm)
-            return scale > 0 ? 1.0 / scale : 1.0
+        property real pxPerMm: {
+            var usableW = Math.max(1, width * (1.0 - margin * 2.0))
+            var usableH = Math.max(1, height * (1.0 - margin * 2.0))
+            return Math.min(usableW / spanXmm, usableH / spanYmm)
         }
-        property real contentPixelW: spanXmm / mmPerPixel
-        property real contentPixelH: spanYmm / mmPerPixel
+        property real contentPixelW: spanXmm * pxPerMm
+        property real contentPixelH: spanYmm * pxPerMm
         property real contentOriginX: (width - contentPixelW) / 2.0
         property real contentOriginY: (height - contentPixelH) / 2.0
-
-        function monitorX(row) {
-            if (root.physicalPreview)
-                return contentOriginX + (row.originXmm - minOriginX) / mmPerPixel
-            return width * row.xFactor
-        }
-        function monitorY(row) {
-            if (root.physicalPreview)
-                return contentOriginY + (row.originYmm - minOriginY) / mmPerPixel
-            return height * row.yFactor
-        }
-        function monitorW(row) {
-            if (root.physicalPreview)
-                return row.widthMm / mmPerPixel
-            return width * row.wFactor
-        }
-        function monitorH(row) {
-            if (root.physicalPreview)
-                return row.heightMm / mmPerPixel
-            return height * row.hFactor
-        }
 
         Repeater {
             model: canvas.parsedRows
@@ -148,10 +126,20 @@ Frame {
                 property real dragOriginX: modelData.originXmm
                 property real dragOriginY: modelData.originYmm
 
-                x: canvas.monitorX(modelData)
-                y: canvas.monitorY(modelData)
-                width: Math.max(1, canvas.monitorW(modelData))
-                height: Math.max(1, canvas.monitorH(modelData))
+                // Bindings read canvas.* and root.physicalPreview directly so
+                // Qt tracks dependency changes (unlike helper-function calls).
+                x: root.physicalPreview
+                   ? canvas.contentOriginX + (modelData.originXmm - canvas.minOriginX) * canvas.pxPerMm
+                   : canvas.width * modelData.xFactor
+                y: root.physicalPreview
+                   ? canvas.contentOriginY + (modelData.originYmm - canvas.minOriginY) * canvas.pxPerMm
+                   : canvas.height * modelData.yFactor
+                width: Math.max(1, root.physicalPreview
+                                   ? modelData.widthMm * canvas.pxPerMm
+                                   : canvas.width * modelData.wFactor)
+                height: Math.max(1, root.physicalPreview
+                                    ? modelData.heightMm * canvas.pxPerMm
+                                    : canvas.height * modelData.hFactor)
                 radius: 6
                 color: Qt.hsla((modelData.index * 0.17) % 1.0, 0.25, 0.35, 1.0)
                 border.color: modelData.id === root.selectedDisplayId ? root.palette.highlight : root.palette.mid
@@ -196,8 +184,8 @@ Frame {
                         root.displaySelected(modelData.id)
                     }
                     onReleased: (mouse) => {
-                        var dxMm = (mouse.x - pressX) * canvas.mmPerPixel
-                        var dyMm = (mouse.y - pressY) * canvas.mmPerPixel
+                        var dxMm = (mouse.x - pressX) / Math.max(canvas.pxPerMm, 0.0001)
+                        var dyMm = (mouse.y - pressY) / Math.max(canvas.pxPerMm, 0.0001)
                         root.displayMoved(modelData.id, monitor.dragOriginX + dxMm, monitor.dragOriginY + dyMm)
                     }
                 }
