@@ -27,8 +27,13 @@ workspace. It has two distinct build scopes:
 ### Running the GUI
 
 - Headless smoke render (what CI validates), renders the Compose view and writes a PNG:
-  `QT_QPA_PLATFORM=xcb QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc xvfb-run -a \
-   cargo run -p easel-desktop -- --smoke-screenshot <outdir>` → `<outdir>/gui-linux.png`.
+
+  ```
+  QT_QPA_PLATFORM=xcb QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc xvfb-run -a \
+    cargo run -p easel-desktop -- --smoke-screenshot <outdir>
+  ```
+
+  Output: `<outdir>/gui-linux.png`.
 - Interactive: an XFCE desktop is available on `DISPLAY=:1`. Launch the full app with
   `DISPLAY=:1 QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc cargo run -p easel-desktop`.
   It enumerates the live X screen (the VNC display) rather than the smoke fixture layout.
