@@ -104,40 +104,44 @@ impl<'a> LocalIndexer<'a> {
                 if !still_image_extension(extension) {
                     continue;
                 }
-                if self.index_file(&path)? {
-                    count += 1;
+                match self.index_file(&path)? {
+                    IndexOutcome::Created | IndexOutcome::Updated => count += 1,
+                    IndexOutcome::Skipped => {}
                 }
             }
         }
         Ok(count)
     }
 
-    /// Indexes one still-image file, returning whether a new record was created.
-    pub fn index_file(&self, path: &Path) -> Result<bool, IndexError> {
+    /// Indexes or refreshes one still-image file.
+    pub fn index_file(&self, path: &Path) -> Result<IndexOutcome, IndexError> {
         let canonical = fs::canonicalize(path).map_err(|error| IndexError::Io {
             path: path.to_path_buf(),
             source: error,
         })?;
         let path_string = canonical.to_string_lossy().into_owned();
-        if self.store.find_by_path(&path_string)?.is_some() {
-            return Ok(false);
-        }
-
-        let dimensions = probe_dimensions(&canonical).unwrap_or(MediaDimensions {
-            width: 1,
-            height: 1,
-        });
+        let Some(dimensions) = probe_dimensions(&canonical) else {
+            return Ok(IndexOutcome::Skipped);
+        };
         let title = canonical
             .file_stem()
             .map(|value| value.to_string_lossy().into_owned());
+
+        if let Some(existing) = self.store.find_by_path(&path_string)? {
+            let mut refreshed = existing;
+            refreshed.title = title.or(refreshed.title);
+            refreshed.media = MediaMetadata::StillImage { dimensions };
+            refreshed.retrieved_at_unix = Some(now_unix());
+            self.store.upsert_asset(&refreshed)?;
+            return Ok(IndexOutcome::Updated);
+        }
+
         let asset = MediaAsset {
             id: AssetId::new(),
             provider_id: None,
             title,
             media: MediaMetadata::StillImage { dimensions },
-            location: AssetLocation::Local {
-                path: path_string.clone(),
-            },
+            location: AssetLocation::Local { path: path_string },
             license: None,
             attribution: None,
             content_safety: easel_core::ContentSafety::Safe,
@@ -151,8 +155,19 @@ impl<'a> LocalIndexer<'a> {
             HistoryAction::Discovered,
             now_unix(),
         ))?;
-        Ok(true)
+        Ok(IndexOutcome::Created)
     }
+}
+
+/// Result of indexing one path.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum IndexOutcome {
+    /// A new library row was inserted.
+    Created,
+    /// An existing row was refreshed (dimensions / timestamps).
+    Updated,
+    /// The file could not be probed and was left unchanged.
+    Skipped,
 }
 
 /// Folder indexing failure.
@@ -182,28 +197,58 @@ fn now_unix() -> u64 {
 }
 
 fn probe_dimensions(path: &Path) -> Option<MediaDimensions> {
-    // Keep the library crate free of the image decoder stack; Stage 3 records a
-    // placeholder until Compose/decode fills accurate dimensions on use.
-    let _ = path;
-    None
+    let (width, height) = image::image_dimensions(path).ok()?;
+    if width == 0 || height == 0 {
+        return None;
+    }
+    Some(MediaDimensions { width, height })
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
+    use image::{Rgb, RgbImage};
     use uuid::Uuid;
 
     #[test]
     fn indexes_still_images_in_folder() {
         let root = std::env::temp_dir().join(format!("easel-idx-{}", Uuid::new_v4()));
         fs::create_dir_all(&root).unwrap();
-        fs::write(root.join("a.png"), b"not-a-real-png").unwrap();
+        RgbImage::from_pixel(64, 48, Rgb([10, 20, 30]))
+            .save(root.join("a.png"))
+            .unwrap();
         fs::write(root.join("notes.txt"), b"skip").unwrap();
         let store = LibraryStore::open(root.join("library.db")).unwrap();
         let indexer = LocalIndexer::new(&store);
         let count = indexer.add_and_scan(&root, false).unwrap();
         assert_eq!(count, 1);
-        assert_eq!(store.list_assets(10).unwrap().len(), 1);
+        let assets = store.list_assets(10).unwrap();
+        assert_eq!(assets.len(), 1);
+        assert_eq!(assets[0].media.dimensions().width, 64);
+        assert_eq!(assets[0].media.dimensions().height, 48);
         assert_eq!(store.list_folders().unwrap().len(), 1);
+    }
+
+    #[test]
+    fn refresh_updates_dimensions_for_existing_path() {
+        let root = std::env::temp_dir().join(format!("easel-idx-refresh-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("a.png");
+        RgbImage::from_pixel(32, 32, Rgb([1, 2, 3]))
+            .save(&path)
+            .unwrap();
+        let store = LibraryStore::open(root.join("library.db")).unwrap();
+        let indexer = LocalIndexer::new(&store);
+        assert_eq!(indexer.index_file(&path).unwrap(), IndexOutcome::Created);
+        RgbImage::from_pixel(80, 60, Rgb([4, 5, 6]))
+            .save(&path)
+            .unwrap();
+        assert_eq!(indexer.index_file(&path).unwrap(), IndexOutcome::Updated);
+        let asset = store
+            .find_by_path(&fs::canonicalize(&path).unwrap().to_string_lossy())
+            .unwrap()
+            .unwrap();
+        assert_eq!(asset.media.dimensions().width, 80);
+        assert_eq!(asset.media.dimensions().height, 60);
     }
 }

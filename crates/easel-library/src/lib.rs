@@ -12,6 +12,6 @@ mod store;
 mod watch;
 
 pub use cache::AcquisitionCache;
-pub use index::{IndexedFolder, LocalIndexer, still_image_extension};
+pub use index::{IndexOutcome, IndexedFolder, LocalIndexer, still_image_extension};
 pub use store::{LibraryStore, LibraryStoreError};
 pub use watch::{FolderWatchEvent, FolderWatcher};

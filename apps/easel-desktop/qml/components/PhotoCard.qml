@@ -38,6 +38,7 @@ Frame {
             clip: true
 
             Image {
+                id: previewImage
                 anchors.fill: parent
                 source: root.imageSource
                 fillMode: Image.PreserveAspectCrop
@@ -47,7 +48,7 @@ Frame {
 
             Label {
                 anchors.centerIn: parent
-                visible: root.imageSource.length === 0 || parent.children[0].status !== Image.Ready
+                visible: root.imageSource.length === 0 || previewImage.status !== Image.Ready
                 text: qsTr("Image preview")
                 color: "white"
                 opacity: 0.82

@@ -8,10 +8,20 @@
 //! produces ±1 LSB channel differences between MSVC and Unix for some scale factors.
 //! This module uses the pure-Rust `libm` crate so apply-payload rasters stay
 //! byte-identical across CI OS runners.
+//!
+//! Kernel weights are precomputed once per axis so large wallpapers do not recompute
+//! `sin` for every output pixel.
 
 use image::{Rgba, RgbaImage};
 
 const LANCZOS_RADIUS: f64 = 3.0;
+
+/// One weighted source sample contributing to an output coordinate.
+#[derive(Clone, Copy, Debug)]
+struct SampleWeight {
+    index: u32,
+    weight: f64,
+}
 
 /// Resizes `source` to `out_width`×`out_height` with a portable Lanczos-3 kernel.
 #[must_use]
@@ -26,76 +36,109 @@ pub fn resize_lanczos3(source: &RgbaImage, out_width: u32, out_height: u32) -> R
     let horizontal = if source.width() == out_width {
         source.clone()
     } else {
-        resize_axis(source, out_width, source.height(), Axis::Horizontal)
+        let contributions = build_contributions(source.width(), out_width);
+        resize_horizontal(source, out_width, &contributions)
     };
 
     if horizontal.height() == out_height {
         horizontal
     } else {
-        resize_axis(&horizontal, out_width, out_height, Axis::Vertical)
+        let contributions = build_contributions(horizontal.height(), out_height);
+        resize_vertical(&horizontal, out_height, &contributions)
     }
 }
 
-#[derive(Clone, Copy)]
-enum Axis {
-    Horizontal,
-    Vertical,
-}
-
-fn resize_axis(source: &RgbaImage, out_width: u32, out_height: u32, axis: Axis) -> RgbaImage {
-    let mut output = RgbaImage::new(out_width, out_height);
-    let (in_extent, out_extent) = match axis {
-        Axis::Horizontal => (source.width(), out_width),
-        Axis::Vertical => (source.height(), out_height),
-    };
+fn build_contributions(in_extent: u32, out_extent: u32) -> Vec<Vec<SampleWeight>> {
     let scale = f64::from(in_extent) / f64::from(out_extent);
-    // Downscaling widens the kernel in source space; upscaling keeps radius = 3.
     let filter_scale = scale.max(1.0);
     let support = LANCZOS_RADIUS * filter_scale;
     let max_index = in_extent.saturating_sub(1);
+    let mut contributions = Vec::with_capacity(out_extent as usize);
 
-    for out_y in 0..out_height {
-        for out_x in 0..out_width {
-            let (center, fixed) = match axis {
-                Axis::Horizontal => ((f64::from(out_x) + 0.5) * scale - 0.5, out_y),
-                Axis::Vertical => ((f64::from(out_y) + 0.5) * scale - 0.5, out_x),
-            };
-
-            let first = floor_clamped(center - support, max_index);
-            let last = ceil_clamped(center + support, max_index);
-
-            let mut weight_sum = 0.0_f64;
-            let mut acc = [0.0_f64; 4];
-            for sample in first..=last {
-                let weight = lanczos3((f64::from(sample) - center) / filter_scale);
-                if weight == 0.0 {
-                    continue;
-                }
-                weight_sum += weight;
-                let pixel = match axis {
-                    Axis::Horizontal => source.get_pixel(sample, fixed),
-                    Axis::Vertical => source.get_pixel(fixed, sample),
-                };
-                for (channel, total) in acc.iter_mut().enumerate() {
-                    *total += f64::from(pixel.0[channel]) * weight;
-                }
+    for out in 0..out_extent {
+        let center = (f64::from(out) + 0.5) * scale - 0.5;
+        let first = floor_clamped(center - support, max_index);
+        let last = ceil_clamped(center + support, max_index);
+        let mut samples = Vec::new();
+        let mut weight_sum = 0.0_f64;
+        for sample in first..=last {
+            let weight = lanczos3((f64::from(sample) - center) / filter_scale);
+            if weight == 0.0 {
+                continue;
             }
+            weight_sum += weight;
+            samples.push(SampleWeight {
+                index: sample,
+                weight,
+            });
+        }
+        if weight_sum.abs() > f64::EPSILON {
+            for sample in &mut samples {
+                sample.weight /= weight_sum;
+            }
+        } else {
+            samples.clear();
+        }
+        contributions.push(samples);
+    }
+    contributions
+}
 
-            let rgba = if weight_sum.abs() > f64::EPSILON {
-                Rgba([
-                    round_u8(acc[0] / weight_sum),
-                    round_u8(acc[1] / weight_sum),
-                    round_u8(acc[2] / weight_sum),
-                    round_u8(acc[3] / weight_sum),
-                ])
-            } else {
-                // No contributing samples (should be rare); keep opaque black.
-                Rgba([0, 0, 0, 255])
-            };
-            output.put_pixel(out_x, out_y, rgba);
+fn resize_horizontal(
+    source: &RgbaImage,
+    out_width: u32,
+    contributions: &[Vec<SampleWeight>],
+) -> RgbaImage {
+    let height = source.height();
+    let mut output = RgbaImage::new(out_width, height);
+    for y in 0..height {
+        for (x, samples) in contributions.iter().enumerate() {
+            output.put_pixel(
+                u32::try_from(x).unwrap_or(0),
+                y,
+                gather_samples(samples, |index| *source.get_pixel(index, y)),
+            );
         }
     }
     output
+}
+
+fn resize_vertical(
+    source: &RgbaImage,
+    out_height: u32,
+    contributions: &[Vec<SampleWeight>],
+) -> RgbaImage {
+    let width = source.width();
+    let mut output = RgbaImage::new(width, out_height);
+    for (y, samples) in contributions.iter().enumerate() {
+        for x in 0..width {
+            output.put_pixel(
+                x,
+                u32::try_from(y).unwrap_or(0),
+                gather_samples(samples, |index| *source.get_pixel(x, index)),
+            );
+        }
+    }
+    output
+}
+
+fn gather_samples(samples: &[SampleWeight], pixel_at: impl Fn(u32) -> Rgba<u8>) -> Rgba<u8> {
+    if samples.is_empty() {
+        return Rgba([0, 0, 0, 255]);
+    }
+    let mut acc = [0.0_f64; 4];
+    for sample in samples {
+        let pixel = pixel_at(sample.index);
+        for (channel, total) in acc.iter_mut().enumerate() {
+            *total += f64::from(pixel.0[channel]) * sample.weight;
+        }
+    }
+    Rgba([
+        round_u8(acc[0]),
+        round_u8(acc[1]),
+        round_u8(acc[2]),
+        round_u8(acc[3]),
+    ])
 }
 
 fn floor_clamped(value: f64, max_index: u32) -> u32 {

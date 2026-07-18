@@ -16,6 +16,8 @@ use thiserror::Error;
 use url::Url;
 
 const DEFAULT_USER_AGENT: &str = "Easel/0.1 (https://github.com/fritz-fritz/easel)";
+/// Upper bound for a single remote acquisition download.
+pub const MAX_ACQUISITION_BYTES: u64 = 128 * 1024 * 1024;
 
 /// Downloads and retains remote acquisition bytes under a cache root.
 pub struct AcquisitionCache {
@@ -114,14 +116,39 @@ impl AcquisitionCache {
                 response.status()
             )));
         }
-        let bytes = response
-            .bytes()
-            .map_err(|error| CacheError::Request(error.to_string()))?;
+        if let Some(length) = response.content_length() {
+            if length > MAX_ACQUISITION_BYTES {
+                return Err(CacheError::TooLarge {
+                    bytes: length,
+                    limit: MAX_ACQUISITION_BYTES,
+                });
+            }
+        }
 
         let temporary = destination.with_extension("partial");
         {
+            use std::io::Read;
+
             let mut file = fs::File::create(&temporary)?;
-            file.write_all(&bytes)?;
+            let mut written: u64 = 0;
+            let mut remote = response;
+            let mut buffer = vec![0_u8; 64 * 1024];
+            loop {
+                let read = remote.read(&mut buffer)?;
+                if read == 0 {
+                    break;
+                }
+                written = written.saturating_add(read as u64);
+                if written > MAX_ACQUISITION_BYTES {
+                    drop(file);
+                    let _ = fs::remove_file(&temporary);
+                    return Err(CacheError::TooLarge {
+                        bytes: written,
+                        limit: MAX_ACQUISITION_BYTES,
+                    });
+                }
+                file.write_all(&buffer[..read])?;
+            }
             file.sync_all()?;
         }
         fs::rename(&temporary, &destination)?;
@@ -184,6 +211,14 @@ pub enum CacheError {
     /// Host is outside the provider allowlist.
     #[error("acquisition host not allowed: {0}")]
     HostNotAllowed(String),
+    /// Remote payload exceeded the acquisition size limit.
+    #[error("acquisition exceeded size limit ({bytes} > {limit} bytes)")]
+    TooLarge {
+        /// Observed or attempted byte count.
+        bytes: u64,
+        /// Configured maximum.
+        limit: u64,
+    },
 }
 
 #[cfg(test)]

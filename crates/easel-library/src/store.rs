@@ -130,6 +130,14 @@ impl LibraryStore {
             .map_err(LibraryStoreError::from)
     }
 
+    /// Deletes an indexed local asset by absolute path.
+    pub fn remove_by_path(&self, path: &str) -> Result<bool, LibraryStoreError> {
+        let changed = self
+            .conn
+            .execute("DELETE FROM assets WHERE path = ?1", params![path])?;
+        Ok(changed > 0)
+    }
+
     /// Lists indexed assets ordered by most recently updated.
     pub fn list_assets(&self, limit: usize) -> Result<Vec<MediaAsset>, LibraryStoreError> {
         let mut stmt = self

@@ -9,6 +9,7 @@ repository.workspace = true
 
 [dependencies]
 easel-core = { path = "../easel-core" }
+image = { workspace = true }
 notify.workspace = true
 reqwest.workspace = true
 rusqlite.workspace = true

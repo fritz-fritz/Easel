@@ -159,14 +159,15 @@ impl qobject::DiscoverController {
         match library_store() {
             Ok(store) => {
                 if let Err(error) = store.upsert_asset(&asset) {
-                    self.as_mut()
-                        .set_status_text(QString::from(format!("Could not save asset: {error}")));
+                    self.as_mut().set_status_text(QString::from(
+                        format!("Could not save asset: {error}").as_str(),
+                    ));
                     return;
                 }
                 if let Err(error) = store.add_favorite(asset.id) {
-                    self.as_mut().set_status_text(QString::from(format!(
-                        "Could not favorite asset: {error}"
-                    )));
+                    self.as_mut().set_status_text(QString::from(
+                        format!("Could not favorite asset: {error}").as_str(),
+                    ));
                     return;
                 }
                 self.as_mut()

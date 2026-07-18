@@ -4,6 +4,7 @@
 
 //! Library-page folder index and favorites presentation model.
 
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
 
@@ -244,8 +245,10 @@ impl qobject::LibraryController {
                     FolderWatchEvent::Upsert(path) => {
                         let _ = indexer.index_file(&path);
                     }
-                    FolderWatchEvent::Remove(_) => {
-                        // Deletion bookkeeping can wait until a later hardening pass.
+                    FolderWatchEvent::Remove(path) => {
+                        for candidate in removal_path_candidates(&path) {
+                            let _ = store.remove_by_path(&candidate);
+                        }
                     }
                 }
             }
@@ -262,9 +265,8 @@ fn asset_model_list(assets: &[MediaAsset], budget: PixelBudget) -> QStringList {
     for asset in assets {
         let assessment = assess_suitability(asset.media.dimensions(), budget);
         let preview = match &asset.location {
-            AssetLocation::Local { path } => {
-                Url::from_file_path(Path::new(path)).map_or_else(|()| path.clone(), String::from)
-            }
+            AssetLocation::Local { path } => Url::from_file_path(Path::new(path))
+                .map_or_else(|()| path.clone(), |url| url.as_str().to_owned()),
             AssetLocation::Remote { preview_url, .. } => preview_url.as_str().to_owned(),
         };
         let creator = asset
@@ -311,4 +313,27 @@ fn path_from_file_url(raw: &str) -> PathBuf {
         }
     }
     PathBuf::from(trimmed)
+}
+
+/// Builds path strings that may match a previously indexed canonical local asset.
+fn removal_path_candidates(path: &Path) -> Vec<String> {
+    let mut candidates = Vec::new();
+    let push_unique = |list: &mut Vec<String>, value: String| {
+        if !list.iter().any(|existing| existing == &value) {
+            list.push(value);
+        }
+    };
+
+    push_unique(&mut candidates, path.to_string_lossy().into_owned());
+    if let Ok(canonical) = fs::canonicalize(path) {
+        push_unique(&mut candidates, canonical.to_string_lossy().into_owned());
+    } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
+        if let Ok(parent_canonical) = fs::canonicalize(parent) {
+            push_unique(
+                &mut candidates,
+                parent_canonical.join(name).to_string_lossy().into_owned(),
+            );
+        }
+    }
+    candidates
 }
