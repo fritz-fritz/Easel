@@ -38,6 +38,11 @@ backends, arrangement TOML persistence, CI GUI smoke screenshots). Live media re
 
 Exit: repeatable output for mixed-resolution, mixed-scale, and physically mismatched displays.
 
+**Status:** Implemented for still images (physical-span planner with PPI/bezel
+correction, layout fixtures, arrangement editing with snap + size/bezel overrides,
+Compose Correction mode, cache keys including arrangement geometry). Perspective
+correction remains Stage 7.
+
 ## Stage 3 — Library and compliant discovery
 
 - Local folder index with filesystem watching.

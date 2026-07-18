@@ -5,8 +5,8 @@
 //! Dev fixture displays matching the Compose monitor preview layout.
 
 use easel_core::{
-    Display, DisplayId, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint, PhysicalSize,
-    ScaleFactor,
+    BezelInsets, Display, DisplayId, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint,
+    PhysicalSize, PhysicalSizeSource, ScaleFactor,
 };
 
 /// Stable identities used by the Compose preview until platform enumeration exists.
@@ -126,7 +126,9 @@ fn display(
         native_pixels,
         scale_factor: ScaleFactor::default(),
         physical_size,
+        physical_size_source: PhysicalSizeSource::Detected,
         physical_origin,
+        bezel: BezelInsets::uniform(5.0),
         rotation_degrees: 0,
     }
 }

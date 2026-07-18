@@ -7,6 +7,7 @@
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
+use crate::physical::{BezelInsets, PhysicalSizeSource, snap_origin};
 use crate::{
     Display, DisplayId, DisplayValidationError, LogicalRect, Millimeters, NativePixelSize,
     PhysicalPoint, PhysicalSize, ScaleFactor,
@@ -52,6 +53,83 @@ impl DisplayArrangement {
         for display in &self.displays {
             display.validate()?;
         }
+        Ok(())
+    }
+
+    /// Returns a mutable display by stable identity.
+    pub fn display_mut(&mut self, id: DisplayId) -> Option<&mut Display> {
+        self.displays.iter_mut().find(|display| display.id == id)
+    }
+
+    /// Moves a display origin in physical space, optionally snapping to neighbors.
+    pub fn move_display(
+        &mut self,
+        id: DisplayId,
+        origin: PhysicalPoint,
+        snap_threshold_mm: Option<f64>,
+    ) -> Result<(), ArrangementError> {
+        let moving_size = self
+            .displays
+            .iter()
+            .find(|display| display.id == id)
+            .map(|display| display.physical_size)
+            .ok_or(ArrangementError::UnknownDisplay(id))?;
+
+        let neighbors: Vec<(PhysicalPoint, PhysicalSize)> = self
+            .displays
+            .iter()
+            .filter(|display| display.id != id)
+            .map(|display| (display.physical_origin, display.physical_size))
+            .collect();
+
+        let snapped = snap_threshold_mm.map_or(origin, |threshold| {
+            snap_origin(origin, moving_size, &neighbors, threshold)
+        });
+
+        let display = self
+            .display_mut(id)
+            .ok_or(ArrangementError::UnknownDisplay(id))?;
+        display.physical_origin = snapped;
+        display.validate()?;
+        Ok(())
+    }
+
+    /// Overrides the physical size for a display and marks it as user-authored.
+    pub fn override_physical_size(
+        &mut self,
+        id: DisplayId,
+        size: PhysicalSize,
+    ) -> Result<(), ArrangementError> {
+        let display = self
+            .display_mut(id)
+            .ok_or(ArrangementError::UnknownDisplay(id))?;
+        display.physical_size = size;
+        display.physical_size_source = PhysicalSizeSource::UserOverride;
+        display.validate()?;
+        Ok(())
+    }
+
+    /// Sets bezel insets for a display.
+    pub fn set_bezel(&mut self, id: DisplayId, bezel: BezelInsets) -> Result<(), ArrangementError> {
+        let display = self
+            .display_mut(id)
+            .ok_or(ArrangementError::UnknownDisplay(id))?;
+        display.bezel = bezel;
+        display.validate()?;
+        Ok(())
+    }
+
+    /// Sets clockwise rotation for a display.
+    pub fn set_rotation(
+        &mut self,
+        id: DisplayId,
+        rotation_degrees: u16,
+    ) -> Result<(), ArrangementError> {
+        let display = self
+            .display_mut(id)
+            .ok_or(ArrangementError::UnknownDisplay(id))?;
+        display.rotation_degrees = rotation_degrees;
+        display.validate()?;
         Ok(())
     }
 }
@@ -116,16 +194,33 @@ impl ObservedDisplay {
             native_pixels: self.evidence.native_pixels,
             scale_factor: self.scale_factor,
             physical_size: self.physical_size,
+            physical_size_source: PhysicalSizeSource::Detected,
             physical_origin: self.physical_origin,
+            bezel: BezelInsets::default(),
             rotation_degrees: self.rotation_degrees,
         }
+    }
+
+    /// Converts an observation while preserving user calibration from a prior match.
+    #[must_use]
+    pub fn into_display_preserving(self, previous: &Display) -> Display {
+        let mut display = self.into_display(previous.id);
+        display.physical_origin = previous.physical_origin;
+        display.bezel = previous.bezel;
+        display.rotation_degrees = previous.rotation_degrees;
+        if previous.physical_size_source == PhysicalSizeSource::UserOverride {
+            display.physical_size = previous.physical_size;
+            display.physical_size_source = PhysicalSizeSource::UserOverride;
+        }
+        display
     }
 }
 
 /// Rematches observed outputs against a previously persisted arrangement.
 ///
 /// Prefer manufacturer + model + serial. Fall back to connector + native size.
-/// Unmatched observations receive new identities.
+/// Unmatched observations receive new identities. Matched displays keep user
+/// physical origin, bezel, rotation, and size overrides.
 #[must_use]
 pub fn match_displays(
     previous: &DisplayArrangement,
@@ -135,9 +230,11 @@ pub fn match_displays(
     let mut matched = Vec::with_capacity(observed.len());
 
     for observation in observed {
-        let id = take_best_match(&mut remaining, &observation.evidence)
-            .map_or_else(DisplayId::new, |display| display.id);
-        matched.push(observation.into_display(id));
+        let display = match take_best_match(&mut remaining, &observation.evidence) {
+            Some(previous_display) => observation.into_display_preserving(previous_display),
+            None => observation.into_display(DisplayId::new()),
+        };
+        matched.push(display);
     }
 
     DisplayArrangement {
@@ -208,6 +305,9 @@ pub enum ArrangementError {
     /// An embedded display failed validation.
     #[error(transparent)]
     Display(#[from] DisplayValidationError),
+    /// The requested display is not part of this arrangement.
+    #[error("unknown display in arrangement: {0:?}")]
+    UnknownDisplay(DisplayId),
 }
 
 /// Convenience physical origin at the logical origin scaled by an approximate PPI.
@@ -255,10 +355,12 @@ mod tests {
                 width: Millimeters(600.0),
                 height: Millimeters(340.0),
             },
+            physical_size_source: PhysicalSizeSource::Detected,
             physical_origin: PhysicalPoint {
                 x: Millimeters(0.0),
                 y: Millimeters(0.0),
             },
+            bezel: BezelInsets::default(),
             rotation_degrees: 0,
         }
     }
@@ -326,5 +428,64 @@ mod tests {
         let matched = match_displays(&DisplayArrangement::empty(), vec![observed]);
         assert_eq!(matched.displays.len(), 1);
         assert_ne!(matched.displays[0].id, DisplayId::from_u128(9));
+    }
+
+    #[test]
+    fn rematch_preserves_user_calibration() {
+        let mut previous_display = sample_display(1, "DP-1", "SN-1", 1920);
+        previous_display.physical_origin = PhysicalPoint {
+            x: Millimeters(120.0),
+            y: Millimeters(40.0),
+        };
+        previous_display.bezel = BezelInsets::uniform(8.0);
+        previous_display.physical_size = PhysicalSize {
+            width: Millimeters(580.0),
+            height: Millimeters(330.0),
+        };
+        previous_display.physical_size_source = PhysicalSizeSource::UserOverride;
+        let previous =
+            DisplayArrangement::from_displays(vec![previous_display.clone()]).expect("valid");
+
+        let mut observed = observation_from(&previous_display);
+        observed.physical_origin = PhysicalPoint {
+            x: Millimeters(0.0),
+            y: Millimeters(0.0),
+        };
+        observed.physical_size = PhysicalSize {
+            width: Millimeters(600.0),
+            height: Millimeters(340.0),
+        };
+
+        let matched = match_displays(&previous, vec![observed]);
+        assert!((matched.displays[0].physical_origin.x.0 - 120.0).abs() < f64::EPSILON);
+        assert!((matched.displays[0].bezel.left.0 - 8.0).abs() < f64::EPSILON);
+        assert!((matched.displays[0].physical_size.width.0 - 580.0).abs() < f64::EPSILON);
+        assert_eq!(
+            matched.displays[0].physical_size_source,
+            PhysicalSizeSource::UserOverride
+        );
+    }
+
+    #[test]
+    fn move_display_snaps_to_neighbor() {
+        let left = sample_display(1, "DP-1", "SN-1", 1920);
+        let mut right = sample_display(2, "DP-2", "SN-2", 1920);
+        right.physical_origin = PhysicalPoint {
+            x: Millimeters(610.0),
+            y: Millimeters(0.0),
+        };
+        let mut arrangement = DisplayArrangement::from_displays(vec![left, right]).expect("valid");
+        arrangement
+            .move_display(
+                DisplayId::from_u128(2),
+                PhysicalPoint {
+                    x: Millimeters(604.0),
+                    y: Millimeters(3.0),
+                },
+                Some(10.0),
+            )
+            .expect("move");
+        assert!((arrangement.displays[1].physical_origin.x.0 - 600.0).abs() < 1e-9);
+        assert!((arrangement.displays[1].physical_origin.y.0 - 0.0).abs() < 1e-9);
     }
 }

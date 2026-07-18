@@ -343,6 +343,62 @@ dependencies = [
 ]
 
 [[package]]
+name = "easel-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "thiserror 2.0.18",
+ "url",
+ "uuid",
+]
+
+[[package]]
+name = "easel-desktop"
+version = "0.1.0"
+dependencies = [
+ "cxx",
+ "cxx-qt",
+ "cxx-qt-build",
+ "cxx-qt-lib",
+ "directories",
+ "easel-core",
+ "easel-platform",
+ "easel-render",
+ "serde",
+ "toml",
+ "url",
+]
+
+[[package]]
+name = "easel-platform"
+version = "0.1.0"
+dependencies = [
+ "easel-core",
+ "thiserror 2.0.18",
+ "url",
+ "windows",
+]
+
+[[package]]
+name = "easel-providers"
+version = "0.1.0"
+dependencies = [
+ "async-trait",
+ "easel-core",
+ "thiserror 2.0.18",
+]
+
+[[package]]
+name = "easel-render"
+version = "0.1.0"
+dependencies = [
+ "crc32fast",
+ "easel-core",
+ "image",
+ "thiserror 2.0.18",
+]
+
+[[package]]
 name = "equivalent"
 version = "1.0.2"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1150,62 +1206,6 @@ dependencies = [
  "js-sys",
  "serde_core",
  "wasm-bindgen",
-]
-
-[[package]]
-name = "easel-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "thiserror 2.0.18",
- "url",
- "uuid",
-]
-
-[[package]]
-name = "easel-desktop"
-version = "0.1.0"
-dependencies = [
- "cxx",
- "cxx-qt",
- "cxx-qt-build",
- "cxx-qt-lib",
- "directories",
- "serde",
- "toml",
- "url",
- "easel-core",
- "easel-platform",
- "easel-render",
-]
-
-[[package]]
-name = "easel-platform"
-version = "0.1.0"
-dependencies = [
- "thiserror 2.0.18",
- "url",
- "easel-core",
- "windows",
-]
-
-[[package]]
-name = "easel-providers"
-version = "0.1.0"
-dependencies = [
- "async-trait",
- "thiserror 2.0.18",
- "easel-core",
-]
-
-[[package]]
-name = "easel-render"
-version = "0.1.0"
-dependencies = [
- "crc32fast",
- "image",
- "thiserror 2.0.18",
- "easel-core",
 ]
 
 [[package]]

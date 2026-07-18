@@ -8,8 +8,9 @@ use std::fs;
 use std::path::PathBuf;
 
 use easel_core::{
-    Display, DisplayId, FitMode, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint,
-    PhysicalSize, ScaleFactor,
+    BezelInsets, Display, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters,
+    NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, ScaleFactor,
+    different_physical_same_resolution,
 };
 use easel_render::{
     CompositionSettings, MAX_EDGE_PIXELS, RasterJob, RenderPurpose, RenderRequest, decode_still,
@@ -41,10 +42,12 @@ fn display(id: u128, width: u32, height: u32) -> Display {
             width: Millimeters(500.0),
             height: Millimeters(300.0),
         },
+        physical_size_source: PhysicalSizeSource::Detected,
         physical_origin: PhysicalPoint {
             x: Millimeters(0.0),
             y: Millimeters(0.0),
         },
+        bezel: BezelInsets::default(),
         rotation_degrees: 0,
     }
 }
@@ -66,6 +69,7 @@ fn committed_fixture_covers_with_focal_bias() {
             displays: vec![display(10, 8, 16)],
             composition: CompositionSettings {
                 fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::Digital,
                 zoom: 1.0,
                 focal_x: 0.0,
                 focal_y: 0.5,
@@ -80,6 +84,7 @@ fn committed_fixture_covers_with_focal_bias() {
             displays: vec![display(11, 8, 16)],
             composition: CompositionSettings {
                 fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::Digital,
                 zoom: 1.0,
                 focal_x: 1.0,
                 focal_y: 0.5,
@@ -118,6 +123,7 @@ fn contain_letterboxes_landscape_source() {
             displays: vec![display(20, 20, 20)],
             composition: CompositionSettings {
                 fit_mode: FitMode::Contain,
+                layout_mode: LayoutMode::Digital,
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
@@ -170,6 +176,7 @@ fn multi_display_job_writes_atomic_outputs() {
             displays: vec![display(40, 64, 36), display(41, 48, 48)],
             composition: CompositionSettings {
                 fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::Digital,
                 zoom: 1.25,
                 focal_x: 0.3,
                 focal_y: 0.7,
@@ -189,4 +196,118 @@ fn multi_display_job_writes_atomic_outputs() {
         ));
         assert!(!sibling.exists());
     }
+}
+
+#[test]
+fn physical_span_larger_panel_samples_more_source() {
+    use easel_render::RenderPlan;
+
+    let arrangement = different_physical_same_resolution();
+    let mut displays = arrangement.displays;
+    for display in &mut displays {
+        display.native_pixels.width = 48;
+        display.native_pixels.height = 27;
+        display.logical_rect.width = 48;
+        display.logical_rect.height = 27;
+    }
+
+    let plan = RenderPlan::for_displays(&displays).expect("plan");
+    let ops = plan
+        .operations(
+            NativePixelSize {
+                width: 64,
+                height: 32,
+            },
+            &CompositionSettings {
+                fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::PhysicalSpan,
+                zoom: 1.0,
+                focal_x: 0.5,
+                focal_y: 0.5,
+            },
+        )
+        .expect("ops");
+
+    assert_eq!(ops.len(), 2);
+    // Right panel is physically wider (600mm vs 480mm), so it must sample more source width.
+    assert!(
+        ops[1].source_crop.width > ops[0].source_crop.width,
+        "left crop {} right crop {}",
+        ops[0].source_crop.width,
+        ops[1].source_crop.width
+    );
+    assert!(ops[0].source_crop.x < ops[1].source_crop.x);
+
+    let source = fixture_path("quadrants_32.png");
+    let out_dir = std::env::temp_dir().join("easel-regression-physical");
+    let _ = fs::remove_dir_all(&out_dir);
+    let outputs = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition: CompositionSettings {
+                fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::PhysicalSpan,
+                zoom: 1.0,
+                focal_x: 0.5,
+                focal_y: 0.5,
+            },
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir,
+    }
+    .execute()
+    .expect("execute");
+    assert_eq!(outputs.len(), 2);
+}
+
+#[test]
+fn arrangement_change_produces_distinct_cache_names() {
+    let source = fixture_path("quadrants_32.png");
+    let out_dir = std::env::temp_dir().join("easel-regression-cache-key");
+    let _ = fs::remove_dir_all(&out_dir);
+
+    let mut displays = vec![display(50, 32, 32)];
+    let first = RasterJob {
+        request: RenderRequest {
+            source_path: source.clone(),
+            displays: displays.clone(),
+            composition: CompositionSettings {
+                fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::PhysicalSpan,
+                zoom: 1.0,
+                focal_x: 0.5,
+                focal_y: 0.5,
+            },
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir.join("a"),
+    }
+    .execute()
+    .expect("first");
+
+    displays[0].physical_origin.x = Millimeters(40.0);
+    let second = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition: CompositionSettings {
+                fit_mode: FitMode::Cover,
+                layout_mode: LayoutMode::PhysicalSpan,
+                zoom: 1.0,
+                focal_x: 0.5,
+                focal_y: 0.5,
+            },
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir.join("b"),
+    }
+    .execute()
+    .expect("second");
+
+    assert_ne!(
+        first[0].path.file_name(),
+        second[0].path.file_name(),
+        "cache key must include arrangement geometry"
+    );
 }

@@ -253,6 +253,105 @@ ApplicationWindow {
                         previewUrls: compose.display_previews
                         previewReady: compose.preview_ready
                         layoutModel: controller.layout_model
+                        selectedDisplayId: controller.selected_display_id
+                        physicalPreview: controller.physical_preview
+                        onDisplaySelected: (displayId) => controller.selectDisplay(displayId)
+                        onDisplayMoved: (displayId, originXmm, originYmm) => {
+                            controller.selectDisplay(displayId)
+                            controller.moveSelectedDisplay(originXmm, originYmm)
+                            compose.refreshPreview()
+                        }
+                    }
+
+                    GroupBox {
+                        title: qsTr("Physical calibration")
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        enabled: controller.selected_display_id.length > 0
+
+                        GridLayout {
+                            columns: 6
+                            width: parent.width
+                            columnSpacing: 10
+                            rowSpacing: 10
+
+                            Label { text: qsTr("Origin X mm") }
+                            SpinBox {
+                                id: originXSpin
+                                from: -10000
+                                to: 10000
+                                value: Math.round(controller.selected_origin_x_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    controller.moveSelectedDisplay(value, controller.selected_origin_y_mm)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Origin Y mm") }
+                            SpinBox {
+                                id: originYSpin
+                                from: -10000
+                                to: 10000
+                                value: Math.round(controller.selected_origin_y_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    controller.moveSelectedDisplay(controller.selected_origin_x_mm, value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Bezel mm") }
+                            SpinBox {
+                                id: bezelSpin
+                                from: 0
+                                to: 100
+                                value: Math.round(controller.selected_bezel_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    controller.applySelectedBezel(value)
+                                    compose.refreshPreview()
+                                }
+                            }
+
+                            Label { text: qsTr("Width mm") }
+                            SpinBox {
+                                id: widthSpin
+                                from: 50
+                                to: 5000
+                                value: Math.round(controller.selected_width_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    controller.applySelectedSize(value, controller.selected_height_mm)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Height mm") }
+                            SpinBox {
+                                id: heightSpin
+                                from: 50
+                                to: 5000
+                                value: Math.round(controller.selected_height_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                onValueModified: {
+                                    controller.applySelectedSize(controller.selected_width_mm, value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Preview") }
+                            ComboBox {
+                                model: [qsTr("Physical"), qsTr("Digital (before)")]
+                                currentIndex: controller.physical_preview ? 0 : 1
+                                Layout.fillWidth: true
+                                onActivated: {
+                                    controller.setPhysicalPreviewEnabled(currentIndex === 0)
+                                }
+                            }
+                        }
                     }
 
                     GroupBox {
@@ -328,7 +427,16 @@ ApplicationWindow {
                             }
 
                             Label { text: qsTr("Correction") }
-                            ComboBox { model: [qsTr("Physical + bezel"), qsTr("Digital only")] }
+                            ComboBox {
+                                id: correctionMode
+                                model: [qsTr("Physical + bezel"), qsTr("Digital only")]
+                                currentIndex: compose.layout_mode_index
+                                onActivated: {
+                                    compose.layout_mode_index = currentIndex
+                                    controller.setPhysicalPreviewEnabled(currentIndex === 0)
+                                    compose.refreshPreview()
+                                }
+                            }
                             Label { text: qsTr("Schedule") }
                             ComboBox { model: [qsTr("Manual"), qsTr("Every hour"), qsTr("Time of day")] }
                         }

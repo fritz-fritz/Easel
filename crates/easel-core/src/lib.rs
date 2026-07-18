@@ -9,6 +9,9 @@
 mod arrangement;
 mod asset;
 mod display;
+mod display_group;
+mod layout_fixtures;
+mod physical;
 mod profile;
 
 pub use arrangement::{
@@ -23,7 +26,17 @@ pub use display::{
     Display, DisplayId, DisplayValidationError, LogicalRect, Millimeters, NativePixelSize,
     PhysicalPoint, PhysicalSize, ScaleFactor,
 };
+pub use display_group::{DisplayGroup, DisplayGroupError, DisplayGroupId};
+pub use layout_fixtures::{
+    all_layout_fixtures, asymmetric_bezels, different_physical_same_resolution,
+    mixed_scale_factors, negative_logical_origin, one_display, portrait_plus_landscape,
+    same_physical_different_resolution, t_shaped, two_equal_row, vertical_stack,
+};
+pub use physical::{
+    BezelInsets, MM_PER_INCH, PhysicalLayoutError, PhysicalRect, PhysicalSizeSource, Ppi,
+    content_bounds, content_rect, panel_rect, physical_size_for_ppi, snap_origin,
+};
 pub use profile::{
-    FitMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode, Profile,
-    ProfileId, ProfileValidationError,
+    FitMode, LayoutMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode,
+    Profile, ProfileId, ProfileValidationError,
 };

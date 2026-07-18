@@ -159,6 +159,7 @@ mod tests {
     fn settings(fit_mode: FitMode, zoom: f64, focal_x: f64, focal_y: f64) -> CompositionSettings {
         CompositionSettings {
             fit_mode,
+            layout_mode: easel_core::LayoutMode::Digital,
             zoom,
             focal_x,
             focal_y,

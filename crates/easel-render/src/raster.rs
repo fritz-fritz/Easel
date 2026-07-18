@@ -46,10 +46,12 @@ impl RasterJob {
         let decoded = decode_still(&self.request.source_path)?;
         let operations = plan.operations(decoded.size(), &self.request.composition)?;
         let source_token = source_cache_token(&self.request.source_path, &decoded)?;
+        let arrangement_token =
+            arrangement_cache_token(&self.request.displays, &self.request.composition);
 
         let mut outputs = Vec::with_capacity(operations.len());
         for operation in operations {
-            let path = self.render_one(&decoded, &operation, &source_token)?;
+            let path = self.render_one(&decoded, &operation, &source_token, &arrangement_token)?;
             outputs.push(RasterOutput {
                 display_id: operation.display_id,
                 path,
@@ -63,12 +65,14 @@ impl RasterJob {
         decoded: &DecodedImage,
         operation: &OutputOperation,
         source_token: &str,
+        arrangement_token: &str,
     ) -> Result<PathBuf, RasterError> {
         let canvas = render_operation(&decoded.pixels, operation)?;
         let file_name = cache_file_name(
             source_token,
             operation.display_id,
             &self.request.composition,
+            arrangement_token,
             operation.native_size.width,
             operation.native_size.height,
         );
@@ -110,7 +114,8 @@ pub fn render_operation(
 
     let dest = operation.destination_rect;
     if dest.width == 0 || dest.height == 0 {
-        return Err(RasterError::EmptyCrop);
+        // Letterbox-only output (content falls entirely outside the placed image).
+        return Ok(canvas);
     }
 
     let resized = if cropped.width() == dest.width && cropped.height() == dest.height {
@@ -182,16 +187,47 @@ fn cache_file_name(
     source_token: &str,
     display_id: DisplayId,
     composition: &CompositionSettings,
+    arrangement_token: &str,
     width: u32,
     height: u32,
 ) -> String {
     let fit = format!("{:?}", composition.fit_mode).to_ascii_lowercase();
+    let layout = format!("{:?}", composition.layout_mode).to_ascii_lowercase();
     let zoom = format!("{:.4}", composition.zoom);
     let focal = format!("{:.4}x{:.4}", composition.focal_x, composition.focal_y);
     let display = display_id.to_hyphenated_string().replace('-', "");
     format!(
-        "v{RENDERER_VERSION}_{source_token}_{display}_{fit}_z{zoom}_f{focal}_{width}x{height}.png"
+        "v{RENDERER_VERSION}_{source_token}_{arrangement_token}_{display}_{layout}_{fit}_z{zoom}_f{focal}_{width}x{height}.png"
     )
+}
+
+/// Fingerprint of arrangement geometry that affects physical-span output.
+fn arrangement_cache_token(
+    displays: &[easel_core::Display],
+    composition: &CompositionSettings,
+) -> String {
+    use std::fmt::Write as _;
+    let mut material = String::new();
+    let _ = write!(material, "{:?}", composition.layout_mode);
+    for display in displays {
+        let _ = write!(
+            material,
+            "|{}:{:.3},{:.3}:{:.3}x{:.3}:b{:.2},{:.2},{:.2},{:.2}:r{}:{}x{}",
+            display.id.to_hyphenated_string(),
+            display.physical_origin.x.0,
+            display.physical_origin.y.0,
+            display.physical_size.width.0,
+            display.physical_size.height.0,
+            display.bezel.left.0,
+            display.bezel.top.0,
+            display.bezel.right.0,
+            display.bezel.bottom.0,
+            display.rotation_degrees,
+            display.native_pixels.width,
+            display.native_pixels.height,
+        );
+    }
+    format!("{:016x}", fnv1a64(material.as_bytes()))
 }
 
 fn source_cache_token(path: &Path, decoded: &DecodedImage) -> Result<String, RasterError> {
@@ -252,8 +288,8 @@ mod tests {
     use super::*;
     use crate::plan::{LetterboxColor, PixelRect};
     use easel_core::{
-        Display, DisplayId, FitMode, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint,
-        PhysicalSize, ScaleFactor,
+        BezelInsets, Display, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters,
+        NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, ScaleFactor,
     };
     use image::{Rgb, RgbImage};
 
@@ -352,10 +388,12 @@ mod tests {
                 width: Millimeters(300.0),
                 height: Millimeters(200.0),
             },
+            physical_size_source: PhysicalSizeSource::Detected,
             physical_origin: PhysicalPoint {
                 x: Millimeters(0.0),
                 y: Millimeters(0.0),
             },
+            bezel: BezelInsets::default(),
             rotation_degrees: 0,
         };
 
@@ -365,6 +403,7 @@ mod tests {
                 displays: vec![display],
                 composition: CompositionSettings {
                     fit_mode: FitMode::Cover,
+                    layout_mode: LayoutMode::Digital,
                     zoom: 1.0,
                     focal_x: 0.5,
                     focal_y: 0.5,

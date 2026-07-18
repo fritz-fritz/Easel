@@ -8,8 +8,8 @@ use std::env;
 use std::path::PathBuf;
 
 use easel_core::{
-    Display, DisplayId, FitMode, LogicalRect, Millimeters, NativePixelSize, PhysicalPoint,
-    PhysicalSize, Profile, ScaleFactor,
+    BezelInsets, Display, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters,
+    NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, Profile, ScaleFactor,
 };
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 
@@ -61,10 +61,12 @@ fn display(id: u128, connector: &str, width: u32, height: u32, x: i32, y: i32) -
             width: Millimeters(f64::from(width) / 96.0 * 25.4),
             height: Millimeters(f64::from(height) / 96.0 * 25.4),
         },
+        physical_size_source: PhysicalSizeSource::Detected,
         physical_origin: PhysicalPoint {
             x: Millimeters(f64::from(x) / 96.0 * 25.4),
             y: Millimeters(f64::from(y) / 96.0 * 25.4),
         },
+        bezel: BezelInsets::uniform(2.0),
         rotation_degrees: 0,
     }
 }
@@ -84,6 +86,7 @@ fn write_apply_payload_visual_artifacts() {
     let displays = fixture_displays();
     let mut profile = Profile::new("visual");
     profile.fit_mode = FitMode::Cover;
+    profile.layout_mode = LayoutMode::PhysicalSpan;
     profile.displays = displays.iter().map(|display| display.id).collect();
 
     let outputs = RasterJob {
