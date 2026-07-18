@@ -9,7 +9,6 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use easel_core::{DisplayId, LayoutMode};
-use image::imageops::{self, FilterType};
 use image::{Rgba, RgbaImage};
 use thiserror::Error;
 
@@ -18,6 +17,7 @@ use crate::plan::{
     CompositionSettings, OutputOperation, RENDERER_VERSION, RenderPlan, RenderPlanError,
     RenderRequest,
 };
+use crate::resize::resize_lanczos3;
 
 /// Completed per-display raster file.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -103,7 +103,7 @@ pub fn render_operation(
         return Err(RasterError::EmptyCrop);
     }
 
-    let cropped = imageops::crop_imm(
+    let cropped = image::imageops::crop_imm(
         source,
         u32::try_from(crop.x).unwrap_or(0),
         u32::try_from(crop.y).unwrap_or(0),
@@ -121,10 +121,10 @@ pub fn render_operation(
     let resized = if cropped.width() == dest.width && cropped.height() == dest.height {
         cropped
     } else {
-        imageops::resize(&cropped, dest.width, dest.height, FilterType::Lanczos3)
+        resize_lanczos3(&cropped, dest.width, dest.height)
     };
 
-    imageops::overlay(&mut canvas, &resized, i64::from(dest.x), i64::from(dest.y));
+    image::imageops::overlay(&mut canvas, &resized, i64::from(dest.x), i64::from(dest.y));
     Ok(canvas)
 }
 

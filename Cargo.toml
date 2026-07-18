@@ -38,6 +38,7 @@ image = { version = "=0.25.8", default-features = false, features = [
     "tiff",
     "webp",
 ] }
+libm = "0.2"
 notify = "7"
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
