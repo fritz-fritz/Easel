@@ -123,15 +123,23 @@ jobs:
         run: |
           set -euo pipefail
           # Pipe git diff straight into the selector (no mapfile — macOS ships Bash 3).
+          if command -v python3 >/dev/null 2>&1; then
+            PYTHON=python3
+          elif command -v python >/dev/null 2>&1; then
+            PYTHON=python
+          else
+            echo "::error::python3/python not found on PATH"
+            exit 1
+          fi
           before="${{ github.event.before }}"
           if [[ "${{ github.event_name }}" == "pull_request" ]]; then
             views="$(git diff --name-only "${{ github.event.pull_request.base.sha }}" "${{ github.sha }}" \
-              | python3 .github/ci-visual/select_smoke_views.py)"
+              | "$PYTHON" .github/ci-visual/select_smoke_views.py)"
           elif [[ -n "${before}" && "${before}" != "0000000000000000000000000000000000000000" ]]; then
             views="$(git diff --name-only "${before}" "${{ github.sha }}" \
-              | python3 .github/ci-visual/select_smoke_views.py)"
+              | "$PYTHON" .github/ci-visual/select_smoke_views.py)"
           else
-            views="$(python3 .github/ci-visual/select_smoke_views.py </dev/null)"
+            views="$("$PYTHON" .github/ci-visual/select_smoke_views.py </dev/null)"
           fi
           echo "Selected smoke views: ${views}"
           echo "views=${views}" >> "$GITHUB_OUTPUT"
