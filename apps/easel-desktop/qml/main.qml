@@ -247,7 +247,11 @@ ApplicationWindow {
                     MonitorPreview {
                         id: monitorPreview
                         Layout.fillWidth: true
+                        // Fixed height keeps smoke grab aspect stable across CI window chrome.
                         Layout.preferredHeight: 330
+                        Layout.preferredWidth: 900
+                        Layout.maximumWidth: 900
+                        Layout.alignment: Qt.AlignHCenter
                         Layout.leftMargin: 24
                         Layout.rightMargin: 24
                         previewUrls: compose.display_previews

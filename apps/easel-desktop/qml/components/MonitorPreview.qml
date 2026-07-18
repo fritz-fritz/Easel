@@ -12,7 +12,7 @@ Frame {
 
     property var previewUrls: []
     property bool previewReady: false
-    // Encoded rows: "id|xFactor|yFactor|wFactor|hFactor|label|ox|oy|wMm|hMm|bezel"
+    // Encoded rows: "id|xFactor|yFactor|wFactor|hFactor|ox|oy|wMm|hMm|bezel|label..."
     property var layoutModel: []
     property string selectedDisplayId: ""
     property bool physicalPreview: true
@@ -30,6 +30,8 @@ Frame {
     Item {
         id: canvas
         anchors.fill: parent
+
+        readonly property real margin: 0.04
 
         property var parsedRows: {
             var rows = []
@@ -102,6 +104,40 @@ Frame {
             return span > 0 ? span : 1
         }
 
+        // Uniform mm→px scale letterboxes the arrangement so monitor aspects stay
+        // physical regardless of the preview frame's width/height (CI window sizes differ).
+        property real mmPerPixel: {
+            var usableW = width * (1.0 - margin * 2.0)
+            var usableH = height * (1.0 - margin * 2.0)
+            var scale = Math.min(usableW / spanXmm, usableH / spanYmm)
+            return scale > 0 ? 1.0 / scale : 1.0
+        }
+        property real contentPixelW: spanXmm / mmPerPixel
+        property real contentPixelH: spanYmm / mmPerPixel
+        property real contentOriginX: (width - contentPixelW) / 2.0
+        property real contentOriginY: (height - contentPixelH) / 2.0
+
+        function monitorX(row) {
+            if (root.physicalPreview)
+                return contentOriginX + (row.originXmm - minOriginX) / mmPerPixel
+            return width * row.xFactor
+        }
+        function monitorY(row) {
+            if (root.physicalPreview)
+                return contentOriginY + (row.originYmm - minOriginY) / mmPerPixel
+            return height * row.yFactor
+        }
+        function monitorW(row) {
+            if (root.physicalPreview)
+                return row.widthMm / mmPerPixel
+            return width * row.wFactor
+        }
+        function monitorH(row) {
+            if (root.physicalPreview)
+                return row.heightMm / mmPerPixel
+            return height * row.hFactor
+        }
+
         Repeater {
             model: canvas.parsedRows
 
@@ -112,10 +148,10 @@ Frame {
                 property real dragOriginX: modelData.originXmm
                 property real dragOriginY: modelData.originYmm
 
-                x: parent.width * modelData.xFactor
-                y: parent.height * modelData.yFactor
-                width: parent.width * modelData.wFactor
-                height: parent.height * modelData.hFactor
+                x: canvas.monitorX(modelData)
+                y: canvas.monitorY(modelData)
+                width: Math.max(1, canvas.monitorW(modelData))
+                height: Math.max(1, canvas.monitorH(modelData))
                 radius: 6
                 color: Qt.hsla((modelData.index * 0.17) % 1.0, 0.25, 0.35, 1.0)
                 border.color: modelData.id === root.selectedDisplayId ? root.palette.highlight : root.palette.mid
@@ -125,7 +161,9 @@ Frame {
                 Image {
                     anchors.fill: parent
                     anchors.margins: Math.max(2, modelData.bezelMm > 0 ? 4 : 2)
-                    fillMode: Image.PreserveAspectCrop
+                    // Wallpaper PNGs are already cropped for this output; stretch to the
+                    // panel instead of re-cropping through a container-dependent aspect.
+                    fillMode: Image.Stretch
                     asynchronous: true
                     cache: false
                     visible: root.previewReady && root.previewUrls.length > modelData.index
@@ -158,10 +196,8 @@ Frame {
                         root.displaySelected(modelData.id)
                     }
                     onReleased: (mouse) => {
-                        var usableW = canvas.width * 0.92
-                        var usableH = canvas.height * 0.92
-                        var dxMm = (mouse.x - pressX) / Math.max(usableW, 1) * canvas.spanXmm
-                        var dyMm = (mouse.y - pressY) / Math.max(usableH, 1) * canvas.spanYmm
+                        var dxMm = (mouse.x - pressX) * canvas.mmPerPixel
+                        var dyMm = (mouse.y - pressY) * canvas.mmPerPixel
                         root.displayMoved(modelData.id, monitor.dragOriginX + dxMm, monitor.dragOriginY + dyMm)
                     }
                 }
