@@ -71,6 +71,15 @@ not expose.
 
 Exit: unattended, explainable wallpaper rotation survives restart and topology changes.
 
+**Status:** Implemented for still images (`easel-scheduler` TOML profile/group/schedule/queue
+store + SQLite rotation history, domain schedule/rotation/hotplug evaluators, Compose Save
+profile with Manual/Hourly/Time-of-day schedules, Profiles and Automation pages with
+pause/skip/status/hotplug controls, toolbar tray-equivalent pause/skip, `easel` CLI).
+Background poller selects due wallpapers, renders, and applies through the platform
+backend while recording explainable history; hotplug policy is re-evaluated after display
+rematch. A native system-tray icon is deferred until a Qt Widgets `QApplication` host is
+available (`cxx-qt-lib` exposes `QGuiApplication` only).
+
 ## Stage 5 — Dynamic stills
 
 - Time-of-day and solar-keyed still sets with deterministic fallback frames.

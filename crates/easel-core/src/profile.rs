@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{AssetId, DisplayId};
+use crate::{AssetId, DisplayGroupId, DisplayId, RotationQueueId, ScheduleId};
 
 /// Current serialized profile schema.
-pub const PROFILE_SCHEMA_VERSION: u16 = 1;
+pub const PROFILE_SCHEMA_VERSION: u16 = 2;
 
 /// Stable profile identity independent of its display name.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -23,6 +23,17 @@ impl ProfileId {
     #[must_use]
     pub fn new() -> Self {
         Self(Uuid::new_v4())
+    }
+
+    /// Returns the canonical hyphenated UUID string.
+    #[must_use]
+    pub fn to_hyphenated_string(self) -> String {
+        self.0.hyphenated().to_string()
+    }
+
+    /// Parses a hyphenated UUID string.
+    pub fn parse(value: &str) -> Result<Self, uuid::Error> {
+        Ok(Self(Uuid::parse_str(value.trim())?))
     }
 }
 
@@ -120,8 +131,17 @@ pub struct Profile {
     pub name: String,
     /// Displays participating in the initial group.
     pub displays: Vec<DisplayId>,
+    /// Optional reusable display group; when set, membership is resolved at apply time.
+    #[serde(default)]
+    pub display_group_id: Option<DisplayGroupId>,
     /// Current image selection, if fixed.
     pub selected_asset: Option<AssetId>,
+    /// Optional rotation queue used when automation advances this profile.
+    #[serde(default)]
+    pub rotation_queue_id: Option<RotationQueueId>,
+    /// Optional schedule that drives unattended applies for this profile.
+    #[serde(default)]
+    pub schedule_id: Option<ScheduleId>,
     /// Static, scheduled-still, or persistent live presentation.
     pub presentation: PresentationMode,
     /// Live-media behavior and resource limits.
@@ -148,7 +168,10 @@ impl Profile {
             id: ProfileId::new(),
             name: name.into(),
             displays: Vec::new(),
+            display_group_id: None,
             selected_asset: None,
+            rotation_queue_id: None,
+            schedule_id: None,
             presentation: PresentationMode::Static,
             playback: PlaybackPolicy::default(),
             fit_mode: FitMode::Cover,
@@ -156,6 +179,18 @@ impl Profile {
             zoom: 1.0,
             focal_x: 0.5,
             focal_y: 0.5,
+        }
+    }
+
+    /// Upgrades older on-disk profiles to the current schema.
+    pub fn migrate(mut self) -> Result<Self, ProfileValidationError> {
+        match self.schema_version {
+            1 => {
+                self.schema_version = PROFILE_SCHEMA_VERSION;
+                Ok(self)
+            }
+            PROFILE_SCHEMA_VERSION => Ok(self),
+            other => Err(ProfileValidationError::UnsupportedSchema(other)),
         }
     }
 

@@ -11,12 +11,16 @@
 )]
 
 mod app_controller;
+mod apply_service;
+mod automation_controller;
+mod automation_session;
 mod compose_controller;
 mod discover_controller;
 mod display_session;
 mod fixtures;
 mod library_controller;
 mod library_session;
+mod profile_controller;
 
 use std::env;
 use std::path::PathBuf;

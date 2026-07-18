@@ -37,3 +37,14 @@ workspace. It has two distinct build scopes:
 - Interactive: an XFCE desktop is available on `DISPLAY=:1`. Launch the full app with
   `DISPLAY=:1 QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc cargo run -p easel-desktop`.
   It enumerates the live X screen (the VNC display) rather than the smoke fixture layout.
+- Headless automation CLI (shared store with the desktop app):
+
+  ```
+  cargo run -p easel-cli -- status
+  cargo run -p easel-cli -- pause
+  cargo run -p easel-cli -- resume
+  cargo run -p easel-cli -- skip
+  cargo run -p easel-cli -- next
+  cargo run -p easel-cli -- profiles
+  cargo run -p easel-cli -- schedules
+  ```

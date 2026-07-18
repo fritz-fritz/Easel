@@ -1,0 +1,21 @@
+[package]
+name = "easel-cli"
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+publish.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "easel"
+path = "src/main.rs"
+
+[dependencies]
+clap.workspace = true
+directories = "6.0.0"
+easel-core = { path = "../../crates/easel-core" }
+easel-scheduler = { path = "../../crates/easel-scheduler" }
+
+[lints]
+workspace = true
