@@ -85,8 +85,9 @@ builds the dual review surfaces. New stages only need a producer plus one
 `uses: ./.github/actions/ci-visual` block with a distinct `stage` / `pattern`.
 
 When SHA-256 digests differ for `apply-payload`, the gallery builder decodes the PNGs and
-still treats the asset as a match if every channel stays within ±1 LSB (common on Windows
-vs Linux/macOS). Larger drift fails the OS-compare gate.
+classifies ±1 LSB channel drift as `match-tolerant`. That is **diagnostic only** — the OS
+compare gate still fails because the goal is byte-identical output across runners. Larger
+drift is `content-mismatch`.
 
 | Stage id | Producer | Gate | Expected files | Published via |
 | --- | --- | --- | --- | --- |
@@ -112,7 +113,7 @@ After the `CI` workflow finishes on a pull request, [`ci-visual-gallery.yml`](..
 
 | Stage | Expectation | Gate |
 | --- | --- | --- |
-| `apply-payload` | Same dimensions; pixels match across `ubuntu` / `windows` / `macos` within ±1 LSB per channel (PNG digests may still differ) | Fail status + job on size mismatch or channel drift above tolerance |
+| `apply-payload` | Byte-identical PNGs across `ubuntu` / `windows` / `macos` for each display | Fail on digest/pixel mismatch (including ±1 LSB near-matches, which are labeled `match-tolerant` for debugging) or size mismatch |
 | `gui-smoke` | Platform chrome differs | Informational only (hashes/dims still shown) |
 
 Incomplete OS matrices (an asset present on some runners only) are warnings, not hard failures.

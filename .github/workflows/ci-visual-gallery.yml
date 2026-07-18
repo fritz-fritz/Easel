@@ -163,6 +163,7 @@ jobs:
           print(f"strict_failed={cmp.get('strict_failed', 0)}")
           print(f"strict_total={cmp.get('strict_total', 0)}")
           print(f"strict_match={cmp.get('strict_match', 0)}")
+          print(f"strict_tolerant={cmp.get('strict_tolerant', 0)}")
           print(f"strict_warnings={cmp.get('strict_warnings', 0)}")
           print(f"image_count={summary.get('image_count', 0)}")
           PY

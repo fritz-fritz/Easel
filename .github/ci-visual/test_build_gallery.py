@@ -107,7 +107,7 @@ class BuildGalleryTests(unittest.TestCase):
             self.assertFalse(totals["gate_ok"])
             self.assertEqual(totals["strict_match"], 0)
 
-    def test_strict_one_lsb_is_tolerant_match(self) -> None:
+    def test_strict_one_lsb_is_tolerant_but_fails_gate(self) -> None:
         with tempfile.TemporaryDirectory() as tmp:
             root = Path(tmp)
             width, height = 8, 4
@@ -153,8 +153,10 @@ class BuildGalleryTests(unittest.TestCase):
             comparisons = build_comparisons(collect_images(root, load_manifests(root)))
             totals = comparison_totals(comparisons)
             self.assertEqual(comparisons[0]["status"], "match-tolerant")
-            self.assertTrue(totals["gate_ok"])
-            self.assertEqual(totals["strict_match"], 1)
+            self.assertFalse(totals["gate_ok"])
+            self.assertEqual(totals["strict_match"], 0)
+            self.assertEqual(totals["strict_tolerant"], 1)
+            self.assertEqual(totals["strict_failed"], 1)
             self.assertEqual(comparisons[0]["pixel_compare"]["max_channel_delta"], 1)
 
     def test_display_numeric_sort_order(self) -> None:
@@ -225,12 +227,12 @@ class BuildGalleryTests(unittest.TestCase):
             self.assertGreaterEqual(summary["comparison"]["informational_variance"], 1)
             comment = (out / "comment.md").read_text(encoding="utf8")
             self.assertIn("Apply-payload OS compare", comment)
-            self.assertIn("fully identical across runners", comment)
+            self.assertIn("byte-identical across runners", comment)
             self.assertIn("SHA-256 (12)", comment)
             self.assertIn("Cross-OS metadata", comment)
             html_page = (out / "site" / "index.html").read_text(encoding="utf8")
             self.assertIn("OS compare", html_page)
-            self.assertIn("fully OS-identical", html_page)
+            self.assertIn("byte-identical across OS", html_page)
             self.assertIn('table class="compare"', html_page)
 
     def test_fail_on_mismatch_exit_code(self) -> None:

@@ -25,11 +25,15 @@ from urllib.parse import quote
 
 MARKER = "<!-- easel-ci-visual -->"
 EXPECTED_OS = ("macos-latest", "ubuntu-latest", "windows-latest")
-# Stages where cross-OS raster parity is gated (regression signal).
+# Stages where byte-identical cross-OS output is expected (regression signal).
 STRICT_STAGES = frozenset({"apply-payload"})
-# Hosted runners can differ by 1 LSB on a handful of edge samples; require
-# matching dimensions and keep channel drift within this bound for strict stages.
+# When digests differ, decode pixels for diagnostics. ±1 LSB still fails the gate
+# (goal remains byte-identical) but is classified as match-tolerant for the gallery.
 STRICT_MAX_CHANNEL_DELTA = 1
+# Bounds for PNG decode in the privileged gallery publisher (PR-sourced artifacts).
+PNG_MAX_FILE_BYTES = 32 * 1024 * 1024
+PNG_MAX_EDGE = 8192
+PNG_MAX_PIXELS = 16 * 1024 * 1024
 
 CSS = """\
 @import url("https://fonts.googleapis.com/css2?family=IBM+Plex+Sans:wght@400;500;600;650&family=IBM+Plex+Mono:wght@400;500&display=swap");
@@ -277,7 +281,16 @@ def png_meta(path: Path) -> dict:
 
 
 def decode_png_rgba(path: Path) -> tuple[int, int, bytes] | None:
-    """Decode an 8-bit RGBA PNG to raw pixels (stdlib only)."""
+    """Decode an 8-bit RGBA PNG to raw pixels (stdlib only).
+
+    Rejects oversized files/dimensions before zlib inflate to bound memory use.
+    """
+    try:
+        size = path.stat().st_size
+    except OSError:
+        return None
+    if size <= 0 or size > PNG_MAX_FILE_BYTES:
+        return None
     data = path.read_bytes()
     if len(data) < 24 or data[:8] != b"\x89PNG\r\n\x1a\n":
         return None
@@ -299,22 +312,39 @@ def decode_png_rgba(path: Path) -> tuple[int, int, bytes] | None:
             width, height, bit_depth, color_type, _comp, _filt, inter = struct.unpack(
                 ">IIBBBBB", chunk[:13]
             )
-            if bit_depth != 8 or color_type != 6 or inter != 0:
+            if (
+                bit_depth != 8
+                or color_type != 6
+                or inter != 0
+                or width == 0
+                or height == 0
+                or width > PNG_MAX_EDGE
+                or height > PNG_MAX_EDGE
+                or width * height > PNG_MAX_PIXELS
+            ):
                 return None
         elif tag == b"IDAT":
             idat.extend(chunk)
+            if len(idat) > PNG_MAX_FILE_BYTES:
+                return None
         elif tag == b"IEND":
             break
     if width is None or height is None or not idat:
         return None
-    try:
-        raw = zlib.decompress(bytes(idat))
-    except zlib.error:
-        return None
     bpp = 4
     stride = width * bpp
     expected = height * (1 + stride)
-    if len(raw) != expected:
+    try:
+        decompressor = zlib.decompressobj()
+        raw = decompressor.decompress(bytes(idat), max_length=expected)
+        # Reject truncated or oversize inflate attempts.
+        if len(raw) != expected or decompressor.unconsumed_tail:
+            return None
+        # Consume any trailing zlib checksum bytes without accepting more output.
+        unused = decompressor.decompress(b"", max_length=1)
+        if unused or not decompressor.eof:
+            return None
+    except zlib.error:
         return None
     out = bytearray(height * stride)
     prev = bytearray(stride)
@@ -582,8 +612,8 @@ def build_comparisons(images: list[dict]) -> list[dict]:
         elif len(unique_hashes) > 1:
             status = "content-mismatch"
             if strict:
-                # Byte digests often differ across OS from PNG filter choice even when
-                # pixels match; decode and allow tiny channel drift (±1 LSB).
+                # Digests differ — decode for diagnostics. ±1 LSB is still a gate
+                # failure (goal is byte-identical) but classified match-tolerant.
                 paths = [Path(by_os[os_name]["src_path"]) for os_name in all_os]
                 pixel_stats = pixel_compare(paths)
                 if pixel_stats and pixel_stats["within_tolerance"]:
@@ -598,13 +628,10 @@ def build_comparisons(images: list[dict]) -> list[dict]:
         gate = "strict" if strict else "informational"
         gate_ok = True
         if strict:
-            gate_ok = status in {
-                "match",
-                "match-tolerant",
-                "match-incomplete",
-                "single-os",
-            }
-            if status in {"content-mismatch", "size-mismatch"}:
+            # Only byte-identical full/partial matrices pass. match-tolerant fails
+            # the gate while remaining useful gallery/debug signal.
+            gate_ok = status in {"match", "match-incomplete", "single-os"}
+            if status in {"content-mismatch", "size-mismatch", "match-tolerant"}:
                 gate_ok = False
 
         row = {
@@ -635,9 +662,8 @@ def comparison_totals(comparisons: list[dict]) -> dict:
     strict = [c for c in comparisons if c["gate"] == "strict"]
     informational = [c for c in comparisons if c["gate"] == "informational"]
     strict_bad = [c for c in strict if not c["gate_ok"]]
-    strict_match = [
-        c for c in strict if c["status"] in {"match", "match-tolerant"}
-    ]
+    strict_match = [c for c in strict if c["status"] == "match"]
+    strict_tolerant = [c for c in strict if c["status"] == "match-tolerant"]
     strict_warn = [
         c
         for c in strict
@@ -650,9 +676,11 @@ def comparison_totals(comparisons: list[dict]) -> dict:
     ]
     return {
         "strict_total": len(strict),
-        # Fully identical with complete OS coverage only.
+        # Byte-identical with complete OS coverage only.
         "strict_match": len(strict_match),
-        # Gate-pass count (match + incomplete/single-os warnings).
+        # Near-matches (±1 LSB) — diagnostic only; still count as gate failures.
+        "strict_tolerant": len(strict_tolerant),
+        # Gate-pass count (byte-identical match + incomplete/single-os warnings).
         "strict_ok": len(strict) - len(strict_bad),
         "strict_failed": len(strict_bad),
         "strict_warnings": len(strict_warn),
@@ -663,8 +691,10 @@ def comparison_totals(comparisons: list[dict]) -> dict:
 
 
 def status_chip_class(status: str, *, gate: str) -> str:
-    if status in {"match", "match-tolerant"}:
+    if status == "match":
         return "match"
+    if status == "match-tolerant":
+        return "warn"
     if status in {"content-mismatch", "size-mismatch"}:
         return "info" if gate == "informational" else "mismatch"
     if status in {"match-incomplete", "single-os"}:
@@ -675,7 +705,9 @@ def status_chip_class(status: str, *, gate: str) -> str:
 def status_label(status: str, *, gate: str) -> str:
     labels = {
         "match": "identical across OS",
-        "match-tolerant": f"within ±{STRICT_MAX_CHANNEL_DELTA} LSB across OS",
+        "match-tolerant": (
+            f"±{STRICT_MAX_CHANNEL_DELTA} LSB drift (not byte-identical)"
+        ),
         "match-incomplete": "identical (matrix incomplete)",
         "single-os": "single OS only",
         "content-mismatch": (
@@ -724,15 +756,21 @@ def write_site(
 
     banner_chips: list[str] = []
     if totals["strict_total"]:
-        if not totals["gate_ok"]:
+        hard_failed = totals["strict_failed"] - totals["strict_tolerant"]
+        if hard_failed > 0:
             banner_chips.append(
                 f'<span class="chip mismatch">apply-payload '
-                f'{totals["strict_failed"]} OS regression(s)</span>'
+                f"{hard_failed} OS regression(s)</span>"
+            )
+        if totals["strict_tolerant"]:
+            banner_chips.append(
+                f'<span class="chip warn">apply-payload {totals["strict_tolerant"]} '
+                f"near-match (±{STRICT_MAX_CHANNEL_DELTA} LSB; not byte-identical)</span>"
             )
         if totals["strict_match"]:
             banner_chips.append(
                 f'<span class="chip match">apply-payload {totals["strict_match"]}/'
-                f'{totals["strict_total"]} fully OS-identical</span>'
+                f'{totals["strict_total"]} byte-identical across OS</span>'
             )
         if totals["strict_warnings"]:
             banner_chips.append(
@@ -751,7 +789,8 @@ def write_site(
         stage_comparisons = comparisons_by_stage.get(stage, [])
         gate = "strict" if stage in STRICT_STAGES else "informational"
         note = (
-            "Byte-identical rasters expected across OS — mismatches are regression signals."
+            "Byte-identical rasters required across OS. Near-matches (±1 LSB) are "
+            "shown for debugging but still fail the gate."
             if gate == "strict"
             else "Platform chrome differs by OS; variance here is informational, not a gate."
         )
@@ -900,15 +939,27 @@ def write_comment(
         ]
     )
     if totals["strict_total"]:
-        if not totals["gate_ok"]:
+        hard_failed = totals["strict_failed"] - totals["strict_tolerant"]
+        if hard_failed > 0:
             lines.append(
-                f"| Apply-payload OS compare | ❌ {totals['strict_failed']} "
+                f"| Apply-payload OS compare | ❌ {hard_failed} "
                 f"regression(s) (content/size mismatch) |"
             )
-        else:
+        if totals["strict_tolerant"]:
+            lines.append(
+                f"| Near-match (±{STRICT_MAX_CHANNEL_DELTA} LSB) | ⚠️ "
+                f"{totals['strict_tolerant']} asset(s) — still fails gate "
+                f"(want byte-identical) |"
+            )
+        if totals["gate_ok"]:
             lines.append(
                 f"| Apply-payload OS compare | ✅ {totals['strict_match']}/"
-                f"{totals['strict_total']} fully identical across runners |"
+                f"{totals['strict_total']} byte-identical across runners |"
+            )
+        elif totals["strict_match"]:
+            lines.append(
+                f"| Byte-identical | {totals['strict_match']}/"
+                f"{totals['strict_total']} assets |"
             )
         if totals["strict_warnings"]:
             lines.append(
