@@ -4,6 +4,5 @@
   "version": "1.23.1",
   "triplet": "x64-windows-static-md",
   "asset": "libheif-msvc-x64-windows-static-md-1.23.1.zip",
-  "sha256": null,
-  "notes": "sha256 is filled by sync-easel-deps.yml after easel-deps republishes a zip whose heif_version.h matches version. Until then install-libheif-windows.ps1 warns on version mismatch but still prefers the owned zip (has aom) over the interim fallback."
+  "sha256": "264b4a242fe37572381d8c5c550eaf257a11a2ee2d2390fd1ba4e6d546fa76a7"
 }
