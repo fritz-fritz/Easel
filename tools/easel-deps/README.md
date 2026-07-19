@@ -52,15 +52,23 @@ Build-time controls (so routine merges stay cheap):
 
 - Main pushes **skip the compile** when a release for that libheif version already exists (~seconds).
 - `VCPKG_BUILD_TYPE=release` — do not compile debug variants (Easel only links release).
-- vcpkg **GitHub Actions binary cache** (`x-gha`) — restore packed aom/x265/libheif instead of rebuilding.
-- Source tarballs cached under `VCPKG_DOWNLOADS` (outside the wiped vcpkg git checkout).
+- vcpkg **`files` binary cache** under `C:/vcpkg-binary-cache`, restored/saved with `actions/cache` (the old `x-gha` backend was removed from vcpkg).
+- Source tarballs under `VCPKG_DOWNLOADS`, same cache entry (`save-always` so publish failures still keep the cache).
 
-Force a rebuild/publish: Actions → **Build libheif (Windows MSVC)** → Run workflow, or push a `libheif-v*` tag.
+Publishing rules:
+
+| Trigger | Tag |
+| --- | --- |
+| Push to `main` (first release for the version) | `libheif-vX.Y.Z` — **fails hard** if the name is taken/burned (no `-rN` fallback) |
+| `workflow_dispatch` / schedule | next free `libheif-vX.Y.Z-rN` (skips immutable-burned names via git-ref probe) |
+| Push `libheif-v*` tag | that exact tag |
+
+Force a rebuild/publish: Actions → **Build libheif (Windows MSVC)** → Run workflow.
 
 Manual bump:
 
 1. Edit `versions.json` (or merge a sync PR).
-2. Push to `main` (first release for that version) or `workflow_dispatch` / tag `libheif-vX.Y.Z`.
+2. Push to `main` (first release for that version) or `workflow_dispatch` for a `-rN` repack.
 3. Confirm the release asset + `.sha256` match the packaged port version.
 
 ## Local use (Easel)

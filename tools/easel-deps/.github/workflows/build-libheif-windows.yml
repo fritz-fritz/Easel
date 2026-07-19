@@ -20,13 +20,12 @@ env:
   # Skip debug builds (~half of aom/x265 compile time). Release zip already
   # omits debug/; Easel CI only links release libs.
   VCPKG_BUILD_TYPE: release
-  # Binary cache in GitHub Actions cache — second+ builds restore packed
-  # packages instead of recompiling aom/x265/libheif.
-  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-  # Fixed path outside C:\vcpkg so bootstrap can wipe the git tree without
-  # losing the download cache. Avoid ${{ runner.* }} here — that context is
-  # only valid inside step `env`/`with`, not workflow/job-level env.
+  # files backend + actions/cache (x-gha was removed from vcpkg).
+  VCPKG_BINARY_SOURCES: "clear;files,C:/vcpkg-binary-cache,readwrite"
+  # Fixed paths outside C:\vcpkg so bootstrap can wipe the git tree without
+  # losing caches. Avoid ${{ runner.* }} in workflow/job env — invalid there.
   VCPKG_DOWNLOADS: C:/vcpkg-downloads
+  VCPKG_BINARY_CACHE: C:/vcpkg-binary-cache
 
 jobs:
   build:
@@ -108,23 +107,19 @@ jobs:
           "build=$($build.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "gate: build=$build ($reason)"
 
-      - name: Export GitHub Actions cache credentials for vcpkg
-        if: steps.gate.outputs.build == 'true'
-        uses: actions/github-script@v7
-        with:
-          script: |
-            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
-            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
-
-      - name: Cache vcpkg source downloads
+      - name: Cache vcpkg downloads + binary packs
         if: steps.gate.outputs.build == 'true'
         uses: actions/cache@v4
         with:
-          path: ${{ env.VCPKG_DOWNLOADS }}
-          key: vcpkg-downloads-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features_key }}
+          path: |
+            ${{ env.VCPKG_DOWNLOADS }}
+            ${{ env.VCPKG_BINARY_CACHE }}
+          key: vcpkg-${{ env.TRIPLET }}-rel-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features_key }}
           restore-keys: |
-            vcpkg-downloads-${{ steps.ver.outputs.vcpkg_ref }}-
-            vcpkg-downloads-
+            vcpkg-${{ env.TRIPLET }}-rel-${{ steps.ver.outputs.vcpkg_ref }}-
+            vcpkg-${{ env.TRIPLET }}-rel-
+          # Keep caches even if publish fails (immutable-burned tags, etc.).
+          save-always: true
 
       - name: Bootstrap vcpkg
         if: steps.gate.outputs.build == 'true'
@@ -133,8 +128,8 @@ jobs:
           $ref = "${{ steps.ver.outputs.vcpkg_ref }}"
           $kind = "${{ steps.ver.outputs.vcpkg_ref_kind }}"
           $git = "https://github.com/microsoft/vcpkg"
-          # Fresh shallow checkout each run; binary cache (x-gha) holds build
-          # products, downloads live under VCPKG_DOWNLOADS (cached separately).
+          # Fresh checkout each run; ABI packs live under VCPKG_BINARY_CACHE and
+          # source tarballs under VCPKG_DOWNLOADS (both restored via actions/cache).
           if (Test-Path C:\vcpkg) {
             Remove-Item -Recurse -Force C:\vcpkg
           }
@@ -147,6 +142,7 @@ jobs:
             git clone --depth 1 --branch $ref $git C:\vcpkg
           }
           New-Item -ItemType Directory -Path $env:VCPKG_DOWNLOADS -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:VCPKG_BINARY_CACHE -Force | Out-Null
           & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
           "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
@@ -188,8 +184,8 @@ jobs:
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        # Tags always publish. Dispatch/schedule always publish a (re)build tag.
-        # Push to main publishes only when no release exists yet for this version.
+        # Tags always publish. Dispatch/schedule always publish a -rN rebuild.
+        # Main push publishes the base tag once; on failure, stop (manual repack).
         if: >
           steps.gate.outputs.build == 'true' &&
           (startsWith(github.ref, 'refs/tags/libheif-v') ||
@@ -201,6 +197,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
           $ErrorActionPreference = "Stop"
           $ver = "${{ steps.pkg.outputs.resolved_version }}"
@@ -208,18 +205,23 @@ jobs:
           $path = "dist/$asset"
           $sum = "$path.sha256"
           $sha = "${{ steps.pkg.outputs.sha256 }}"
-          $base = "libheif-v$ver"
           $fromTagPush = $env:GITHUB_REF -like "refs/tags/libheif-v*"
           $forceRebuild = $env:EVENT_NAME -in @("workflow_dispatch", "schedule")
 
           if ($fromTagPush) {
-            $tag = $env:GITHUB_REF_NAME
-            if ($tag -notmatch "^libheif-v$([regex]::Escape($ver))(-r\d+)?$") {
-              throw "git tag $tag does not match packaged libheif-v$ver"
-            }
+            $tag = & .\scripts\next-libheif-release-tag.ps1 `
+              -Mode exact -Version $ver -ExactTag $env:GITHUB_REF_NAME `
+              -HeadSha $env:GITHUB_SHA
+          } elseif ($forceRebuild) {
+            $tag = & .\scripts\next-libheif-release-tag.ps1 `
+              -Mode rebuild -Version $ver -HeadSha $env:GITHUB_SHA
           } else {
-            $tag = $base
+            # Main / sync: first publish only. No -rN fallback — dispatch for repacks.
+            $tag = & .\scripts\next-libheif-release-tag.ps1 `
+              -Mode first -Version $ver -HeadSha $env:GITHUB_SHA
           }
+          if (-not $tag) { throw "next-libheif-release-tag.ps1 returned empty tag" }
+          $tag = ([string]$tag).Trim()
 
           $triplet = $env:TRIPLET
           $features = "${{ steps.ver.outputs.features }}"
@@ -240,76 +242,10 @@ jobs:
             "The zip root must contain ``.vcpkg-root`` and ``installed/``."
           ) -join "`n"
 
-          function Test-ReleaseExists([string]$ReleaseTag) {
-            gh release view $ReleaseTag 2>$null | Out-Null
-            return ($LASTEXITCODE -eq 0)
-          }
-
-          function Get-NextRebuildTag([string]$BaseTag) {
-            $max = 1
-            $json = gh release list --limit 100 --json tagName | ConvertFrom-Json
-            foreach ($r in $json) {
-              if ($r.tagName -match "^$([regex]::Escape($BaseTag))-r(\d+)$") {
-                $n = [int]$Matches[1]
-                if ($n -gt $max) { $max = $n }
-              }
-            }
-            return "$BaseTag-r$($max + 1)"
-          }
-
-          function New-Release([string]$ReleaseTag) {
-            Write-Host "Creating release $ReleaseTag"
-            # Discard gh stdout so callers never capture a URL mixed with exit codes.
-            gh release create $ReleaseTag $path $sum --title $ReleaseTag --notes $notes | Out-Null
-            if ($LASTEXITCODE -ne 0) {
-              throw "gh release create $ReleaseTag failed with exit $LASTEXITCODE"
-            }
-          }
-
-          function Test-AnyVersionRelease([string]$BaseTag) {
-            if (Test-ReleaseExists $BaseTag) { return $true }
-            $json = gh release list --limit 100 --json tagName | ConvertFrom-Json
-            foreach ($r in $json) {
-              if ($r.tagName -eq $BaseTag -or $r.tagName -match "^$([regex]::Escape($BaseTag))-r\d+$") {
-                return $true
-              }
-            }
-            return $false
-          }
-
-          if ($fromTagPush) {
-            if (Test-ReleaseExists $tag) {
-              throw "release $tag already exists; immutable releases cannot be overwritten — push a new libheif-v$ver-rN tag"
-            }
-            New-Release $tag
-          } elseif ($forceRebuild) {
-            if (Test-AnyVersionRelease $base) {
-              $tag = Get-NextRebuildTag $base
-            } else {
-              $tag = $base
-            }
-            try {
-              New-Release $tag
-            } catch {
-              if ($tag -eq $base) {
-                Write-Warning "$_ — retrying as next rebuild tag"
-                $tag = Get-NextRebuildTag $base
-                New-Release $tag
-              } else {
-                throw
-              }
-            }
-          } else {
-            if (Test-AnyVersionRelease $base) {
-              Write-Host "Skipping publish: a release for $base already exists. Use workflow_dispatch or a libheif-v* tag to mint a rebuild."
-              return
-            }
-            try {
-              New-Release $tag
-            } catch {
-              Write-Warning "$_ — retrying as next rebuild tag"
-              $tag = Get-NextRebuildTag $base
-              New-Release $tag
-            }
+          Write-Host "Creating release $tag"
+          # Discard gh stdout so callers never capture a URL mixed with exit codes.
+          gh release create $tag $path $sum --title $tag --notes $notes | Out-Null
+          if ($LASTEXITCODE -ne 0) {
+            throw "gh release create $tag failed with exit $LASTEXITCODE (no retry — use workflow_dispatch for a -rN repack)"
           }
           Write-Host "Published $tag / $asset (sha256=$sha)"

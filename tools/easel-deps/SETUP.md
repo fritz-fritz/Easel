@@ -63,9 +63,17 @@ Easel CI    install-libheif-windows.ps1 (checksum + version header)
 GitHub immutable releases permanently burn a tag name even after deletion.
 Corrected rebuilds therefore publish as `libheif-vX.Y.Z-rN` (e.g. `libheif-v1.23.1-r2`).
 
-Do **not** loop `gh release create` while capturing its stdout into a PowerShell
-variable — `gh` prints the release URL, so `$code = fn` becomes `@(url, 0)` and
-`if ($code -eq 0)` is falsy, which previously minted r3…r20 in one job.
+`scripts/next-libheif-release-tag.ps1` picks the tag **before** `gh release create`:
+
+- Lists live releases + existing git tags.
+- Probes candidates with `POST /git/refs` (burned names return 422 even when absent).
+- Deletes a successful probe ref, then creates the release **once** — no create-retry loop.
+
+Main/sync publishes only the base tag and exits on error; use `workflow_dispatch` for `-rN` repacks.
+
+Do **not** assign `gh release create` stdout into a PowerShell variable used as an exit
+code — `gh` prints the release URL, so `$code = fn` becomes `@(url, 0)` and
+`if ($code -eq 0)` is falsy (this previously minted r3…r20 in one job).
 
 ## Build performance
 
@@ -73,9 +81,9 @@ Cold MSVC builds of aom+x265+libheif take on the order of 10–20 minutes. Mitig
 
 1. **Early gate** — main pushes exit in seconds when a release for that version exists.
 2. **`VCPKG_BUILD_TYPE=release`** — skip debug compiles (~2× on aom/x265).
-3. **`x-gha` binary cache** — restore packed packages on subsequent builds.
-4. **Download cache** — `VCPKG_DOWNLOADS` lives outside `C:\vcpkg` so bootstrap can
-   refresh the git checkout without wiping source tarballs.
+3. **`files` binary cache** + `actions/cache` on `C:/vcpkg-binary-cache` (ABI packs).
+4. **Download cache** — `VCPKG_DOWNLOADS` at `C:/vcpkg-downloads`, same cache entry with
+   `save-always: true` so a publish failure still keeps downloads/packs for next run.
 
 Easel Windows CI should stay on the download-zip path; do not compile libheif in
 application PR jobs.
