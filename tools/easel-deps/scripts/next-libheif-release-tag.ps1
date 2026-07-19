@@ -7,6 +7,9 @@
 #
 # Burned immutable tags (deleted published releases) still block ref creation.
 # We detect that with a create-ref probe + delete, never by retrying gh release create.
+#
+# IMPORTANT: Do not return empty .NET collections from PowerShell functions —
+# an empty HashSet enumerates to nothing and becomes $null.
 
 [CmdletBinding()]
 param(
@@ -21,7 +24,10 @@ param(
 
     [string]$Repo = "",
 
-    [string]$HeadSha = ""
+    [string]$HeadSha = "",
+
+    # Optional path: write the chosen tag here (avoids pipeline capture issues).
+    [string]$OutFile = ""
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,35 +41,43 @@ if (-not $Repo) {
 
 $Base = "libheif-v$Version"
 
-function New-TagSet {
-    return [System.Collections.Generic.HashSet[string]]::new(
-        [StringComparer]::OrdinalIgnoreCase
-    )
+# Hashtable keyed by tag name — never returned from a function (stays in script scope).
+$script:Occupied = @{}
+
+function Add-OccupiedTag([string]$Name) {
+    if ($Name) { $script:Occupied[$Name] = $true }
 }
 
-function Get-OccupiedTags([string]$BaseTag) {
-    $occupied = New-TagSet
+function Test-OccupiedTag([string]$Name) {
+    return $script:Occupied.ContainsKey($Name)
+}
 
-    $releases = gh release list --repo $Repo --limit 200 --json tagName | ConvertFrom-Json
+function Collect-OccupiedTags([string]$BaseTag) {
+    $releasesJson = gh release list --repo $Repo --limit 200 --json tagName 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "gh release list failed: $releasesJson"
+    }
+    $releases = $releasesJson | ConvertFrom-Json
     foreach ($r in @($releases)) {
         if ($null -eq $r) { continue }
         $name = [string]$r.tagName
         if ($name -eq $BaseTag -or $name -match "^$([regex]::Escape($BaseTag))-r\d+$") {
-            [void]$occupied.Add($name)
+            Add-OccupiedTag $name
         }
     }
 
-    $refs = gh api "repos/$Repo/git/matching-refs/tags/$BaseTag" | ConvertFrom-Json
+    $refsJson = gh api "repos/$Repo/git/matching-refs/tags/$BaseTag" 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        throw "gh api matching-refs failed: $refsJson"
+    }
+    $refs = $refsJson | ConvertFrom-Json
     foreach ($ref in @($refs)) {
         if ($null -eq $ref) { continue }
         $name = ([string]$ref.ref) -replace '^refs/tags/', ''
         if ($name -eq $BaseTag -or $name -match "^$([regex]::Escape($BaseTag))-r\d+$") {
-            [void]$occupied.Add($name)
+            Add-OccupiedTag $name
         }
     }
-
-    # Leading comma stops PowerShell from unrolling HashSet -> Object[] (fixed-size).
-    return , $occupied
 }
 
 function Test-TagCreatable([string]$Tag, [string]$Sha) {
@@ -73,7 +87,6 @@ function Test-TagCreatable([string]$Tag, [string]$Sha) {
     gh api "repos/$Repo/git/ref/tags/$Tag" 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { return $false }
 
-    # Immutable-burned names reject ref creation even when no tag/release exists.
     $createOut = gh api -X POST "repos/$Repo/git/refs" `
         -f ref="refs/tags/$Tag" `
         -f sha=$Sha 2>&1
@@ -86,10 +99,10 @@ function Test-TagCreatable([string]$Tag, [string]$Sha) {
     return $true
 }
 
-function Get-MaxRebuildNumber($Occupied, [string]$BaseTag) {
+function Get-MaxRebuildNumber([string]$BaseTag) {
     $max = 0
-    foreach ($name in @($Occupied)) {
-        if ([string]$name -match "^$([regex]::Escape($BaseTag))-r(\d+)$") {
+    foreach ($name in @($script:Occupied.Keys)) {
+        if ($name -match "^$([regex]::Escape($BaseTag))-r(\d+)$") {
             $n = [int]$Matches[1]
             if ($n -gt $max) { $max = $n }
         }
@@ -97,11 +110,20 @@ function Get-MaxRebuildNumber($Occupied, [string]$BaseTag) {
     return $max
 }
 
+function Emit-Tag([string]$Tag) {
+    if ($OutFile) {
+        Set-Content -Path $OutFile -Value $Tag -NoNewline -Encoding utf8
+    }
+    # Single string to stdout for callers that capture pipeline output.
+    Write-Output $Tag
+}
+
 if (-not $HeadSha) {
     $HeadSha = (gh api "repos/$Repo/commits/main" --jq .sha)
 }
 
-$occupied = Get-OccupiedTags $Base
+Collect-OccupiedTags $Base
+Write-Host ("occupied tags: " + (($script:Occupied.Keys | Sort-Object) -join ", "))
 
 switch ($Mode) {
     "exact" {
@@ -112,32 +134,31 @@ switch ($Mode) {
         if (-not (Test-TagCreatable $ExactTag $HeadSha)) {
             throw "exact tag $ExactTag is occupied or immutable-burned; push a new libheif-v$Version-rN tag"
         }
-        Write-Output $ExactTag
+        Emit-Tag $ExactTag
     }
     "first" {
-        if ($occupied.Count -gt 0) {
-            $list = (@($occupied) | Sort-Object) -join ", "
+        if ($script:Occupied.Count -gt 0) {
+            $list = ($script:Occupied.Keys | Sort-Object) -join ", "
             throw "a release/tag for $Base already exists ($list); use workflow_dispatch for a -rN repack"
         }
         if (-not (Test-TagCreatable $Base $HeadSha)) {
             throw "base tag $Base is immutable-burned; use workflow_dispatch for a -rN repack"
         }
-        Write-Output $Base
+        Emit-Tag $Base
     }
     "rebuild" {
-        # Walk upward from max(live)+1. Burned holes are skipped via create-ref
-        # probes; no need to mutate $occupied (avoids fixed-size-array pitfalls).
-        $n = (Get-MaxRebuildNumber $occupied $Base) + 1
+        $n = (Get-MaxRebuildNumber $Base) + 1
         if ($n -lt 1) { $n = 1 }
         $limit = $n + 200
+        Write-Host "rebuild search starting at ${Base}-r${n}"
         while ($n -le $limit) {
             $candidate = "$Base-r$n"
-            if ($occupied.Contains($candidate)) {
+            if (Test-OccupiedTag $candidate) {
                 $n++
                 continue
             }
             if (Test-TagCreatable $candidate $HeadSha) {
-                Write-Output $candidate
+                Emit-Tag $candidate
                 return
             }
             $n++
