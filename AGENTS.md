@@ -72,11 +72,14 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   script (or rely on `start`) after a restart.
 - Actually *setting* the wallpaper on Linux is implemented **only** for KDE Plasma 6
   (`crates/easel-platform/src/plasma.rs`, via `qdbus`/`org.kde.plasmashell`); there is no
-  XFCE/GNOME/generic-X backend. On the XFCE Cloud desktop `select_wallpaper_backend()`
+  XFCE/GNOME/generic-X backend yet. On the XFCE Cloud desktop `select_wallpaper_backend()`
   returns `NoBackend`, so the Compose **Apply** button cannot push to the compositor here.
-  CI does not set real wallpaper either — it validates the per-display **apply-payload
-  rasters** that Easel would hand the compositor. Reproduce those (three `apply-display-*.png`
-  for the `DP-1/2/3` fixture) with:
+- **Decision: do NOT install KDE Plasma on this Cloud VM.** A generic **X** wallpaper
+  backend is planned and will be the supported path for this environment; until it lands,
+  do not add a KDE/Plasma session just to make live apply work. Validate apply on this VM
+  via the per-display **apply-payload rasters** instead (this is also all CI checks — CI
+  does not set real wallpaper). Reproduce those (three `apply-display-*.png` for the
+  `DP-1/2/3` fixture) with:
 
   ```
   EASEL_VISUAL_OUTDIR=<outdir> cargo test -p easel-render write_apply_payload_visual_artifacts
