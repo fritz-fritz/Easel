@@ -1,0 +1,51 @@
+name: Sync libheif upstream
+
+# Keep versions.json aligned with strukturag/libheif + microsoft/vcpkg.
+# When both publish a newer libheif than we pin, open a PR that bumps the pin
+# (and points vcpkg.ref at the first commit whose port matches). Merging the PR
+# triggers Build libheif (Windows MSVC) via the versions.json path filter.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "12 5 * * *"
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Resolve upstream + vcpkg port
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 scripts/sync-upstream.py --versions versions.json --github-output "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.resolve.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="sync/libheif-v${{ steps.resolve.outputs.libheif }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add versions.json
+          git commit -m "chore: bump libheif to ${{ steps.resolve.outputs.libheif }}"
+          git push -u origin "$BRANCH" --force
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --title "chore: bump libheif to ${{ steps.resolve.outputs.libheif }}" \
+              --body-file pr-body.md
+          else
+            gh pr create --title "chore: bump libheif to ${{ steps.resolve.outputs.libheif }}" \
+              --body-file pr-body.md \
+              --base main --head "$BRANCH"
+          fi

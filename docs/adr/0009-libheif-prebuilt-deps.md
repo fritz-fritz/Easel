@@ -2,6 +2,7 @@
 
 - Status: accepted
 - Date: 2026-07-19
+- Updated: 2026-07-19 (release accuracy + upstream sync)
 
 ## Context
 
@@ -26,22 +27,27 @@ official Windows binary asset to pin.
 
 Use sibling repo [`fritz-fritz/easel-deps`](https://github.com/fritz-fritz/easel-deps) that:
 
-Canonical scaffold (until agents have push access to that repo) lives in
-`tools/easel-deps/` with a git bundle at `tools/easel-deps.bundle` — see
-`tools/easel-deps/SETUP.md`.
+Canonical scaffold lives in `tools/easel-deps/` with a git bundle at
+`tools/easel-deps.bundle` — see `tools/easel-deps/SETUP.md`.
 
-1. On tag / schedule / workflow_dispatch, builds **MSVC** `x64-windows-static-md`
-   libheif with the codecs Easel needs (`libde265`, `x265`, `aom`).
-2. Publishes a versioned GitHub Release zip with a **stable layout**, preferably
-   already shaped for `libheif-sys` + `vcpkg-rs`:
+1. Builds **MSVC** `x64-windows-static-md` libheif (`libde265`, `x265`, `aom`) from a
+   pinned microsoft/vcpkg **tag or commit** in `versions.json`.
+2. **Verifies** the installed port / `heif_version.h` matches `libheif.version`
+   before publishing (prevents tag/asset name drift).
+3. Publishes a versioned GitHub Release zip (+ `.sha256` sidecar) shaped for
+   `libheif-sys` / `vcpkg-rs` (release layout omits `debug/` by default):
    ```
    .vcpkg-root
-   installed/x64-windows-static-md/{include,lib}/…
+   versions.json
+   installed/x64-windows-static-md/{include,lib,share}/…
    installed/vcpkg/{status,info/*.list,updates/}
    ```
-3. Pins exact upstream versions in the release notes / a `versions.json`.
-4. Easel CI downloads that asset (checksum-verified) instead of compiling or
-   depending on an unaffiliated third-party binary host.
+4. **Sync libheif upstream** (scheduled) opens PRs when strukturag/libheif and
+   microsoft/vcpkg both expose a newer port.
+5. Easel pins the asset in `.github/libheif-windows.lock.json`. CI installs via
+   `.github/scripts/install-libheif-windows.ps1` (SHA-256 + version header
+   verified). **sync-easel-deps** opens PRs when easel-deps publishes a corrected
+   release (requires `.sha256` sidecar).
 
 Linux/macOS keep apt/brew. Optional later: same repo can publish macOS bottles if
 Homebrew becomes a bottleneck.
@@ -51,11 +57,12 @@ Homebrew becomes a bottleneck.
 - Easel CI Windows jobs stay in the “download + link” regime (~seconds).
 - Codec/CRT/library naming is under our control (avoids `x265-static` vs `x265`,
   missing `aom`, `/MD` mismatches).
-- One more repo to maintain; schedule rebuilds when bumping libheif.
-- First release published: `libheif-v1.23.1` /
-  `libheif-msvc-x64-windows-static-md-1.23.1.zip` (vcpkg port libheif 1.21.2 +
-  aom/hevc). Easel CI prefers this asset via
-  `.github/scripts/install-libheif-windows.ps1`.
+- One more repo to maintain; upstream sync + weekly rebuild keep pins honest.
+- The first `libheif-v1.23.1` cut was mispackaged (vcpkg tag `2026.05.25` → port
+  **1.21.2** under a 1.23.1 name). Fixed publisher pins vcpkg commit
+  `33e5269b…` (port 1.23.1), verifies before release, and Easel rejects assets
+  without a `.sha256` sidecar / mismatched `heif_version.h` (interim third-party
+  fallback remains until the corrected release exists).
 
 ## References
 
@@ -63,3 +70,5 @@ Homebrew becomes a bottleneck.
 - Pillow `winbuild/` + wheels workflow
 - `libheif-sys` Windows path (`vcpkg::find_package("libheif")`)
 - `.github/scripts/install-libheif-windows.ps1`
+- `.github/libheif-windows.lock.json`
+- `.github/workflows/sync-easel-deps.yml`

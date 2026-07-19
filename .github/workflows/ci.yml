@@ -38,6 +38,9 @@ jobs:
               - 'crates/**'
               - 'apps/**'
               - '.github/workflows/ci.yml'
+              - '.github/scripts/install-libheif-windows.ps1'
+              - '.github/libheif-windows.lock.json'
+              - 'tools/easel-deps/**'
             desktop:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -46,6 +49,9 @@ jobs:
               - 'apps/easel-desktop/**'
               - '.github/actions/ci-visual/**'
               - '.github/workflows/ci.yml'
+              - '.github/scripts/install-libheif-windows.ps1'
+              - '.github/libheif-windows.lock.json'
+              - 'tools/easel-deps/**'
             # Include ci.yml so edits to the Gallery tooling job itself are exercised.
             gallery_tooling:
               - '.github/ci-visual/**'

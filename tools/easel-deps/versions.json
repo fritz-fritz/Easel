@@ -7,10 +7,13 @@
   },
   "vcpkg": {
     "git": "https://github.com/microsoft/vcpkg",
-    "tag": "2026.05.25"
+    "ref": "33e5269bbfc24fb252bc48a3e624c8193afdccce",
+    "ref_kind": "commit",
+    "comment": "First microsoft/vcpkg commit whose libheif port is 1.23.1 (no monthly tag yet). Prefer a dated tag once one includes this port."
   },
   "asset": {
     "name_template": "libheif-msvc-{triplet}-{libheif_version}.zip",
-    "layout": "vcpkg-installed"
+    "layout": "vcpkg-installed",
+    "include_debug": false
   }
 }

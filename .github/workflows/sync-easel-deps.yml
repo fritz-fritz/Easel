@@ -1,0 +1,53 @@
+name: Sync easel-deps pin
+
+# Keep .github/libheif-windows.lock.json aligned with fritz-fritz/easel-deps
+# GitHub Releases. Only accepts a release whose asset SHA256 sidecar (or API
+# digest) is present and whose tag version matches the lock's intended version
+# scheme (libheif-vX.Y.Z). Opens a PR when the pin should move.
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "42 7 * * *"
+  repository_dispatch:
+    types: [easel-deps-release]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Probe easel-deps latest libheif release
+        id: probe
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          python3 .github/scripts/sync-easel-deps-pin.py \
+            --lock .github/libheif-windows.lock.json \
+            --github-output "$GITHUB_OUTPUT"
+
+      - name: Create pull request
+        if: steps.probe.outputs.changed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          BRANCH="sync/easel-deps-${{ steps.probe.outputs.tag }}"
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git checkout -B "$BRANCH"
+          git add .github/libheif-windows.lock.json .github/workflows/ci.yml
+          git commit -m "chore: pin Windows libheif to ${{ steps.probe.outputs.tag }}"
+          git push -u origin "$BRANCH" --force
+          if gh pr view "$BRANCH" --json number >/dev/null 2>&1; then
+            gh pr edit "$BRANCH" --title "chore: pin Windows libheif to ${{ steps.probe.outputs.tag }}" --body-file pr-body.md
+          else
+            gh pr create --title "chore: pin Windows libheif to ${{ steps.probe.outputs.tag }}" \
+              --body-file pr-body.md --base main --head "$BRANCH"
+          fi

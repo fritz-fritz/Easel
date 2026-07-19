@@ -1,16 +1,62 @@
-# easel-deps status
+# easel-deps status (Easel tree)
 
-Repo: https://github.com/fritz-fritz/easel-deps  
-Latest release: [`libheif-v1.23.1`](https://github.com/fritz-fritz/easel-deps/releases/tag/libheif-v1.23.1)
+Canonical consumer-facing notes for agents working in the Easel repo. The live
+repo is https://github.com/fritz-fritz/easel-deps — keep this scaffold in
+`tools/easel-deps/` in sync and push there when the Cursor GitHub App is
+authorized on that sibling.
 
-Asset consumed by Easel CI:
+## Correctness bug in `libheif-v1.23.1` (first cut)
 
-`libheif-msvc-x64-windows-static-md-1.23.1.zip`
+The first published asset was named `…-1.23.1.zip` but was built from vcpkg tag
+`2026.05.25`, whose `libheif` port is **1.21.2** (`heif_version.h` /
+`installed/vcpkg/status` confirm this). Release notes claimed 1.23.1.
 
-(Note: at vcpkg tag `2026.05.25` the `libheif` port resolves to **1.21.2**; the release tag/asset name tracks `versions.json`.)
+Fix (already reflected in this scaffold):
 
-## Rebuild / bump
+1. Pin `vcpkg.ref` to commit `33e5269bbfc24fb252bc48a3e624c8193afdccce` (first
+   port bump to 1.23.1), or a later monthly tag once one exists.
+2. Package script verifies status/`heif_version.h` against `libheif.version` and
+   fails the release job on mismatch.
+3. Omit `debug/` from the zip (`include_debug: false`).
+4. Publish `*.zip.sha256` next to the asset.
 
-1. Edit `versions.json` in the easel-deps repo (or sync from this tree).
-2. Run Actions → **Build libheif (Windows MSVC)**, or push tag `libheif-vX.Y.Z`.
-3. Keep `.github/scripts/install-libheif-windows.ps1` pins in sync.
+## Apply this scaffold to the sibling repo
+
+This Cloud Agent token currently cannot push to `fritz-fritz/easel-deps`
+(Cursor GitHub App must be authorized on that repo). Until then:
+
+```bash
+git clone https://github.com/fritz-fritz/easel-deps.git
+cd easel-deps
+git checkout -b cursor/fix-release-sync-a4c5
+git am ../Easel/tools/easel-deps/pending-remote.patch
+# or: copy tools/easel-deps/* over the clone
+git push -u origin HEAD
+gh pr create --fill
+# after merge:
+gh workflow run build-libheif-windows.yml --repo fritz-fritz/easel-deps
+```
+
+Alternatively restore from the bundle: `git clone -b main tools/easel-deps.bundle easel-deps-new`.
+
+Then refresh Easel’s `.github/libheif-windows.lock.json` (or let
+`.github/workflows/sync-easel-deps.yml` open the pin PR once the corrected
+release publishes a `.sha256` sidecar).
+
+## Sync loop
+
+```
+strukturag/libheif release
+        │
+        ▼
+easel-deps  Sync libheif upstream  ──PR──► versions.json bump
+        │
+        ▼
+easel-deps  Build libheif (Windows MSVC) ──► GitHub Release + SHA256
+        │
+        ▼
+Easel       sync-easel-deps.yml ──PR──► .github/libheif-windows.lock.json
+        │
+        ▼
+Easel CI    install-libheif-windows.ps1 (checksum + version header)
+```
