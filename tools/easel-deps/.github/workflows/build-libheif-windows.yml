@@ -2,19 +2,30 @@ name: Build libheif (Windows MSVC)
 
 on:
   workflow_dispatch:
+  schedule:
+    # Rebuild pinned versions weekly so toolchain/runner drift surfaces early.
+    - cron: "17 6 * * 1"
   push:
+    # Do not combine tags with paths filters: a tag-only push would be skipped.
+    # Main pushes that would not publish exit in the gate step (~seconds).
+    branches: [main]
     tags:
       - "libheif-v*"
-    paths:
-      - "versions.json"
-      - "scripts/**"
-      - ".github/workflows/build-libheif-windows.yml"
 
 permissions:
   contents: write
 
 env:
   TRIPLET: x64-windows-static-md
+  # Skip debug builds (~half of aom/x265 compile time). Release zip already
+  # omits debug/; Easel CI only links release libs.
+  VCPKG_BUILD_TYPE: release
+  # files backend + actions/cache (x-gha was removed from vcpkg).
+  VCPKG_BINARY_SOURCES: "clear;files,C:/vcpkg-binary-cache,readwrite"
+  # Fixed paths outside C:\vcpkg so bootstrap can wipe the git tree without
+  # losing caches. Avoid ${{ runner.* }} in workflow/job env — invalid there.
+  VCPKG_DOWNLOADS: C:/vcpkg-downloads
+  VCPKG_BINARY_CACHE: C:/vcpkg-binary-cache
 
 jobs:
   build:
@@ -28,98 +39,235 @@ jobs:
         run: |
           $v = Get-Content versions.json -Raw | ConvertFrom-Json
           $libheif = $v.libheif.version
-          $tag = $v.vcpkg.tag
           $features = ($v.libheif.vcpkg_features -join ",")
-          "libheif=$libheif" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "vcpkg_tag=$tag" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          "features=$features" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          $asset = "libheif-msvc-$env:TRIPLET-$libheif.zip"
-          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
-          Write-Host "libheif=$libheif vcpkg=$tag features=$features asset=$asset"
+          # actions/cache keys cannot contain commas
+          $featuresKey = ($v.libheif.vcpkg_features -join "+")
+          $includeDebug = if ($v.asset.include_debug) { "true" } else { "false" }
 
-      - name: Cache vcpkg downloads and buildtrees
-        uses: actions/cache@v4
+          # Prefer explicit ref (commit or tag); fall back to legacy "tag" key.
+          $ref = $null
+          $refKind = "tag"
+          if ($v.vcpkg.ref) {
+            $ref = $v.vcpkg.ref
+            $refKind = if ($v.vcpkg.ref_kind) { $v.vcpkg.ref_kind } else {
+              if ($ref -match '^[0-9a-f]{7,40}$') { "commit" } else { "tag" }
+            }
+          } elseif ($v.vcpkg.tag) {
+            $ref = $v.vcpkg.tag
+            $refKind = "tag"
+          } else {
+            throw "versions.json missing vcpkg.ref or vcpkg.tag"
+          }
+
+          $asset = "libheif-msvc-$env:TRIPLET-$libheif.zip"
+          "libheif=$libheif" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vcpkg_ref=$ref" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "vcpkg_ref_kind=$refKind" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "features=$features" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "features_key=$featuresKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "include_debug=$includeDebug" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "libheif=$libheif vcpkg=$refKind/$ref features=$features asset=$asset"
+
+      - name: Decide whether a full build is needed
+        id: gate
+        shell: pwsh
+        env:
+          GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          $ver = "${{ steps.ver.outputs.libheif }}"
+          $base = "libheif-v$ver"
+          $fromTagPush = $env:GITHUB_REF -like "refs/tags/libheif-v*"
+          $forceRebuild = $env:EVENT_NAME -in @("workflow_dispatch", "schedule")
+
+          function Test-AnyVersionRelease([string]$BaseTag) {
+            gh release view $BaseTag 2>$null | Out-Null
+            if ($LASTEXITCODE -eq 0) { return $true }
+            $json = gh release list --limit 100 --json tagName | ConvertFrom-Json
+            foreach ($r in $json) {
+              if ($r.tagName -eq $BaseTag -or $r.tagName -match "^$([regex]::Escape($BaseTag))-r\d+$") {
+                return $true
+              }
+            }
+            return $false
+          }
+
+          $build = $true
+          $reason = "build required"
+          if ($fromTagPush -or $forceRebuild) {
+            $reason = "tag/dispatch/schedule always builds"
+          } elseif (Test-AnyVersionRelease $base) {
+            $build = $false
+            $reason = "main push and $base already has a release — skip compile (use workflow_dispatch to rebuild)"
+          } else {
+            $reason = "main push and no release for $base yet"
+          }
+
+          "build=$($build.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          Write-Host "gate: build=$build ($reason)"
+
+      - name: Restore vcpkg downloads + binary packs
+        id: vcpkg-cache
+        if: steps.gate.outputs.build == 'true'
+        uses: actions/cache/restore@v4
         with:
           path: |
-            C:/vcpkg/downloads
-            C:/vcpkg/buildtrees
-            C:/vcpkg/packages
-          key: vcpkg-${{ env.TRIPLET }}-${{ steps.ver.outputs.vcpkg_tag }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features }}
+            ${{ env.VCPKG_DOWNLOADS }}
+            ${{ env.VCPKG_BINARY_CACHE }}
+          key: vcpkg-${{ env.TRIPLET }}-rel-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features_key }}
+          restore-keys: |
+            vcpkg-${{ env.TRIPLET }}-rel-${{ steps.ver.outputs.vcpkg_ref }}-
+            vcpkg-${{ env.TRIPLET }}-rel-
 
       - name: Bootstrap vcpkg
+        if: steps.gate.outputs.build == 'true'
         shell: pwsh
         run: |
-          $tag = "${{ steps.ver.outputs.vcpkg_tag }}"
-          if (-not (Test-Path C:\vcpkg\.vcpkg-root)) {
-            git clone --depth 1 --branch $tag https://github.com/microsoft/vcpkg C:\vcpkg
-          } else {
-            Push-Location C:\vcpkg
-            git fetch --depth 1 origin tag $tag
-            git checkout $tag
-            Pop-Location
+          $ref = "${{ steps.ver.outputs.vcpkg_ref }}"
+          $kind = "${{ steps.ver.outputs.vcpkg_ref_kind }}"
+          $git = "https://github.com/microsoft/vcpkg"
+          # Fresh checkout each run; ABI packs live under VCPKG_BINARY_CACHE and
+          # source tarballs under VCPKG_DOWNLOADS (both restored via actions/cache).
+          if (Test-Path C:\vcpkg) {
+            Remove-Item -Recurse -Force C:\vcpkg
           }
+          if ($kind -eq "commit") {
+            git clone --filter=blob:none $git C:\vcpkg
+            Push-Location C:\vcpkg
+            git checkout $ref
+            Pop-Location
+          } else {
+            git clone --depth 1 --branch $ref $git C:\vcpkg
+          }
+          New-Item -ItemType Directory -Path $env:VCPKG_DOWNLOADS -Force | Out-Null
+          New-Item -ItemType Directory -Path $env:VCPKG_BINARY_CACHE -Force | Out-Null
           & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
           "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
 
       - name: Install libheif
+        if: steps.gate.outputs.build == 'true'
         shell: pwsh
         run: |
           $features = "${{ steps.ver.outputs.features }}"
-          # vcpkg feature syntax: libheif[core,aom,hevc]:triplet
           $pkg = "libheif[${features}]:$env:TRIPLET"
-          Write-Host "vcpkg install $pkg"
+          Write-Host "vcpkg install $pkg (VCPKG_BUILD_TYPE=$env:VCPKG_BUILD_TYPE, binary sources=$env:VCPKG_BINARY_SOURCES)"
           & C:\vcpkg\vcpkg.exe install $pkg --clean-after-build
           if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed: $LASTEXITCODE" }
-          Test-Path "C:\vcpkg\installed\$env:TRIPLET\lib\heif.lib" | ForEach-Object {
-            if (-not $_) { throw "heif.lib missing after install" }
+          if (-not (Test-Path "C:\vcpkg\installed\$env:TRIPLET\lib\heif.lib")) {
+            throw "heif.lib missing after install"
           }
 
       - name: Package release zip
+        id: pkg
+        if: steps.gate.outputs.build == 'true'
         shell: pwsh
         env:
           VCPKG_ROOT: C:\vcpkg
           TRIPLET: ${{ env.TRIPLET }}
           OUT_ZIP: ${{ github.workspace }}/dist/${{ steps.ver.outputs.asset }}
+          LIBHEIF_VERSION: ${{ steps.ver.outputs.libheif }}
+          INCLUDE_DEBUG: ${{ steps.ver.outputs.include_debug }}
         run: |
           New-Item -ItemType Directory -Path dist -Force | Out-Null
           .\scripts\package-vcpkg-libheif.ps1
 
       - name: Upload workflow artifact
+        if: steps.gate.outputs.build == 'true'
         uses: actions/upload-artifact@v4
         with:
           name: ${{ steps.ver.outputs.asset }}
-          path: dist/${{ steps.ver.outputs.asset }}
+          path: |
+            dist/${{ steps.ver.outputs.asset }}
+            dist/${{ steps.ver.outputs.asset }}.sha256
           if-no-files-found: error
 
       - name: Publish GitHub Release
-        if: startsWith(github.ref, 'refs/tags/libheif-v') || github.event_name == 'workflow_dispatch'
+        # Tags always publish. Dispatch/schedule always publish a -rN rebuild.
+        # Main push publishes the base tag once; on failure, stop (manual repack).
+        if: >
+          steps.gate.outputs.build == 'true' &&
+          (startsWith(github.ref, 'refs/tags/libheif-v') ||
+           ((github.event_name == 'workflow_dispatch' ||
+             github.event_name == 'schedule' ||
+             github.event_name == 'push') &&
+            steps.pkg.outputs.resolved_version == steps.ver.outputs.libheif))
         shell: pwsh
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT_NAME: ${{ github.event_name }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
         run: |
-          $ver = "${{ steps.ver.outputs.libheif }}"
+          $ErrorActionPreference = "Stop"
+          $ver = "${{ steps.pkg.outputs.resolved_version }}"
           $asset = "${{ steps.ver.outputs.asset }}"
           $path = "dist/$asset"
-          if ($env:GITHUB_REF -like "refs/tags/libheif-v*") {
-            $tag = $env:GITHUB_REF_NAME
+          $sum = "$path.sha256"
+          $sha = "${{ steps.pkg.outputs.sha256 }}"
+          $fromTagPush = $env:GITHUB_REF -like "refs/tags/libheif-v*"
+          $forceRebuild = $env:EVENT_NAME -in @("workflow_dispatch", "schedule")
+
+          if ($fromTagPush) {
+            $tagFile = Join-Path $env:RUNNER_TEMP "libheif-release-tag.txt"
+            & .\scripts\next-libheif-release-tag.ps1 `
+              -Mode exact -Version $ver -ExactTag $env:GITHUB_REF_NAME `
+              -HeadSha $env:GITHUB_SHA -OutFile $tagFile
+            if ($LASTEXITCODE -ne 0) { throw "next-libheif-release-tag.ps1 failed" }
+            $tag = (Get-Content -Raw $tagFile).Trim()
+          } elseif ($forceRebuild) {
+            $tagFile = Join-Path $env:RUNNER_TEMP "libheif-release-tag.txt"
+            & .\scripts\next-libheif-release-tag.ps1 `
+              -Mode rebuild -Version $ver -HeadSha $env:GITHUB_SHA -OutFile $tagFile
+            if ($LASTEXITCODE -ne 0) { throw "next-libheif-release-tag.ps1 failed" }
+            $tag = (Get-Content -Raw $tagFile).Trim()
           } else {
-            $tag = "libheif-v$ver"
+            # Main / sync: first publish only. No -rN fallback — dispatch for repacks.
+            $tagFile = Join-Path $env:RUNNER_TEMP "libheif-release-tag.txt"
+            & .\scripts\next-libheif-release-tag.ps1 `
+              -Mode first -Version $ver -HeadSha $env:GITHUB_SHA -OutFile $tagFile
+            if ($LASTEXITCODE -ne 0) { throw "next-libheif-release-tag.ps1 failed" }
+            $tag = (Get-Content -Raw $tagFile).Trim()
           }
-          $notes = @"
-          Prebuilt MSVC libheif $ver for Easel (`$env:TRIPLET`).
+          if (-not $tag) { throw "next-libheif-release-tag.ps1 returned empty tag" }
+          if ($tag -notmatch '^libheif-v') { throw "refusing to publish unexpected tag value: $tag" }
 
-          Features: ${{ steps.ver.outputs.features }}
-          vcpkg tag: ${{ steps.ver.outputs.vcpkg_tag }}
+          $triplet = $env:TRIPLET
+          $features = "${{ steps.ver.outputs.features }}"
+          $refKind = "${{ steps.ver.outputs.vcpkg_ref_kind }}"
+          $ref = "${{ steps.ver.outputs.vcpkg_ref }}"
+          $includeDebug = "${{ steps.ver.outputs.include_debug }}"
+          # Avoid PowerShell @"..."@ here-strings: a column-0 closing "@" ends the
+          # YAML block scalar, and lines like "- Features:" then parse as YAML.
+          $notes = @(
+            "Prebuilt MSVC libheif $ver for Easel ($triplet).",
+            "",
+            "* Features: $features",
+            "* vcpkg ${refKind}: ``$ref``",
+            "* SHA256: ``$sha``",
+            "* Debug libs: $includeDebug",
+            "",
+            "Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.",
+            "The zip root must contain ``.vcpkg-root`` and ``installed/``."
+          ) -join "`n"
 
-          Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.
-          "@
-          # Create or update the release, then upload (clobber) the asset.
-          $existing = gh release view $tag 2>$null
+          Write-Host "Creating release $tag"
+          # Discard gh stdout so callers never capture a URL mixed with exit codes.
+          gh release create $tag $path $sum --title $tag --notes $notes | Out-Null
           if ($LASTEXITCODE -ne 0) {
-            gh release create $tag $path --title $tag --notes $notes
-          } else {
-            gh release upload $tag $path --clobber
-            # Refresh notes on dispatch rebuilds.
-            gh release edit $tag --notes $notes
+            throw "gh release create $tag failed with exit $LASTEXITCODE (no retry — use workflow_dispatch for a -rN repack)"
           }
-          Write-Host "Published $tag / $asset"
+          Write-Host "Published $tag / $asset (sha256=$sha)"
+
+      # save-always is deprecated/broken; save explicitly so publish failures keep packs.
+      - name: Save vcpkg downloads + binary packs
+        if: >
+          always() &&
+          steps.gate.outputs.build == 'true' &&
+          steps.vcpkg-cache.outcome == 'success' &&
+          steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.VCPKG_DOWNLOADS }}
+            ${{ env.VCPKG_BINARY_CACHE }}
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}

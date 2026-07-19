@@ -2,3 +2,6 @@ dist/
 *.zip
 .vcpkg-root
 installed/
+__pycache__/
+*.pyc
+pr-body.md

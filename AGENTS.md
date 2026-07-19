@@ -20,6 +20,10 @@ Easel coordinates with two sibling repos under the same owner (referenced in
 
 - `github.com/fritz-fritz/easel-ci-visual` — CI visual galleries / GitHub Pages.
 - `github.com/fritz-fritz/easel-deps` — prebuilt Windows libheif for CI.
+  Scaffold: `tools/easel-deps/` (+ `tools/easel-deps.bundle`). Easel pins the
+  release in `.github/libheif-windows.lock.json`; Windows CI installs via
+  `.github/scripts/install-libheif-windows.ps1`. Scheduled sync:
+  easel-deps `sync-upstream.yml` ↔ Easel `sync-easel-deps.yml`.
 
 They are listed in `.cursor/environment.json` under `repositoryDependencies`, which is
 what scopes the Cloud Agent's generated GitHub token to include them so the agent can
