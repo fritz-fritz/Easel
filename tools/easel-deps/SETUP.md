@@ -57,3 +57,12 @@ Easel       sync-easel-deps.yml ──PR──► .github/libheif-windows.lock.j
         ▼
 Easel CI    install-libheif-windows.ps1 (checksum + version header)
 ```
+
+## Immutable releases and rebuild tags
+
+GitHub immutable releases permanently burn a tag name even after deletion.
+Corrected rebuilds therefore publish as `libheif-vX.Y.Z-rN` (e.g. `libheif-v1.23.1-r2`).
+
+Do **not** loop `gh release create` while capturing its stdout into a PowerShell
+variable — `gh` prints the release URL, so `$code = fn` becomes `@(url, 0)` and
+`if ($code -eq 0)` is falsy, which previously minted r3…r20 in one job.
