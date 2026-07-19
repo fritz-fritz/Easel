@@ -56,8 +56,8 @@ if ((Test-Path (Join-Path $Root ".vcpkg-root")) -and (Test-Path $Marker) -and ((
     Copy-Item -Recurse -Force (Join-Path $Staging "include\*") $Include
     Copy-Item -Force (Join-Path $Staging "lib\heif.lib") (Join-Path $Lib "heif.lib")
     Copy-Item -Force (Join-Path $Staging "lib\libde265.lib") (Join-Path $Lib "libde265.lib")
-    # vcpkg-rs / MSVC expect x265.lib; the prebuilt archive uses x265-static.lib.
-    Copy-Item -Force (Join-Path $Staging "lib\x265-static.lib") (Join-Path $Lib "x265.lib")
+    # Keep the archive's MSVC name; heif.lib / prior caches may reference x265-static.lib.
+    Copy-Item -Force (Join-Path $Staging "lib\x265-static.lib") (Join-Path $Lib "x265-static.lib")
 
     $Status = @"
 Package: libheif
@@ -76,7 +76,7 @@ Status: install ok installed
         "$Triplet/lib/",
         "$Triplet/lib/heif.lib",
         "$Triplet/lib/libde265.lib",
-        "$Triplet/lib/x265.lib"
+        "$Triplet/lib/x265-static.lib"
     )
     Get-ChildItem -Recurse -File $Include | ForEach-Object {
         $rel = $_.FullName.Substring($Installed.Length + 1).Replace("\", "/")
