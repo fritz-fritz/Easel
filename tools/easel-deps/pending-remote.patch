@@ -1,28 +1,81 @@
-From a3ae7596cb2034a434bce9e7df5917afb64e228e Mon Sep 17 00:00:00 2001
-From: Cursor Agent <cursoragent@cursor.com>
-Date: Sun, 19 Jul 2026 07:53:01 +0000
-Subject: [PATCH] fix(release): pin real libheif 1.23.1 and automate upstream
- sync
+From a1f4a5a4b818872488bd9f03d4978e29d370633b Mon Sep 17 00:00:00 2001
+From: FRITZ|FRITZ <fritz@fritztech.net>
+Date: Sun, 19 Jul 2026 03:53:49 -0400
+Subject: [PATCH 1/2] fix(release): pin real libheif 1.23.1 and automate
+ upstream sync (#4)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
 
-The first libheif-v1.23.1 asset was built from vcpkg 2026.05.25 (port
-1.21.2). Pin the vcpkg commit that ships 1.23.1, verify heif_version.h
-before publish, omit debug/, emit SHA256 sidecars, and add a scheduled
-upstream sync workflow.
+<!-- CURSOR_AGENT_PR_BODY_BEGIN -->
+## Summary
 
+The first `libheif-v1.23.1` release was built from vcpkg tag
+`2026.05.25`, so the zip contains **libheif 1.21.2** while the tag/asset
+name claimed 1.23.1.
+
+This PR fixes the release pipeline so republishing produces a real
+1.23.1 asset.
+
+## Changes
+
+- Pin `vcpkg.ref` to commit `33e5269bbfc24fb252bc48a3e624c8193afdccce`
+(first port with libheif **1.23.1**)
+- Package script verifies `heif_version.h` / vcpkg status against
+`versions.json` and fails on mismatch
+- Omit `debug/` from release zips (`include_debug: false`); emit
+`*.zip.sha256` sidecars
+- Cache key uses `features_key` (no commas) so `actions/cache` accepts
+it
+- Release notes heredoc fixed (closing `"@` at column 0; expand
+`$TRIPLET` correctly)
+- Add scheduled **Sync libheif upstream** workflow (opens PRs when
+strukturag/libheif + microsoft/vcpkg move ahead)
+
+## After merge
+
+1. Merge this PR (push to `main` triggers **Build libheif (Windows
+MSVC)**)
+2. Confirm release `libheif-v1.23.1` asset + `.sha256` report port
+**1.23.1**
+3. Easel’s `sync-easel-deps.yml` will open a pin PR once the sidecar
+exists (or run it via `workflow_dispatch`)
+
+Companion Easel PR: https://github.com/fritz-fritz/Easel/pull/23
+<!-- CURSOR_AGENT_PR_BODY_END -->
+
+<div><a
+href="https://cursor.com/agents/bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-web-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-web-light.png"><img
+alt="Open in Web" width="114" height="28"
+src="https://cursor.com/assets/images/open-in-web-dark.png"></picture></a>&nbsp;<a
+href="https://cursor.com/background-agent?bcId=bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-cursor-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-cursor-light.png"><img
+alt="Open in Cursor" width="131" height="28"
+src="https://cursor.com/assets/images/open-in-cursor-dark.png"></picture></a>&nbsp;</div>
+
+---------
+
+Co-authored-by: Cursor Agent <cursoragent@cursor.com>
 Co-authored-by: FRITZ|FRITZ <fritz-fritz@users.noreply.github.com>
 ---
- .github/workflows/build-libheif-windows.yml   | 101 ++++++---
- .github/workflows/sync-upstream.yml           |  51 +++++
- README.md                                     |  40 ++--
- SETUP.md                                      |  59 +++++
- .../__pycache__/sync-upstream.cpython-312.pyc | Bin 0 -> 9995 bytes
- scripts/package-vcpkg-libheif.ps1             |  96 ++++++++-
- scripts/sync-upstream.py                      | 201 ++++++++++++++++++
- versions.json                                 |   7 +-
- 8 files changed, 501 insertions(+), 54 deletions(-)
+ .github/workflows/build-libheif-windows.yml | 101 +++++++---
+ .github/workflows/sync-upstream.yml         |  51 +++++
+ .gitignore                                  |   3 +
+ README.md                                   |  40 ++--
+ SETUP.md                                    |  59 ++++++
+ scripts/package-vcpkg-libheif.ps1           |  96 +++++++++-
+ scripts/sync-upstream.py                    | 201 ++++++++++++++++++++
+ versions.json                               |   7 +-
+ 8 files changed, 504 insertions(+), 54 deletions(-)
  create mode 100644 .github/workflows/sync-upstream.yml
  create mode 100644 SETUP.md
- create mode 100644 scripts/__pycache__/sync-upstream.cpython-312.pyc
  create mode 100755 scripts/sync-upstream.py
 
 diff --git a/.github/workflows/build-libheif-windows.yml b/.github/workflows/build-libheif-windows.yml
@@ -274,6 +327,17 @@ index 0000000..5fa8299
 +              --body-file pr-body.md \
 +              --base main --head "$BRANCH"
 +          fi
+diff --git a/.gitignore b/.gitignore
+index cd1e16b..eb8f150 100644
+--- a/.gitignore
++++ b/.gitignore
+@@ -2,3 +2,6 @@ dist/
+ *.zip
+ .vcpkg-root
+ installed/
++__pycache__/
++*.pyc
++pr-body.md
 diff --git a/README.md b/README.md
 index 96dddfc..4ccfa5d 100644
 --- a/README.md
@@ -413,126 +477,6 @@ index 0000000..bd27aac
 +        ▼
 +Easel CI    install-libheif-windows.ps1 (checksum + version header)
 +```
-diff --git a/scripts/__pycache__/sync-upstream.cpython-312.pyc b/scripts/__pycache__/sync-upstream.cpython-312.pyc
-new file mode 100644
-index 0000000000000000000000000000000000000000..ce893e2fb7d72c65cea0fb473a17668eb8cc134f
-GIT binary patch
-literal 9995
-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
-
-literal 0
-HcmV?d00001
-
 diff --git a/scripts/package-vcpkg-libheif.ps1 b/scripts/package-vcpkg-libheif.ps1
 index 841f952..5cb70a6 100644
 --- a/scripts/package-vcpkg-libheif.ps1
@@ -906,6 +850,96 @@ index 8bfd27f..b9684ef 100644
 +    "include_debug": false
    }
  }
+-- 
+2.43.0
+
+
+From 2c7fa61bf9ca1019dc2530f8b29c0a57bcbd11a0 Mon Sep 17 00:00:00 2001
+From: FRITZ|FRITZ <fritz@fritztech.net>
+Date: Sun, 19 Jul 2026 03:55:39 -0400
+Subject: [PATCH 2/2] fix(ci): avoid YAML-breaking PowerShell here-string in
+ release notes (#5)
+
+<!-- CURSOR_AGENT_PR_BODY_BEGIN -->
+## Summary
+
+The merge of #4 never ran the Windows build: the workflow YAML failed to
+parse in **0s**.
+
+PowerShell `@"..."@` here-strings put content (and the closing `"@`) at
+column 0, which ends the `run: |` block scalar. Lines like `- Features:`
+were then parsed as YAML and the workflow aborted before any job
+started.
+
+## Fix
+
+Build release notes with an indented `@(...) -join "\`n"` array instead
+of a here-string, so the entire script stays inside the YAML block
+scalar.
+
+## After merge
+
+Push to `main` should trigger **Build libheif (Windows MSVC)** and
+republish `libheif-v1.23.1` with a real 1.23.1 port + `.sha256` sidecar.
+<!-- CURSOR_AGENT_PR_BODY_END -->
+
+<div><a
+href="https://cursor.com/agents/bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-web-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-web-light.png"><img
+alt="Open in Web" width="114" height="28"
+src="https://cursor.com/assets/images/open-in-web-dark.png"></picture></a>&nbsp;<a
+href="https://cursor.com/background-agent?bcId=bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-cursor-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-cursor-light.png"><img
+alt="Open in Cursor" width="131" height="28"
+src="https://cursor.com/assets/images/open-in-cursor-dark.png"></picture></a>&nbsp;</div>
+
+Co-authored-by: Cursor Agent <cursoragent@cursor.com>
+Co-authored-by: FRITZ|FRITZ <fritz-fritz@users.noreply.github.com>
+---
+ .github/workflows/build-libheif-windows.yml | 24 +++++++++++----------
+ 1 file changed, 13 insertions(+), 11 deletions(-)
+
+diff --git a/.github/workflows/build-libheif-windows.yml b/.github/workflows/build-libheif-windows.yml
+index 5e6fcd9..6b3e67b 100644
+--- a/.github/workflows/build-libheif-windows.yml
++++ b/.github/workflows/build-libheif-windows.yml
+@@ -153,17 +153,19 @@ jobs:
+           $refKind = "${{ steps.ver.outputs.vcpkg_ref_kind }}"
+           $ref = "${{ steps.ver.outputs.vcpkg_ref }}"
+           $includeDebug = "${{ steps.ver.outputs.include_debug }}"
+-          $notes = @"
+-Prebuilt MSVC libheif $ver for Easel ($triplet).
+-
+-- Features: $features
+-- vcpkg ${refKind}: ``$ref``
+-- SHA256: ``$sha``
+-- Debug libs: $includeDebug
+-
+-Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.
+-The zip root must contain ``.vcpkg-root`` and ``installed/``.
+-"@
++          # Avoid PowerShell @"..."@ here-strings: a column-0 closing "@" ends the
++          # YAML block scalar, and lines like "- Features:" then parse as YAML.
++          $notes = @(
++            "Prebuilt MSVC libheif $ver for Easel ($triplet).",
++            "",
++            "* Features: $features",
++            "* vcpkg ${refKind}: ``$ref``",
++            "* SHA256: ``$sha``",
++            "* Debug libs: $includeDebug",
++            "",
++            "Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.",
++            "The zip root must contain ``.vcpkg-root`` and ``installed/``."
++          ) -join "`n"
+           $existing = gh release view $tag 2>$null
+           if ($LASTEXITCODE -ne 0) {
+             gh release create $tag $path $sum --title $tag --notes $notes
 -- 
 2.43.0
 
