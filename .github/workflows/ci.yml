@@ -79,6 +79,8 @@ jobs:
       - uses: dtolnay/rust-toolchain@1.85
         with:
           components: rustfmt, clippy
+      # Restore target/ before Windows vcpkg so the cache cannot wipe the install.
+      - uses: Swatinem/rust-cache@v2
       - name: Install libheif (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -91,19 +93,28 @@ jobs:
       - name: Install libheif (macOS)
         if: runner.os == 'macOS'
         run: brew install libheif pkg-config
+      - name: Cache Windows vcpkg libheif
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          # Keep the tree outside target/ — rust-cache owns that directory.
+          path: ${{ runner.temp }}/easel-vcpkg
+          key: easel-vcpkg-libheif-${{ runner.os }}-${{ hashFiles('crates/easel-dynamic/Cargo.toml') }}
       - name: Install libheif (Windows via cargo-vcpkg)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
+          $vcpkg = Join-Path $env:RUNNER_TEMP "easel-vcpkg"
+          $env:VCPKG_ROOT = $vcpkg
+          "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "VCPKG_ROOT=$vcpkg"
           cargo install cargo-vcpkg
           # cargo-vcpkg cannot run against a virtual workspace manifest; point at
           # the package that declares [package.metadata.vcpkg].
           cargo vcpkg -v build --manifest-path crates/easel-dynamic/Cargo.toml
-          # libheif-sys / vcpkg-rs look up the tree via VCPKG_ROOT (or OUT_DIR walk).
-          $vcpkg = Join-Path $PWD "target\vcpkg"
-          "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
-          Write-Host "VCPKG_ROOT=$vcpkg"
-      - uses: Swatinem/rust-cache@v2
+          if (-not (Test-Path (Join-Path $vcpkg ".vcpkg-root"))) {
+            throw "vcpkg root missing after cargo vcpkg build: $vcpkg"
+          }
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check
@@ -196,15 +207,29 @@ jobs:
           cache: true
           install-deps: "true"
 
+      # Restore target/ before Windows vcpkg so the cache cannot wipe the install.
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Cache Windows vcpkg libheif
+        if: runner.os == 'Windows'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/easel-vcpkg
+          key: easel-vcpkg-libheif-${{ runner.os }}-${{ hashFiles('crates/easel-dynamic/Cargo.toml') }}
+
       - name: Install libheif (Windows via cargo-vcpkg)
         if: runner.os == 'Windows'
         shell: pwsh
         run: |
-          cargo install cargo-vcpkg
-          cargo vcpkg -v build --manifest-path crates/easel-dynamic/Cargo.toml
-          $vcpkg = Join-Path $PWD "target\vcpkg"
+          $vcpkg = Join-Path $env:RUNNER_TEMP "easel-vcpkg"
+          $env:VCPKG_ROOT = $vcpkg
           "VCPKG_ROOT=$vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           Write-Host "VCPKG_ROOT=$vcpkg"
+          cargo install cargo-vcpkg
+          cargo vcpkg -v build --manifest-path crates/easel-dynamic/Cargo.toml
+          if (-not (Test-Path (Join-Path $vcpkg ".vcpkg-root"))) {
+            throw "vcpkg root missing after cargo vcpkg build: $vcpkg"
+          }
 
       - name: Install Qt + libheif (macOS)
         if: runner.os == 'macOS'
@@ -213,8 +238,6 @@ jobs:
           echo "CMAKE_PREFIX_PATH=$(brew --prefix qt@6)" >> "$GITHUB_ENV"
           echo "QT_ROOT_DIR=$(brew --prefix qt@6)" >> "$GITHUB_ENV"
           echo "$(brew --prefix qt@6)/bin" >> "$GITHUB_PATH"
-
-      - uses: Swatinem/rust-cache@v2
 
       - name: Build desktop (Linux)
         if: runner.os == 'Linux'
