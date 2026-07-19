@@ -55,6 +55,32 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
 - Interactive: an XFCE desktop is available on `DISPLAY=:1`. Launch the full app with
   `DISPLAY=:1 QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc cargo run -p easel-desktop`.
   It enumerates the live X screen (the VNC display) rather than the smoke fixture layout.
+
+### Multi-display (3 monitors) on the live desktop
+
+- The live app enumerates `Qt.application.screens` (XRandR-backed), so the number of
+  displays it reports equals the number of RandR monitors on `DISPLAY=:1`. The VNC
+  framebuffer is a single output (`VNC-0`), i.e. **one** display by default.
+- To exercise multi-display handling like CI's `DP-1`/`DP-2`/`DP-3` fixture, run
+  `tools/dev/three-displays.sh` — it uses `xrandr --setmonitor` to split the framebuffer
+  into three staggered logical monitors (`DP-1`/`DP-2`/`DP-3`, CI-matching physical mm).
+  `tools/dev/three-displays.sh reset` restores the single monitor. The script is
+  idempotent and defensive, and is wired into `.cursor/environment.json` `start`, so fresh
+  Cloud VMs come up with three monitors already defined. If you launch the app *before*
+  splitting (or change the split while it is open), click **Refresh displays** to re-probe.
+  The split is a live X-server change and is not persisted across VNC restarts; re-run the
+  script (or rely on `start`) after a restart.
+- Actually *setting* the wallpaper on Linux is implemented **only** for KDE Plasma 6
+  (`crates/easel-platform/src/plasma.rs`, via `qdbus`/`org.kde.plasmashell`); there is no
+  XFCE/GNOME/generic-X backend. On the XFCE Cloud desktop `select_wallpaper_backend()`
+  returns `NoBackend`, so the Compose **Apply** button cannot push to the compositor here.
+  CI does not set real wallpaper either — it validates the per-display **apply-payload
+  rasters** that Easel would hand the compositor. Reproduce those (three `apply-display-*.png`
+  for the `DP-1/2/3` fixture) with:
+
+  ```
+  EASEL_VISUAL_OUTDIR=<outdir> cargo test -p easel-render write_apply_payload_visual_artifacts
+  ```
 - Headless automation CLI (shared store with the desktop app):
 
   ```
