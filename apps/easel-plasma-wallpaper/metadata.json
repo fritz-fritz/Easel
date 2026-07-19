@@ -1,0 +1,21 @@
+{
+    "KPackageStructure": "Plasma/Wallpaper",
+    "KPlugin": {
+        "Authors": [
+            {
+                "Name": "Easel",
+                "Email": "hello@fritztech.net"
+            }
+        ],
+        "Description": "Easel-managed wallpaper host (dynamic stills and live media)",
+        "Icon": "preferences-desktop-wallpaper",
+        "Id": "net.fritztech.easel.wallpaper",
+        "License": "MPL-2.0",
+        "Name": "Easel",
+        "Version": "0.1.0",
+        "Website": "https://github.com/fritz-fritz/Easel"
+    },
+    "X-KDE-ParentApp": "org.kde.plasmashell",
+    "X-Plasma-API": "declarativeappletscript",
+    "X-Plasma-MainScript": "ui/main.qml"
+}

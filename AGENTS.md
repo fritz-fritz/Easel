@@ -57,4 +57,6 @@ workspace. It has two distinct build scopes:
 
 - `easel-dynamic` (HEIC import/encode) needs `libheif-dev` at build time plus an encoder plugin
   (`libheif-plugin-x265` and/or `libheif-plugin-aomenc`). The Cloud VM image includes these;
-  on a clean host install `libheif-dev` and the encoder/decoder plugins.
+  on a clean host install `libheif-dev` and the encoder/decoder plugins. On Windows CI/MSVC,
+  run `.github/scripts/install-libheif-windows.ps1` (prebuilt static libs staged for
+  `libheif-sys`; upstream GitHub releases are source-only).

@@ -21,14 +21,9 @@ thiserror.workspace = true
 [dev-dependencies]
 tempfile = "3"
 
-# Merged by `cargo vcpkg` on Windows CI (see libheif-sys docs).
-[package.metadata.vcpkg]
-git = "https://github.com/microsoft/vcpkg"
-tag = "2026.05.25"
-dependencies = ["libheif[aom]"]
-
-[package.metadata.vcpkg.target.x86_64-pc-windows-msvc]
-triplet = "x64-windows-static-md"
+# Windows CI stages prebuilt MSVC libs via
+# `.github/scripts/install-libheif-windows.ps1` (strukturag releases are
+# source-only). Local Windows builds can use that script or cargo-vcpkg.
 
 [lints]
 workspace = true

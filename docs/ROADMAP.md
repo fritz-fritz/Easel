@@ -101,12 +101,14 @@ pre-render, Compose Import HEIC + timeline evaluation against the loaded set,
 packages for Appearance sets (KNightTime) and community zzag HEIC for dense solar when
 present (ADR 0007); otherwise the still poller. Windows remains still-poller-only.
 
-## Stage 6 — Live media
+## Stage 6 — Live media + Plasma plugin host
 
+- KDE Plasma `Plasma/Wallpaper` plugin (`apps/easel-plasma-wallpaper`, ADR 0008): OS-level
+  host for Easel-managed stills (including dense solar) and live media; desktop/CLI remain
+  the management UI. Wire `PlasmaBackend` to prefer the plugin when installed.
 - Local animated-image and video metadata, bounded poster extraction, and library thumbnails.
 - Qt Multimedia preview with explicit runtime codec diagnostics.
 - Shared playback clock and multi-display crop/transform compositor.
-- KDE Plasma QML wallpaper plugin and lifecycle integration.
 - Battery, full-screen application, lock, sleep/wake, and thermal pause policies.
 - Windows and macOS live-host feasibility spikes; enable only backends that meet stability gates.
 - Static poster fallback and crash recovery for every live session.

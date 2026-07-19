@@ -75,14 +75,18 @@ Apple HEIC remains the interchange import/export format. Plasma day/night packag
 OS-hosted without extras. Automation must still fall back to the still poller when the
 chosen native format is unavailable (dense solar without zzag).
 
+**Superseding direction (ADR 0008):** Easel will ship its own `Plasma/Wallpaper` plugin so
+dense solar, live media, and managed multi-display crops are OS-hosted without depending
+on zzag. Built-in day/night remains the preferred zero-daemon path for Appearance sets.
+
 ## Consequences
 
 - Appearance-keyed Mojave-style imports can be OS-hosted on stock Plasma Wayland.
-- Dense solar sets keep correct behavior via Easel's poller on stock Plasma; users who
-  install zzag get true native solar packages.
+- Dense solar sets keep correct behavior via Easel's poller on stock Plasma until the
+  Easel wallpaper plugin (ADR 0008) is wired; zzag remains an optional interim host.
 - Docs and Compose copy must not claim Apple-parity solar hosting on stock Plasma.
-- Future work: optional AVIF writer matching `kdynamicwallpaperbuilder` manifests; optional
-  reduction of dense solar → day/night for users who prefer built-in hosting only.
+- Future work: Easel plugin host (0008); optional AVIF writer; optional reduction of dense
+  solar → day/night for built-in-only users.
 
 ## References
 
@@ -93,3 +97,4 @@ chosen native format is unavailable (dense solar without zzag).
 - https://invent.kde.org/plasma/knighttime
 - https://github.com/zzag/plasma5-wallpapers-dynamic
 - `docs/adr/0006-apple-heic-dynamic-interchange.md`
+- `docs/adr/0008-plasma-wallpaper-plugin-host.md`
