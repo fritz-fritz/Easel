@@ -15,11 +15,11 @@ use easel_core::AppearanceMode;
 pub fn system_appearance() -> AppearanceMode {
     #[cfg(target_os = "macos")]
     {
-        return macos_appearance();
+        macos_appearance()
     }
     #[cfg(windows)]
     {
-        return windows_appearance();
+        windows_appearance()
     }
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
