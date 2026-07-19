@@ -1,7 +1,7 @@
 From a1f4a5a4b818872488bd9f03d4978e29d370633b Mon Sep 17 00:00:00 2001
 From: FRITZ|FRITZ <fritz@fritztech.net>
 Date: Sun, 19 Jul 2026 03:53:49 -0400
-Subject: [PATCH 1/5] fix(release): pin real libheif 1.23.1 and automate
+Subject: [PATCH 1/6] fix(release): pin real libheif 1.23.1 and automate
  upstream sync (#4)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -857,7 +857,7 @@ index 8bfd27f..b9684ef 100644
 From 2c7fa61bf9ca1019dc2530f8b29c0a57bcbd11a0 Mon Sep 17 00:00:00 2001
 From: FRITZ|FRITZ <fritz@fritztech.net>
 Date: Sun, 19 Jul 2026 03:55:39 -0400
-Subject: [PATCH 2/5] fix(ci): avoid YAML-breaking PowerShell here-string in
+Subject: [PATCH 2/6] fix(ci): avoid YAML-breaking PowerShell here-string in
  release notes (#5)
 
 <!-- CURSOR_AGENT_PR_BODY_BEGIN -->
@@ -947,7 +947,7 @@ index 5e6fcd9..6b3e67b 100644
 From cb0fe8e6cfbebf380782dd475613a574bdd4c8b9 Mon Sep 17 00:00:00 2001
 From: FRITZ|FRITZ <fritz@fritztech.net>
 Date: Sun, 19 Jul 2026 04:20:44 -0400
-Subject: [PATCH 3/5] fix(package): drop Debug CMake imports when omitting
+Subject: [PATCH 3/6] fix(package): drop Debug CMake imports when omitting
  debug/ (#6)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1034,7 +1034,7 @@ index 5cb70a6..2923d74 100644
 From 8abbd6a354beffd132ddc60b74f94d490bddded2 Mon Sep 17 00:00:00 2001
 From: FRITZ|FRITZ <fritz@fritztech.net>
 Date: Sun, 19 Jul 2026 04:52:12 -0400
-Subject: [PATCH 4/5] fix(ci): fall back to libheif-vX.Y.Z-rN when tag is
+Subject: [PATCH 4/6] fix(ci): fall back to libheif-vX.Y.Z-rN when tag is
  immutable-burned (#7)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
@@ -1142,24 +1142,71 @@ index 6b3e67b..aa1559c 100644
 2.43.0
 
 
-From 26bba0e0f48cd92a230eaf9c0bf0477a2ebf435d Mon Sep 17 00:00:00 2001
-From: Cursor Agent <cursoragent@cursor.com>
-Date: Sun, 19 Jul 2026 09:25:04 +0000
-Subject: [PATCH 5/5] fix(ci): stop minting spurious -rN releases on publish
+From cbff66f99fd8ecd6ac499c1007c2277ecdeaf004 Mon Sep 17 00:00:00 2001
+From: FRITZ|FRITZ <fritz@fritztech.net>
+Date: Sun, 19 Jul 2026 05:25:23 -0400
+Subject: [PATCH 5/6] fix(ci): stop minting spurious -rN releases on publish
+ (#8)
 MIME-Version: 1.0
 Content-Type: text/plain; charset=UTF-8
 Content-Transfer-Encoding: 8bit
 
-gh release create prints the release URL to stdout. Assigning
-`$code = Publish-Release` captured that URL plus exit 0; PowerShell's
-`if ($code -eq 0)` then filtered to 0 (falsy), so the fallback loop
-kept creating libheif-v1.23.1-r3…r20 until it gave up.
+<!-- CURSOR_AGENT_PR_BODY_BEGIN -->
+## Summary
 
-- Discard gh stdout; throw on non-zero exit
-- Create at most one rebuild tag via Get-NextRebuildTag
-- Skip publish on main when a release for this version already exists
-- workflow_dispatch/schedule still force a single new -rN
+Merging #7 triggered a rebuild that minted **libheif-v1.23.1-r3 through
+r20** in one publish step, then failed.
 
+### Bug
+
+`gh release create` prints the release URL to stdout. The fallback
+helper did:
+
+```powershell
+$code = Publish-Release $candidate   # captured @(url, 0)
+if ($code -eq 0) { break }           # array -eq filters to 0 → falsy → keep looping
+```
+
+So each “failed” attempt actually **succeeded** at creating an immutable
+release, then the loop continued.
+
+### Cleanup (already done)
+
+Deleted releases/tags `libheif-v1.23.1-r3` … `r20`. Kept canonical
+`libheif-v1.23.1-r2` (what Easel pins).
+
+### Fix
+
+- Discard `gh` stdout; throw on non-zero exit (no mixed URL/exit-code
+assignment)
+- At most **one** rebuild tag via `Get-NextRebuildTag`
+- Push to `main`: skip publish if any release for this version already
+exists
+- `workflow_dispatch` / `schedule`: force exactly one new `-rN`
+- Tag pushes: publish that exact tag only (fail clearly if it already
+exists)
+
+No new release is expected from merging this PR (main push will skip
+publish).
+<!-- CURSOR_AGENT_PR_BODY_END -->
+
+<div><a
+href="https://cursor.com/agents/bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-web-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-web-light.png"><img
+alt="Open in Web" width="114" height="28"
+src="https://cursor.com/assets/images/open-in-web-dark.png"></picture></a>&nbsp;<a
+href="https://cursor.com/background-agent?bcId=bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-cursor-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-cursor-light.png"><img
+alt="Open in Cursor" width="131" height="28"
+src="https://cursor.com/assets/images/open-in-cursor-dark.png"></picture></a>&nbsp;</div>
+
+Co-authored-by: Cursor Agent <cursoragent@cursor.com>
 Co-authored-by: FRITZ|FRITZ <fritz-fritz@users.noreply.github.com>
 ---
  .github/workflows/build-libheif-windows.yml | 108 +++++++++++++++-----
@@ -1334,6 +1381,330 @@ index bd27aac..8fcec5d 100644
 +Do **not** loop `gh release create` while capturing its stdout into a PowerShell
 +variable — `gh` prints the release URL, so `$code = fn` becomes `@(url, 0)` and
 +`if ($code -eq 0)` is falsy, which previously minted r3…r20 in one job.
+-- 
+2.43.0
+
+
+From 2195774ca424b67c06f95d3641ede2d56e5f1fcb Mon Sep 17 00:00:00 2001
+From: FRITZ|FRITZ <fritz@fritztech.net>
+Date: Sun, 19 Jul 2026 05:46:48 -0400
+Subject: [PATCH 6/6] perf(ci): skip needless rebuilds; release-only + vcpkg
+ x-gha cache (#9)
+MIME-Version: 1.0
+Content-Type: text/plain; charset=UTF-8
+Content-Transfer-Encoding: 8bit
+
+<!-- CURSOR_AGENT_PR_BODY_BEGIN -->
+## Summary
+
+Cold Windows builds were ~15–18 minutes (mostly aom + x265), and **main
+pushes still did a full compile** even when publish was skipped.
+
+Easel’s approach (download a prebuilt zip in CI) is already the right
+architecture — this speeds up **easel-deps** rebuilds only.
+
+## Changes
+
+1. **Early gate** — main pushes exit in seconds when a release for that
+libheif version already exists (`workflow_dispatch` / schedule / tags
+still build).
+2. **`VCPKG_BUILD_TYPE=release`** — skip debug compiles (~half of
+aom/x265 time); the zip already omits `debug/`.
+3. **vcpkg `x-gha` binary cache** — restore packed packages on
+subsequent builds instead of recompiling.
+4. **Download cache** — `VCPKG_DOWNLOADS` lives outside `C:\vcpkg` so
+bootstrap can refresh the git checkout without wiping source tarballs.
+
+## Expected
+
+| Scenario | Before | After |
+| --- | --- | --- |
+| Main push, release exists | ~15–18 min compile, then skip publish |
+~30s gate exit |
+| Cold rebuild (dispatch) | ~15–18 min (dbg+rel) | ~8–12 min
+(release-only) |
+| Warm rebuild (binary cache hit) | ~15 min recompile | ~1–3 min restore
++ package |
+
+## Note on alternatives
+
+Compiling libheif inside Easel PR CI is what we avoided on purpose.
+NuGet/Chocolatey/third-party zips trade away CRT/codec control. Keeping
+an owned release zip + making *this* pipeline cheaper is the right
+split.
+
+<!-- CURSOR_AGENT_PR_BODY_END -->
+
+<div><a
+href="https://cursor.com/agents/bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-web-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-web-light.png"><img
+alt="Open in Web" width="114" height="28"
+src="https://cursor.com/assets/images/open-in-web-dark.png"></picture></a>&nbsp;<a
+href="https://cursor.com/background-agent?bcId=bc-c0688f23-4aa4-4a0e-80d3-36db0d8f88eb"><picture><source
+media="(prefers-color-scheme: dark)"
+srcset="https://cursor.com/assets/images/open-in-cursor-dark.png"><source
+media="(prefers-color-scheme: light)"
+srcset="https://cursor.com/assets/images/open-in-cursor-light.png"><img
+alt="Open in Cursor" width="131" height="28"
+src="https://cursor.com/assets/images/open-in-cursor-dark.png"></picture></a>&nbsp;</div>
+
+---------
+
+Co-authored-by: Cursor Agent <cursoragent@cursor.com>
+Co-authored-by: FRITZ|FRITZ <fritz-fritz@users.noreply.github.com>
+---
+ .github/workflows/build-libheif-windows.yml | 99 ++++++++++++++++-----
+ README.md                                   | 13 ++-
+ SETUP.md                                    | 13 +++
+ 3 files changed, 103 insertions(+), 22 deletions(-)
+
+diff --git a/.github/workflows/build-libheif-windows.yml b/.github/workflows/build-libheif-windows.yml
+index 06ccba4..41ac3e6 100644
+--- a/.github/workflows/build-libheif-windows.yml
++++ b/.github/workflows/build-libheif-windows.yml
+@@ -7,6 +7,7 @@ on:
+     - cron: "17 6 * * 1"
+   push:
+     # Do not combine tags with paths filters: a tag-only push would be skipped.
++    # Main pushes that would not publish exit in the gate step (~seconds).
+     branches: [main]
+     tags:
+       - "libheif-v*"
+@@ -16,6 +17,15 @@ permissions:
+ 
+ env:
+   TRIPLET: x64-windows-static-md
++  # Skip debug builds (~half of aom/x265 compile time). Release zip already
++  # omits debug/; Easel CI only links release libs.
++  VCPKG_BUILD_TYPE: release
++  # Binary cache in GitHub Actions cache — second+ builds restore packed
++  # packages instead of recompiling aom/x265/libheif.
++  VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
++  # Keep source tarballs outside the vcpkg git tree so bootstrap can refresh
++  # the checkout without wiping the download cache.
++  VCPKG_DOWNLOADS: ${{ runner.temp }}/vcpkg-downloads
+ 
+ jobs:
+   build:
+@@ -59,22 +69,72 @@ jobs:
+           "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+           Write-Host "libheif=$libheif vcpkg=$refKind/$ref features=$features asset=$asset"
+ 
+-      - name: Cache vcpkg downloads and buildtrees
++      - name: Decide whether a full build is needed
++        id: gate
++        shell: pwsh
++        env:
++          GH_TOKEN: ${{ github.token }}
++          EVENT_NAME: ${{ github.event_name }}
++        run: |
++          $ver = "${{ steps.ver.outputs.libheif }}"
++          $base = "libheif-v$ver"
++          $fromTagPush = $env:GITHUB_REF -like "refs/tags/libheif-v*"
++          $forceRebuild = $env:EVENT_NAME -in @("workflow_dispatch", "schedule")
++
++          function Test-AnyVersionRelease([string]$BaseTag) {
++            gh release view $BaseTag 2>$null | Out-Null
++            if ($LASTEXITCODE -eq 0) { return $true }
++            $json = gh release list --limit 100 --json tagName | ConvertFrom-Json
++            foreach ($r in $json) {
++              if ($r.tagName -eq $BaseTag -or $r.tagName -match "^$([regex]::Escape($BaseTag))-r\d+$") {
++                return $true
++              }
++            }
++            return $false
++          }
++
++          $build = $true
++          $reason = "build required"
++          if ($fromTagPush -or $forceRebuild) {
++            $reason = "tag/dispatch/schedule always builds"
++          } elseif (Test-AnyVersionRelease $base) {
++            $build = $false
++            $reason = "main push and $base already has a release — skip compile (use workflow_dispatch to rebuild)"
++          } else {
++            $reason = "main push and no release for $base yet"
++          }
++
++          "build=$($build.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
++          Write-Host "gate: build=$build ($reason)"
++
++      - name: Export GitHub Actions cache credentials for vcpkg
++        if: steps.gate.outputs.build == 'true'
++        uses: actions/github-script@v7
++        with:
++          script: |
++            core.exportVariable('ACTIONS_CACHE_URL', process.env.ACTIONS_CACHE_URL || '');
++            core.exportVariable('ACTIONS_RUNTIME_TOKEN', process.env.ACTIONS_RUNTIME_TOKEN || '');
++
++      - name: Cache vcpkg source downloads
++        if: steps.gate.outputs.build == 'true'
+         uses: actions/cache@v4
+         with:
+-          path: |
+-            C:/vcpkg/downloads
+-            C:/vcpkg/buildtrees
+-            C:/vcpkg/packages
+-          key: vcpkg-${{ env.TRIPLET }}-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features_key }}
++          path: ${{ env.VCPKG_DOWNLOADS }}
++          key: vcpkg-downloads-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features_key }}
++          restore-keys: |
++            vcpkg-downloads-${{ steps.ver.outputs.vcpkg_ref }}-
++            vcpkg-downloads-
+ 
+       - name: Bootstrap vcpkg
++        if: steps.gate.outputs.build == 'true'
+         shell: pwsh
+         run: |
+           $ref = "${{ steps.ver.outputs.vcpkg_ref }}"
+           $kind = "${{ steps.ver.outputs.vcpkg_ref_kind }}"
+           $git = "https://github.com/microsoft/vcpkg"
+-          if (Test-Path C:\vcpkg\.vcpkg-root) {
++          # Fresh shallow checkout each run; binary cache (x-gha) holds build
++          # products, downloads live under VCPKG_DOWNLOADS (cached separately).
++          if (Test-Path C:\vcpkg) {
+             Remove-Item -Recurse -Force C:\vcpkg
+           }
+           if ($kind -eq "commit") {
+@@ -85,15 +145,17 @@ jobs:
+           } else {
+             git clone --depth 1 --branch $ref $git C:\vcpkg
+           }
++          New-Item -ItemType Directory -Path $env:VCPKG_DOWNLOADS -Force | Out-Null
+           & C:\vcpkg\bootstrap-vcpkg.bat -disableMetrics
+           "VCPKG_ROOT=C:\vcpkg" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+ 
+       - name: Install libheif
++        if: steps.gate.outputs.build == 'true'
+         shell: pwsh
+         run: |
+           $features = "${{ steps.ver.outputs.features }}"
+           $pkg = "libheif[${features}]:$env:TRIPLET"
+-          Write-Host "vcpkg install $pkg"
++          Write-Host "vcpkg install $pkg (VCPKG_BUILD_TYPE=$env:VCPKG_BUILD_TYPE, binary sources=$env:VCPKG_BINARY_SOURCES)"
+           & C:\vcpkg\vcpkg.exe install $pkg --clean-after-build
+           if ($LASTEXITCODE -ne 0) { throw "vcpkg install failed: $LASTEXITCODE" }
+           if (-not (Test-Path "C:\vcpkg\installed\$env:TRIPLET\lib\heif.lib")) {
+@@ -102,6 +164,7 @@ jobs:
+ 
+       - name: Package release zip
+         id: pkg
++        if: steps.gate.outputs.build == 'true'
+         shell: pwsh
+         env:
+           VCPKG_ROOT: C:\vcpkg
+@@ -114,6 +177,7 @@ jobs:
+           .\scripts\package-vcpkg-libheif.ps1
+ 
+       - name: Upload workflow artifact
++        if: steps.gate.outputs.build == 'true'
+         uses: actions/upload-artifact@v4
+         with:
+           name: ${{ steps.ver.outputs.asset }}
+@@ -124,14 +188,14 @@ jobs:
+ 
+       - name: Publish GitHub Release
+         # Tags always publish. Dispatch/schedule always publish a (re)build tag.
+-        # Push to main publishes only when no release exists yet for this version,
+-        # so routine merges do not mint spurious -rN tags.
++        # Push to main publishes only when no release exists yet for this version.
+         if: >
+-          startsWith(github.ref, 'refs/tags/libheif-v') ||
+-          ((github.event_name == 'workflow_dispatch' ||
+-            github.event_name == 'schedule' ||
+-            github.event_name == 'push') &&
+-           steps.pkg.outputs.resolved_version == steps.ver.outputs.libheif)
++          steps.gate.outputs.build == 'true' &&
++          (startsWith(github.ref, 'refs/tags/libheif-v') ||
++           ((github.event_name == 'workflow_dispatch' ||
++             github.event_name == 'schedule' ||
++             github.event_name == 'push') &&
++            steps.pkg.outputs.resolved_version == steps.ver.outputs.libheif))
+         shell: pwsh
+         env:
+           GH_TOKEN: ${{ github.token }}
+@@ -195,8 +259,6 @@ jobs:
+           function New-Release([string]$ReleaseTag) {
+             Write-Host "Creating release $ReleaseTag"
+             # Discard gh stdout so callers never capture a URL mixed with exit codes.
+-            # (Assigning `$code = fn` previously captured create's URL + 0; `if ($code -eq 0)`
+-            # then filtered to 0 which is falsy, so the loop kept minting -rN tags.)
+             gh release create $ReleaseTag $path $sum --title $ReleaseTag --notes $notes | Out-Null
+             if ($LASTEXITCODE -ne 0) {
+               throw "gh release create $ReleaseTag failed with exit $LASTEXITCODE"
+@@ -225,7 +287,6 @@ jobs:
+             } else {
+               $tag = $base
+             }
+-            # Base may be immutable-burned with no visible release; fall back once.
+             try {
+               New-Release $tag
+             } catch {
+@@ -238,7 +299,6 @@ jobs:
+               }
+             }
+           } else {
+-            # Push to main: publish only the first release for this version.
+             if (Test-AnyVersionRelease $base) {
+               Write-Host "Skipping publish: a release for $base already exists. Use workflow_dispatch or a libheif-v* tag to mint a rebuild."
+               return
+@@ -252,4 +312,3 @@ jobs:
+             }
+           }
+           Write-Host "Published $tag / $asset (sha256=$sha)"
+-
+diff --git a/README.md b/README.md
+index 4ccfa5d..27461ea 100644
+--- a/README.md
++++ b/README.md
+@@ -46,12 +46,21 @@ contain 1.21.2 when `vcpkg.tag` was `2026.05.25`).
+ | Workflow | Trigger | Purpose |
+ | --- | --- | --- |
+ | **Sync libheif upstream** | daily schedule + dispatch | When strukturag/libheif + microsoft/vcpkg both have a newer port, open a PR bumping `versions.json` |
+-| **Build libheif (Windows MSVC)** | `versions.json` merge / tag / weekly schedule / dispatch | Build, verify version, publish `libheif-vX.Y.Z` + SHA256 |
++| **Build libheif (Windows MSVC)** | tag / weekly schedule / dispatch / first main publish | Build, verify version, publish `libheif-vX.Y.Z` (+ optional `-rN`) + SHA256 |
++
++Build-time controls (so routine merges stay cheap):
++
++- Main pushes **skip the compile** when a release for that libheif version already exists (~seconds).
++- `VCPKG_BUILD_TYPE=release` — do not compile debug variants (Easel only links release).
++- vcpkg **GitHub Actions binary cache** (`x-gha`) — restore packed aom/x265/libheif instead of rebuilding.
++- Source tarballs cached under `VCPKG_DOWNLOADS` (outside the wiped vcpkg git checkout).
++
++Force a rebuild/publish: Actions → **Build libheif (Windows MSVC)** → Run workflow, or push a `libheif-v*` tag.
+ 
+ Manual bump:
+ 
+ 1. Edit `versions.json` (or merge a sync PR).
+-2. Push to `main` (or tag `libheif-vX.Y.Z`).
++2. Push to `main` (first release for that version) or `workflow_dispatch` / tag `libheif-vX.Y.Z`.
+ 3. Confirm the release asset + `.sha256` match the packaged port version.
+ 
+ ## Local use (Easel)
+diff --git a/SETUP.md b/SETUP.md
+index 8fcec5d..9557cb9 100644
+--- a/SETUP.md
++++ b/SETUP.md
+@@ -66,3 +66,16 @@ Corrected rebuilds therefore publish as `libheif-vX.Y.Z-rN` (e.g. `libheif-v1.23
+ Do **not** loop `gh release create` while capturing its stdout into a PowerShell
+ variable — `gh` prints the release URL, so `$code = fn` becomes `@(url, 0)` and
+ `if ($code -eq 0)` is falsy, which previously minted r3…r20 in one job.
++
++## Build performance
++
++Cold MSVC builds of aom+x265+libheif take on the order of 10–20 minutes. Mitigations:
++
++1. **Early gate** — main pushes exit in seconds when a release for that version exists.
++2. **`VCPKG_BUILD_TYPE=release`** — skip debug compiles (~2× on aom/x265).
++3. **`x-gha` binary cache** — restore packed packages on subsequent builds.
++4. **Download cache** — `VCPKG_DOWNLOADS` lives outside `C:\vcpkg` so bootstrap can
++   refresh the git checkout without wiping source tarballs.
++
++Easel Windows CI should stay on the download-zip path; do not compile libheif in
++application PR jobs.
 -- 
 2.43.0
 

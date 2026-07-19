@@ -46,12 +46,21 @@ contain 1.21.2 when `vcpkg.tag` was `2026.05.25`).
 | Workflow | Trigger | Purpose |
 | --- | --- | --- |
 | **Sync libheif upstream** | daily schedule + dispatch | When strukturag/libheif + microsoft/vcpkg both have a newer port, open a PR bumping `versions.json` |
-| **Build libheif (Windows MSVC)** | `versions.json` merge / tag / weekly schedule / dispatch | Build, verify version, publish `libheif-vX.Y.Z` + SHA256 |
+| **Build libheif (Windows MSVC)** | tag / weekly schedule / dispatch / first main publish | Build, verify version, publish `libheif-vX.Y.Z` (+ optional `-rN`) + SHA256 |
+
+Build-time controls (so routine merges stay cheap):
+
+- Main pushes **skip the compile** when a release for that libheif version already exists (~seconds).
+- `VCPKG_BUILD_TYPE=release` — do not compile debug variants (Easel only links release).
+- vcpkg **GitHub Actions binary cache** (`x-gha`) — restore packed aom/x265/libheif instead of rebuilding.
+- Source tarballs cached under `VCPKG_DOWNLOADS` (outside the wiped vcpkg git checkout).
+
+Force a rebuild/publish: Actions → **Build libheif (Windows MSVC)** → Run workflow, or push a `libheif-v*` tag.
 
 Manual bump:
 
 1. Edit `versions.json` (or merge a sync PR).
-2. Push to `main` (or tag `libheif-vX.Y.Z`).
+2. Push to `main` (first release for that version) or `workflow_dispatch` / tag `libheif-vX.Y.Z`.
 3. Confirm the release asset + `.sha256` match the packaged port version.
 
 ## Local use (Easel)
