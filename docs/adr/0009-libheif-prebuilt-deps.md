@@ -1,6 +1,6 @@
 # ADR 0009: Own a libheif prebuild repo for Windows (and optional macOS) CI
 
-- Status: proposed
+- Status: accepted
 - Date: 2026-07-19
 
 ## Context
@@ -24,7 +24,11 @@ official Windows binary asset to pin.
 
 ## Decision
 
-Create a small sibling repo (working name: `easel-deps` or `libheif-msvc`) that:
+Use sibling repo [`fritz-fritz/easel-deps`](https://github.com/fritz-fritz/easel-deps) that:
+
+Canonical scaffold (until agents have push access to that repo) lives in
+`tools/easel-deps/` with a git bundle at `tools/easel-deps.bundle` — see
+`tools/easel-deps/SETUP.md`.
 
 1. On tag / schedule / workflow_dispatch, builds **MSVC** `x64-windows-static-md`
    libheif with the codecs Easel needs (`libde265`, `x265`, `aom`).

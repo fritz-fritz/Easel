@@ -1,0 +1,11 @@
+Mozilla Public License Version 2.0
+==================================
+
+This repository's build scripts, workflows, and documentation are licensed
+under the Mozilla Public License, v. 2.0. You may obtain a copy at
+https://mozilla.org/MPL/2.0/.
+
+Bundled third-party libraries in release artifacts (libheif, libde265, x265,
+libaom, and their dependencies) retain their upstream licenses (typically
+LGPL/GPL/BSD/MIT as declared by each project and by vcpkg). Consult the
+`share/*/copyright` files inside each release zip.
