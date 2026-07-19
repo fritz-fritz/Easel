@@ -1,0 +1,7 @@
+{
+  "install": "cargo fetch",
+  "repositoryDependencies": [
+    "github.com/fritz-fritz/easel-ci-visual",
+    "github.com/fritz-fritz/easel-deps"
+  ]
+}
