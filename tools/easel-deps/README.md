@@ -52,8 +52,8 @@ Build-time controls (so routine merges stay cheap):
 
 - Main pushes **skip the compile** when a release for that libheif version already exists (~seconds).
 - `VCPKG_BUILD_TYPE=release` — do not compile debug variants (Easel only links release).
-- vcpkg **`files` binary cache** under `C:/vcpkg-binary-cache`, restored/saved with `actions/cache` (the old `x-gha` backend was removed from vcpkg).
-- Source tarballs under `VCPKG_DOWNLOADS`, same cache entry (`save-always` so publish failures still keep the cache).
+- vcpkg **`files` binary cache** under `C:/vcpkg-binary-cache`, restored with `actions/cache/restore` and saved with `actions/cache/save` + `if: always()` (so publish failures still keep the cache; `save-always` is deprecated/broken).
+- Source tarballs under `VCPKG_DOWNLOADS`, same cache entry.
 
 Publishing rules:
 

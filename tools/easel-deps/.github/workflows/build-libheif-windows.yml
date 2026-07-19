@@ -107,9 +107,10 @@ jobs:
           "build=$($build.ToString().ToLower())" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "gate: build=$build ($reason)"
 
-      - name: Cache vcpkg downloads + binary packs
+      - name: Restore vcpkg downloads + binary packs
+        id: vcpkg-cache
         if: steps.gate.outputs.build == 'true'
-        uses: actions/cache@v4
+        uses: actions/cache/restore@v4
         with:
           path: |
             ${{ env.VCPKG_DOWNLOADS }}
@@ -118,8 +119,6 @@ jobs:
           restore-keys: |
             vcpkg-${{ env.TRIPLET }}-rel-${{ steps.ver.outputs.vcpkg_ref }}-
             vcpkg-${{ env.TRIPLET }}-rel-
-          # Keep caches even if publish fails (immutable-burned tags, etc.).
-          save-always: true
 
       - name: Bootstrap vcpkg
         if: steps.gate.outputs.build == 'true'
@@ -211,14 +210,16 @@ jobs:
           if ($fromTagPush) {
             $tag = & .\scripts\next-libheif-release-tag.ps1 `
               -Mode exact -Version $ver -ExactTag $env:GITHUB_REF_NAME `
-              -HeadSha $env:GITHUB_SHA
+              -HeadSha $env:GITHUB_SHA | Select-Object -Last 1
           } elseif ($forceRebuild) {
             $tag = & .\scripts\next-libheif-release-tag.ps1 `
-              -Mode rebuild -Version $ver -HeadSha $env:GITHUB_SHA
+              -Mode rebuild -Version $ver -HeadSha $env:GITHUB_SHA |
+              Select-Object -Last 1
           } else {
             # Main / sync: first publish only. No -rN fallback — dispatch for repacks.
             $tag = & .\scripts\next-libheif-release-tag.ps1 `
-              -Mode first -Version $ver -HeadSha $env:GITHUB_SHA
+              -Mode first -Version $ver -HeadSha $env:GITHUB_SHA |
+              Select-Object -Last 1
           }
           if (-not $tag) { throw "next-libheif-release-tag.ps1 returned empty tag" }
           $tag = ([string]$tag).Trim()
@@ -249,3 +250,17 @@ jobs:
             throw "gh release create $tag failed with exit $LASTEXITCODE (no retry — use workflow_dispatch for a -rN repack)"
           }
           Write-Host "Published $tag / $asset (sha256=$sha)"
+
+      # save-always is deprecated/broken; save explicitly so publish failures keep packs.
+      - name: Save vcpkg downloads + binary packs
+        if: >
+          always() &&
+          steps.gate.outputs.build == 'true' &&
+          steps.vcpkg-cache.outcome == 'success' &&
+          steps.vcpkg-cache.outputs.cache-hit != 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: |
+            ${{ env.VCPKG_DOWNLOADS }}
+            ${{ env.VCPKG_BINARY_CACHE }}
+          key: ${{ steps.vcpkg-cache.outputs.cache-primary-key }}

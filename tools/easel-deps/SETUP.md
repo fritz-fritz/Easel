@@ -81,9 +81,10 @@ Cold MSVC builds of aom+x265+libheif take on the order of 10–20 minutes. Mitig
 
 1. **Early gate** — main pushes exit in seconds when a release for that version exists.
 2. **`VCPKG_BUILD_TYPE=release`** — skip debug compiles (~2× on aom/x265).
-3. **`files` binary cache** + `actions/cache` on `C:/vcpkg-binary-cache` (ABI packs).
-4. **Download cache** — `VCPKG_DOWNLOADS` at `C:/vcpkg-downloads`, same cache entry with
-   `save-always: true` so a publish failure still keeps downloads/packs for next run.
+3. **`files` binary cache** + `actions/cache/restore` + `actions/cache/save` (`if: always()`)
+   on `C:/vcpkg-binary-cache` (ABI packs). Do not use deprecated `save-always`.
+4. **Download cache** — `VCPKG_DOWNLOADS` at `C:/vcpkg-downloads`, same cache entry so a
+   publish failure still keeps downloads/packs for the next run.
 
 Easel Windows CI should stay on the download-zip path; do not compile libheif in
 application PR jobs.

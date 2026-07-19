@@ -75,7 +75,8 @@ function Test-TagCreatable([string]$Tag, [string]$Sha) {
         -f ref="refs/tags/$Tag" `
         -f sha=$Sha 2>&1
     if ($LASTEXITCODE -ne 0) {
-        Write-Host "tag probe $Tag: burned or blocked ($createOut)"
+        # Use ${Tag} — "$Tag:" is a PowerShell parse error.
+        Write-Host "tag probe ${Tag}: burned or blocked ($createOut)"
         return $false
     }
 
