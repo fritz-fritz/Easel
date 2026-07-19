@@ -23,13 +23,13 @@ env:
   # Binary cache in GitHub Actions cache — second+ builds restore packed
   # packages instead of recompiling aom/x265/libheif.
   VCPKG_BINARY_SOURCES: "clear;x-gha,readwrite"
-  # Keep source tarballs outside the vcpkg git tree so bootstrap can refresh
-  # the checkout without wiping the download cache.
-  VCPKG_DOWNLOADS: ${{ runner.temp }}/vcpkg-downloads
 
 jobs:
   build:
     runs-on: windows-latest
+    env:
+      # runner.* is only valid at job/step scope (not workflow-level env).
+      VCPKG_DOWNLOADS: ${{ runner.temp }}/vcpkg-downloads
     steps:
       - uses: actions/checkout@v4
 
