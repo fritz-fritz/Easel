@@ -82,7 +82,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -140,7 +140,7 @@ jobs:
         with:
           # Need enough history to diff PR/push commits for selective smoke views.
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: dtolnay/rust-toolchain@1.88
         with:
           components: clippy
 

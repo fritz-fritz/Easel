@@ -2,7 +2,7 @@
 
 ## Cursor Cloud specific instructions
 
-Easel is a Rust (edition 2024, pinned to toolchain `1.85` via `rust-toolchain.toml`)
+Easel is a Rust (edition 2024, pinned to toolchain `1.88` via `rust-toolchain.toml`)
 workspace. It has two distinct build scopes:
 
 - Default-member crates (`crates/easel-*`) are pure Rust and need no system libraries.
