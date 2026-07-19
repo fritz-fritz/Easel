@@ -13,7 +13,7 @@ use std::thread;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use easel_core::{FitMode, LayoutMode, Profile};
+use easel_core::{AssetId, AssetLocation, DynamicStillSet, FitMode, LayoutMode, Profile};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
@@ -44,6 +44,8 @@ mod qobject {
         #[qproperty(bool, apply_busy)]
         #[qproperty(i32, schedule_index)]
         #[qproperty(QString, profile_name)]
+        #[qproperty(i32, media_mode_index)]
+        #[qproperty(QString, timeline_preview)]
         type ComposeController = super::ComposeControllerRust;
 
         #[qinvokable]
@@ -61,6 +63,14 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "save_profile"]
         fn saveProfile(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[rust_name = "preview_timeline_hour"]
+        fn previewTimelineHour(self: Pin<&mut Self>, hour: f64);
+
+        #[qinvokable]
+        #[rust_name = "import_dynamic_heic_from_url"]
+        fn importDynamicHeicFromUrl(self: Pin<&mut Self>, url: QString);
     }
 
     impl cxx_qt::Threading for ComposeController {}
@@ -80,6 +90,10 @@ pub struct ComposeControllerRust {
     apply_busy: bool,
     schedule_index: i32,
     profile_name: QString,
+    media_mode_index: i32,
+    timeline_preview: QString,
+    /// Still set loaded from a HEIC import (drives timeline scrub evaluation).
+    timeline_still_set: Option<DynamicStillSet>,
     job_generation: AtomicU64,
     apply_generation: AtomicU64,
     job_tx: Sender<WorkerJob>,
@@ -100,6 +114,11 @@ impl Default for ComposeControllerRust {
             apply_busy: false,
             schedule_index: 0,
             profile_name: QString::from("Compose"),
+            media_mode_index: 0,
+            timeline_preview: QString::from(
+                "Select Dynamic stills and import a HEIC, or save an hourly placeholder set.",
+            ),
+            timeline_still_set: None,
             job_generation: AtomicU64::new(0),
             apply_generation: AtomicU64::new(0),
             job_tx: worker_sender(),
@@ -207,6 +226,7 @@ impl qobject::ComposeController {
             }
         };
         let schedule_index = *self.schedule_index();
+        let media_mode_index = *self.media_mode_index();
         match crate::profile_controller::save_compose_profile(
             &name,
             &source,
@@ -220,11 +240,18 @@ impl qobject::ComposeController {
             (*self.focal_x()).clamp(0.0, 1.0),
             (*self.focal_y()).clamp(0.0, 1.0),
             schedule_index,
+            media_mode_index,
         ) {
             Ok(profile) => {
+                let mode = match profile.presentation {
+                    easel_core::PresentationMode::DynamicStills => "dynamic stills",
+                    easel_core::PresentationMode::LiveMedia => "live media",
+                    easel_core::PresentationMode::Static => "static",
+                };
                 self.as_mut().set_preview_status(QString::from(
                     format!(
-                        "Saved profile '{}' ({})",
+                        "Saved {} profile '{}' ({})",
+                        mode,
                         profile.name,
                         profile.id.to_hyphenated_string()
                     )
@@ -234,6 +261,125 @@ impl qobject::ComposeController {
             Err(error) => {
                 self.as_mut().set_preview_status(QString::from(
                     format!("Save profile failed: {error}").as_str(),
+                ));
+            }
+        }
+    }
+
+    fn preview_timeline_hour(mut self: Pin<&mut Self>, hour: f64) {
+        let hour = if hour.is_finite() {
+            hour.clamp(0.0, 23.99)
+        } else {
+            0.0
+        };
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let whole_hour = hour.floor() as u8;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        let minute = ((hour.fract() * 60.0).floor() as u8).min(59);
+
+        let still_set = self.as_ref().rust().timeline_still_set.clone();
+        let (label, frame_path) = if let Some(set) = still_set.as_ref() {
+            use easel_core::{DynamicEvalContext, InstantSeconds, active_frame_with_context};
+            use easel_platform::system_appearance;
+            // Anchor to a fixed UTC day so scrubbing only changes local wall time.
+            let local_minutes = i64::from(whole_hour) * 60 + i64::from(minute);
+            let now = InstantSeconds {
+                unix_seconds: local_minutes * 60,
+            };
+            let selection = active_frame_with_context(
+                set,
+                DynamicEvalContext {
+                    now,
+                    utc_offset_minutes: 0,
+                    appearance: system_appearance(),
+                },
+            );
+            let path = resolve_library_asset_path(selection.asset_id);
+            let label = format!(
+                "{} ({}) · {} frames · {:?}",
+                selection.key_label(),
+                selection.asset_id.to_hyphenated_string(),
+                set.frames.len(),
+                set.schedule_kind
+            );
+            (label, path)
+        } else {
+            (
+                format!(
+                    "tod:{whole_hour:02}:{minute:02} (no still set loaded — import a HEIC or save Dynamic stills)"
+                ),
+                None,
+            )
+        };
+        self.as_mut().set_timeline_preview(QString::from(
+            format!("Simulated {whole_hour:02}:{minute:02} → {label}").as_str(),
+        ));
+        if let Some(path) = frame_path {
+            let current = self.source_path().to_string();
+            if current != path {
+                self.as_mut().set_source_path(QString::from(path.as_str()));
+                self.refresh_preview();
+            }
+        }
+    }
+
+    fn import_dynamic_heic_from_url(mut self: Pin<&mut Self>, url: QString) {
+        let path = path_from_file_url(&url.to_string());
+        let path_str = path.to_string_lossy().to_string();
+        if path_str.trim().is_empty() {
+            self.as_mut()
+                .set_preview_status(QString::from("Choose a dynamic HEIC to import"));
+            return;
+        }
+        let name = {
+            let value = self.profile_name().to_string();
+            if value.trim().is_empty() {
+                path.file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .unwrap_or("Dynamic HEIC")
+                    .to_owned()
+            } else {
+                value
+            }
+        };
+        match crate::profile_controller::import_dynamic_heic_profile(
+            &path_str,
+            &name,
+            fit_mode_from_index(*self.fit_mode_index()),
+            layout_mode_from_index(*self.layout_mode_index()),
+            if self.zoom().is_finite() {
+                (*self.zoom()).max(1.0)
+            } else {
+                1.0
+            },
+            (*self.focal_x()).clamp(0.0, 1.0),
+            (*self.focal_y()).clamp(0.0, 1.0),
+        ) {
+            Ok((profile, still_set, first_frame)) => {
+                self.as_mut().rust_mut().timeline_still_set = Some(still_set.clone());
+                self.as_mut().set_media_mode_index(1);
+                self.as_mut()
+                    .set_source_path(QString::from(first_frame.as_str()));
+                self.as_mut()
+                    .set_profile_name(QString::from(profile.name.as_str()));
+                self.as_mut().set_preview_status(QString::from(
+                    format!(
+                        "Imported {} ({} frames, {:?}) as profile '{}'",
+                        path.file_name()
+                            .and_then(|name| name.to_str())
+                            .unwrap_or("HEIC"),
+                        still_set.frames.len(),
+                        still_set.schedule_kind,
+                        profile.name
+                    )
+                    .as_str(),
+                ));
+                self.as_mut().preview_timeline_hour(12.0);
+                self.refresh_preview();
+            }
+            Err(error) => {
+                self.as_mut().set_preview_status(QString::from(
+                    format!("HEIC import failed: {error}").as_str(),
                 ));
             }
         }
@@ -470,6 +616,17 @@ fn preview_cache_dir() -> PathBuf {
 
 fn apply_cache_dir() -> PathBuf {
     std::env::temp_dir().join("easel").join("compose-apply")
+}
+
+fn resolve_library_asset_path(asset_id: AssetId) -> Option<String> {
+    use crate::library_session::library_store;
+
+    let library = library_store().ok()?;
+    let asset = library.get_asset(asset_id).ok()??;
+    match asset.location {
+        AssetLocation::Local { path } => Some(path),
+        AssetLocation::Remote { .. } => None,
+    }
 }
 
 #[cfg(test)]

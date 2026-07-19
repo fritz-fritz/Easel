@@ -8,10 +8,10 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 use uuid::Uuid;
 
-use crate::{AssetId, DisplayGroupId, DisplayId, RotationQueueId, ScheduleId};
+use crate::{AssetId, DisplayGroupId, DisplayId, DynamicStillSetId, RotationQueueId, ScheduleId};
 
 /// Current serialized profile schema.
-pub const PROFILE_SCHEMA_VERSION: u16 = 2;
+pub const PROFILE_SCHEMA_VERSION: u16 = 3;
 
 /// Stable profile identity independent of its display name.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -142,6 +142,9 @@ pub struct Profile {
     /// Optional schedule that drives unattended applies for this profile.
     #[serde(default)]
     pub schedule_id: Option<ScheduleId>,
+    /// Optional dynamic still set used when `presentation` is `DynamicStills`.
+    #[serde(default)]
+    pub still_set_id: Option<DynamicStillSetId>,
     /// Static, scheduled-still, or persistent live presentation.
     pub presentation: PresentationMode,
     /// Live-media behavior and resource limits.
@@ -172,6 +175,7 @@ impl Profile {
             selected_asset: None,
             rotation_queue_id: None,
             schedule_id: None,
+            still_set_id: None,
             presentation: PresentationMode::Static,
             playback: PlaybackPolicy::default(),
             fit_mode: FitMode::Cover,
@@ -185,7 +189,7 @@ impl Profile {
     /// Upgrades older on-disk profiles to the current schema.
     pub fn migrate(mut self) -> Result<Self, ProfileValidationError> {
         match self.schema_version {
-            1 => {
+            1 | 2 => {
                 self.schema_version = PROFILE_SCHEMA_VERSION;
                 Ok(self)
             }

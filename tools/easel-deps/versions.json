@@ -1,0 +1,16 @@
+{
+  "libheif": {
+    "version": "1.23.1",
+    "vcpkg_port": "libheif",
+    "vcpkg_features": ["core", "aom", "hevc"],
+    "triplet": "x64-windows-static-md"
+  },
+  "vcpkg": {
+    "git": "https://github.com/microsoft/vcpkg",
+    "tag": "2026.05.25"
+  },
+  "asset": {
+    "name_template": "libheif-msvc-{triplet}-{libheif_version}.zip",
+    "layout": "vcpkg-installed"
+  }
+}

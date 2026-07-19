@@ -37,6 +37,7 @@ jobs:
               - 'rustfmt.toml'
               - 'crates/**'
               - 'apps/**'
+              - '.github/workflows/ci.yml'
             desktop:
               - 'Cargo.toml'
               - 'Cargo.lock'
@@ -44,6 +45,7 @@ jobs:
               - 'crates/**'
               - 'apps/easel-desktop/**'
               - '.github/actions/ci-visual/**'
+              - '.github/workflows/ci.yml'
             # Include ci.yml so edits to the Gallery tooling job itself are exercised.
             gallery_tooling:
               - '.github/ci-visual/**'
@@ -78,6 +80,25 @@ jobs:
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
+        with:
+          # Bust when Windows libheif install strategy changes.
+          prefix-key: easel-deps-libheif-v1.23.1
+      - name: Install libheif (Linux)
+        if: runner.os == 'Linux'
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes \
+            pkg-config libheif-dev \
+            libheif-plugin-libde265 \
+            libheif-plugin-aomenc \
+            libheif-plugin-x265
+      - name: Install libheif (macOS)
+        if: runner.os == 'macOS'
+        run: brew install libheif pkg-config
+      - name: Install libheif (Windows prebuilt)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\install-libheif-windows.ps1
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check
@@ -144,12 +165,14 @@ jobs:
           echo "Selected smoke views: ${views}"
           echo "views=${views}" >> "$GITHUB_OUTPUT"
 
-      - name: Install Qt (Linux)
+      - name: Install Qt + libheif (Linux)
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
           sudo apt-get install --yes \
             build-essential clang cmake ninja-build pkg-config g++ \
+            libheif-dev libheif-plugin-libde265 \
+            libheif-plugin-aomenc libheif-plugin-x265 \
             qt6-base-dev qt6-declarative-dev xvfb \
             qml6-module-qtquick qml6-module-qtquick-controls \
             qml6-module-qtquick-layouts qml6-module-qtquick-window \
@@ -168,15 +191,22 @@ jobs:
           cache: true
           install-deps: "true"
 
-      - name: Install Qt (macOS)
+      - uses: Swatinem/rust-cache@v2
+        with:
+          prefix-key: easel-deps-libheif-v1.23.1
+
+      - name: Install libheif (Windows prebuilt)
+        if: runner.os == 'Windows'
+        shell: pwsh
+        run: .\.github\scripts\install-libheif-windows.ps1
+
+      - name: Install Qt + libheif (macOS)
         if: runner.os == 'macOS'
         run: |
-          brew install qt@6
+          brew install qt@6 libheif pkg-config
           echo "CMAKE_PREFIX_PATH=$(brew --prefix qt@6)" >> "$GITHUB_ENV"
           echo "QT_ROOT_DIR=$(brew --prefix qt@6)" >> "$GITHUB_ENV"
           echo "$(brew --prefix qt@6)/bin" >> "$GITHUB_PATH"
-
-      - uses: Swatinem/rust-cache@v2
 
       - name: Build desktop (Linux)
         if: runner.os == 'Linux'

@@ -42,11 +42,18 @@ Connector names and geometry are fallbacks, never sole long-term identifiers.
 - displays and arrangements;
 - still, animated-image, and video assets with licenses and attribution;
 - wallpaper profiles and display groups;
-- schedules and selection rules;
+- schedules, dynamic still sets (time / solar-position / appearance), and selection rules;
 - presentation and playback policy;
 - validation errors.
 
 It has no Qt, HTTP, image-decoder, or OS dependency.
+
+## Dynamic still packages
+
+`easel-dynamic` imports and exports Apple Dynamic Desktop HEIC (and Plasma-compatible
+packages): XMP `apple_desktop` metadata, binary plist schedules, per-frame decode/encode via
+libheif, per-display crop→encode, and Plasma day/night wallpaper packages for Appearance
+sets. See ADR 0006 and ADR 0007.
 
 ## Renderer
 
@@ -99,12 +106,13 @@ in Compose. Domain types remain in `easel-core`; this crate only adds IO, watchi
 
 ## Scheduler
 
-`easel-scheduler` persists profiles, display groups, schedules, rotation queues, and hotplug
-policy as versioned TOML, and stores rotation apply history in SQLite. Schedule evaluation,
-avoid-repeat selection, and hotplug resolution are pure functions in `easel-core` (injected
-clock / UTC offset). The desktop poller and `easel` CLI share the same store; pause, skip, and
-status mutate or read those documents. A native OS system tray icon is deferred until the
-desktop host uses Qt Widgets/`QApplication` (Qt Labs Platform requirement).
+`easel-scheduler` persists profiles, display groups, schedules, rotation queues, dynamic still
+sets, and hotplug policy as versioned TOML, and stores rotation apply history plus last-applied
+dynamic frame state in SQLite. Schedule evaluation, dynamic frame selection, avoid-repeat
+selection, and hotplug resolution are pure functions in `easel-core` (injected clock / UTC
+offset). The desktop poller and `easel` CLI share the same store; pause, skip, and status mutate
+or read those documents. A native OS system tray icon is deferred until the desktop host uses Qt
+Widgets/`QApplication` (Qt Labs Platform requirement).
 
 ## Image providers
 

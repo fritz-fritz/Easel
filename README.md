@@ -5,14 +5,16 @@ desktops. It combines physically correct spanning with a modern Qt 6 interface a
 policy-aware catalog of high-quality, reusable images. Its architecture also distinguishes
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
-This repository contains the Stage 1–4 still-image vertical slice: decode/fit/raster with
+This repository contains the Stage 1–5 still-image vertical slice: decode/fit/raster with
 physical multi-display composition, Compose previews, Qt display enumeration with arrangement
 persistence, Plasma 6 / Windows still apply backends, local library indexing, Openverse
-discovery with retained provenance, reusable profiles with schedule-driven rotation, and
-hotplug policy. Use Compose → Open image → Apply (or Save profile for automation), or
-Discover/Library to select an image first. CI captures apply-payload rasters plus selective Qt GUI
-smoke screenshots (fixture preview and affected workspace pages) for review. Animated/live media hosts and additional Linux desktops remain
-deliberately unimplemented.
+discovery with retained provenance, reusable profiles with schedule-driven rotation,
+time-of-day / solar-position dynamic still sets (Apple HEIC interchange) with catch-up and
+pre-render, and hotplug policy. Use
+Compose → Open image → Apply (or Save profile for automation), or Discover/Library to select an
+image first. CI captures apply-payload rasters plus selective Qt GUI smoke screenshots (fixture
+preview and affected workspace pages) for review. Animated/live media hosts and additional Linux
+desktops remain deliberately unimplemented.
 
 ## Product direction
 
@@ -38,11 +40,16 @@ apps/easel-cli/         Headless profile/schedule/status/pause/skip controls
 crates/easel-core/      Versioned domain model and validation
 crates/easel-library/   Local folder index, SQLite library store, acquisition cache
 crates/easel-scheduler/ Automation TOML store and SQLite rotation history
+crates/easel-dynamic/   Apple HEIC dynamic import/encode and per-display native bundles
 crates/easel-render/    Display-space planning, raster output, and live frame plans
 crates/easel-providers/ Online image provider contracts and adapters
 crates/easel-platform/  Static wallpaper and persistent live-host contracts
 docs/                   Product, architecture, provider, and delivery plans
 ```
+
+Dynamic still interchange follows Apple Dynamic Desktop HEIC (solar / appearance / h24). Easel
+deconstructs packages into a portable still set, encodes per-display native HEIC packages for
+platforms that can host them, and falls back to still-frame apply elsewhere (see ADR 0006).
 
 ## Development
 

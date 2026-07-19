@@ -35,6 +35,9 @@ impl WallpaperBackend for WindowsDesktopBackend {
             activities: false,
             workspaces: false,
             lock_screen: false,
+            cross_fade: false,
+            // Windows has no public dynamic-HEIC wallpaper API.
+            native_dynamic_bundle: false,
         }
     }
 
@@ -50,6 +53,7 @@ impl WallpaperBackend for WindowsDesktopBackend {
                 self.validate_output_path(path)?;
                 apply_virtual_desktop(path)
             }
+            WallpaperOutput::NativeDynamic(_) => Err(BackendError::UnsupportedOutput),
         }
     }
 }

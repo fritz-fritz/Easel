@@ -47,3 +47,9 @@ fn cache_dir() -> PathBuf {
         |dirs| dirs.cache_dir().to_path_buf(),
     )
 }
+
+/// Directory that stores PNG frames decoded from imported dynamic HEIC packages.
+#[must_use]
+pub fn dynamic_stills_dir() -> PathBuf {
+    data_dir().join("dynamic-stills")
+}

@@ -50,4 +50,13 @@ workspace. It has two distinct build scopes:
   cargo run -p easel-cli -- next
   cargo run -p easel-cli -- profiles
   cargo run -p easel-cli -- schedules
+  cargo run -p easel-cli -- stills
+  cargo run -p easel-cli -- inspect-heic path/to/Dynamic.heic
+  cargo run -p easel-cli -- import-heic path/to/Dynamic.heic --name Mojave
   ```
+
+- `easel-dynamic` (HEIC import/encode) needs `libheif-dev` at build time plus an encoder plugin
+  (`libheif-plugin-x265` and/or `libheif-plugin-aomenc`). The Cloud VM image includes these;
+  on a clean host install `libheif-dev` and the encoder/decoder plugins. On Windows CI/MSVC,
+  run `.github/scripts/install-libheif-windows.ps1` (prebuilt static libs staged for
+  `libheif-sys`; upstream GitHub releases are source-only).

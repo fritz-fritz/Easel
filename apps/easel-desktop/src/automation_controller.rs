@@ -9,7 +9,7 @@ use std::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
 use easel_core::{
-    AssetId, AssetLocation, HotplugPolicy, InstantSeconds, MissingOutputPolicy, ProfileId,
+    AssetId, AssetLocation, HotplugPolicy, InstantSeconds, MissingOutputPolicy, Profile, ProfileId,
     RotationSource, resolve_displays,
 };
 use easel_scheduler::now_unix_i64;
@@ -130,13 +130,24 @@ impl AutomationControllerRust {
         };
         self.status_text = QString::from(
             format!(
-                "{} schedule(s), paused={}, hotplug={:?}",
+                "{} schedule(s), {} still set(s), paused={}, hotplug={:?}",
                 store.schedules().len(),
+                store.still_sets().len(),
                 self.paused,
                 store.hotplug_policy().on_missing
             )
             .as_str(),
         );
+        if let Some(hint) = summary.next_dynamic_hint.as_deref() {
+            self.next_fire_hint = QString::from(
+                format!(
+                    "{}; dynamic {}",
+                    summary.next_fire_hint.as_deref().unwrap_or("none"),
+                    hint
+                )
+                .as_str(),
+            );
+        }
         Ok(())
     }
 }
@@ -274,15 +285,19 @@ impl qobject::AutomationController {
                     .due_schedules(now, utc_offset_minutes)
                     .map_err(|error| error.to_string())?
             };
-            if due.is_empty() {
-                return Ok("No due schedules.".to_string());
-            }
             let mut messages = Vec::new();
             for schedule in due {
                 match note_due_schedule(schedule.profile_id, schedule.id, &schedule.name) {
                     Ok(message) => messages.push(message),
                     Err(error) => messages.push(error),
                 }
+            }
+            match sync_dynamic_stills(now, utc_offset_minutes) {
+                Ok(dynamic_messages) => messages.extend(dynamic_messages),
+                Err(error) => messages.push(error),
+            }
+            if messages.is_empty() {
+                return Ok("No due schedules or dynamic transitions.".to_string());
             }
             Ok(messages.join(" | "))
         })();
@@ -416,6 +431,227 @@ fn note_due_schedule(
         "schedule '{schedule_name}' applied {} ({path})",
         decision.asset_id.to_hyphenated_string()
     ))
+}
+
+fn sync_dynamic_stills(
+    now: InstantSeconds,
+    utc_offset_minutes: i32,
+) -> Result<Vec<String>, String> {
+    use std::path::Path;
+
+    use easel_platform::{select_wallpaper_backend, system_appearance};
+
+    let appearance = system_appearance();
+    let due = {
+        let store = automation_store()?;
+        store
+            .due_dynamic_stills(now, utc_offset_minutes, appearance)
+            .map_err(|error| error.to_string())?
+    };
+    if due.is_empty() {
+        prerender_upcoming(now, utc_offset_minutes)?;
+        return Ok(Vec::new());
+    }
+
+    let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;
+    let capabilities = backend.capabilities();
+    let mut messages = Vec::new();
+
+    for item in due {
+        let (profile, still_set) = load_dynamic_profile(&item)?;
+        if capabilities.native_dynamic_bundle {
+            if let Some(message) = try_apply_native_dynamic_due(&profile, &still_set, &item)? {
+                if !message.is_empty() {
+                    messages.push(message);
+                }
+                continue;
+            }
+        }
+
+        let path = resolve_asset_path(item.selection.asset_id)?;
+        // Always apply from the original asset. Pre-rendered per-display crops must not be
+        // fed back into `apply_still`, which re-composes for every active display.
+        let apply_message = apply_service::apply_still(Path::new(&path), &profile)?;
+        let fade_note = if item.request_cross_fade && !capabilities.cross_fade {
+            "; cross-fade requested but unsupported (hard cut)"
+        } else {
+            ""
+        };
+        let reason = format!(
+            "dynamic {}; {}{fade_note}",
+            item.decision_reason, apply_message
+        );
+        record_dynamic_apply(&profile, &item, &reason)?;
+        messages.push(format!(
+            "dynamic '{}' → {} ({})",
+            profile.name,
+            item.selection.key_label(),
+            item.selection.asset_id.to_hyphenated_string()
+        ));
+        if let Some(next_asset) = item.next_asset_id {
+            let _ = prerender_asset(&profile, next_asset);
+        }
+    }
+    Ok(messages)
+}
+
+fn load_dynamic_profile(
+    item: &easel_scheduler::DueDynamicStill,
+) -> Result<(Profile, easel_core::DynamicStillSet), String> {
+    let store = automation_store()?;
+    let profile = store
+        .profile(item.profile_id)
+        .cloned()
+        .ok_or_else(|| "profile not found".to_string())?;
+    let still_set = store
+        .still_set(item.still_set_id)
+        .cloned()
+        .ok_or_else(|| "still set not found".to_string())?;
+    Ok((profile, still_set))
+}
+
+/// Attempts native HEIC host apply. Returns `Ok(Some(msg))` when handled (skip still poller),
+/// `Ok(None)` when the caller should fall back to still-frame apply.
+///
+/// `AlreadyHosting` updates state silently and returns `Some("")` so the caller skips the
+/// still poller without appending an empty status line.
+fn try_apply_native_dynamic_due(
+    profile: &Profile,
+    still_set: &easel_core::DynamicStillSet,
+    item: &easel_scheduler::DueDynamicStill,
+) -> Result<Option<String>, String> {
+    use std::path::PathBuf;
+
+    use crate::apply_service::{NativeDynamicApply, apply_native_dynamic};
+
+    let Ok(frame_paths) = still_set
+        .frames
+        .iter()
+        .map(|frame| resolve_asset_path(frame.asset_id).map(PathBuf::from))
+        .collect::<Result<Vec<_>, _>>()
+    else {
+        return Ok(None);
+    };
+
+    match apply_native_dynamic(still_set, &frame_paths, profile, None) {
+        Ok(NativeDynamicApply::AlreadyHosting { .. }) => {
+            record_dynamic_state_only(item)?;
+            Ok(Some(String::new()))
+        }
+        Ok(NativeDynamicApply::Applied { message, .. }) => {
+            let reason = format!("dynamic native host; {message}");
+            record_dynamic_apply(profile, item, &reason)?;
+            Ok(Some(format!(
+                "dynamic '{}' → native host ({})",
+                profile.name,
+                item.selection.key_label()
+            )))
+        }
+        Err(_) => Ok(None),
+    }
+}
+
+fn record_dynamic_state_only(item: &easel_scheduler::DueDynamicStill) -> Result<(), String> {
+    use easel_core::AppliedDynamicFrame;
+    use easel_scheduler::now_unix_i64;
+
+    let occurred_at = now_unix_i64();
+    let store = automation_store()?;
+    store
+        .history()
+        .set_dynamic_still_state(
+            item.profile_id,
+            &AppliedDynamicFrame {
+                asset_id: item.selection.asset_id,
+                key_label: item.selection.key_label(),
+                applied_at: occurred_at,
+            },
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn record_dynamic_apply(
+    profile: &Profile,
+    item: &easel_scheduler::DueDynamicStill,
+    reason: &str,
+) -> Result<(), String> {
+    use easel_core::AppliedDynamicFrame;
+    use easel_scheduler::{RotationHistoryEntry, now_unix_i64};
+
+    let occurred_at = now_unix_i64();
+    let store = automation_store()?;
+    store
+        .history()
+        .record(&RotationHistoryEntry {
+            queue_id: None,
+            profile_id: item.profile_id,
+            schedule_id: profile.schedule_id,
+            asset_id: item.selection.asset_id,
+            reason: reason.to_owned(),
+            occurred_at,
+        })
+        .map_err(|error| error.to_string())?;
+    store
+        .history()
+        .set_dynamic_still_state(
+            item.profile_id,
+            &AppliedDynamicFrame {
+                asset_id: item.selection.asset_id,
+                key_label: item.selection.key_label(),
+                applied_at: occurred_at,
+            },
+        )
+        .map_err(|error| error.to_string())
+}
+
+fn prerender_upcoming(now: InstantSeconds, utc_offset_minutes: i32) -> Result<(), String> {
+    use easel_core::{PresentationMode, next_transition_after};
+
+    let jobs: Vec<(easel_core::AssetId, Profile)> = {
+        let store = automation_store()?;
+        let mut jobs = Vec::new();
+        for profile in store.profiles() {
+            if profile.presentation != PresentationMode::DynamicStills {
+                continue;
+            }
+            let Some(still_set_id) = profile.still_set_id else {
+                continue;
+            };
+            let Some(still_set) = store.still_set(still_set_id) else {
+                continue;
+            };
+            if let Some((_, frame)) = next_transition_after(still_set, now, utc_offset_minutes) {
+                jobs.push((frame.asset_id, profile.clone()));
+            }
+        }
+        jobs
+    };
+    for (asset_id, profile) in jobs {
+        let _ = prerender_asset(&profile, asset_id);
+    }
+    Ok(())
+}
+
+fn prerender_asset(profile: &Profile, asset_id: AssetId) -> Result<(), String> {
+    use std::path::Path;
+
+    // Warm the ready slot with a copy of the original source. Multi-display composition
+    // stays in `apply_still` so a single cropped PNG is never reused as a virtual desktop.
+    let path = resolve_asset_path(asset_id)?;
+    let store = automation_store()?;
+    let staging = store.prerender_staging_path(profile.id, asset_id);
+    let ready = store.prerender_ready_path(profile.id, asset_id);
+    if ready.is_file() {
+        return Ok(());
+    }
+    if let Some(parent) = staging.parent() {
+        std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
+    }
+    std::fs::copy(Path::new(&path), &staging).map_err(|error| error.to_string())?;
+    store
+        .promote_prerender(&staging, &ready)
+        .map_err(|error| error.to_string())?;
+    Ok(())
 }
 
 fn resolve_asset_path(asset_id: AssetId) -> Result<String, String> {
