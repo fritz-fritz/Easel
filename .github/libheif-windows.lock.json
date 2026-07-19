@@ -1,8 +1,8 @@
 {
   "repo": "fritz-fritz/easel-deps",
-  "tag": "libheif-v1.23.1",
+  "tag": "libheif-v1.23.1-r2",
   "version": "1.23.1",
   "triplet": "x64-windows-static-md",
   "asset": "libheif-msvc-x64-windows-static-md-1.23.1.zip",
-  "sha256": "264b4a242fe37572381d8c5c550eaf257a11a2ee2d2390fd1ba4e6d546fa76a7"
+  "sha256": "6a2525d2cd61e1979ff46efe8ad7f5df6cc3077943b9c654e52dd9adfeb51e9b"
 }

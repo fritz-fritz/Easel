@@ -88,7 +88,7 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           # Bust when Windows libheif install strategy changes.
-          prefix-key: easel-deps-libheif-v1.23.1
+          prefix-key: easel-deps-libheif-v1.23.1-r2
       - name: Install libheif (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -199,7 +199,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: easel-deps-libheif-v1.23.1
+          prefix-key: easel-deps-libheif-v1.23.1-r2
 
       - name: Install libheif (Windows prebuilt)
         if: runner.os == 'Windows'

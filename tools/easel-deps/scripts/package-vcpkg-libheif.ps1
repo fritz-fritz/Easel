@@ -91,6 +91,23 @@ if (-not $IncludeDebug) {
             Set-Content -Path $_.FullName -Value ($lines -join "`n") -Encoding ascii
         }
     }
+
+    # CMake import files for Debug configs reference debug/lib/*.lib. Leaving
+    # those behind after omitting debug/ makes find_package(AOM) (and friends)
+    # fail the existence check, which drops aom from the link line while
+    # heif.lib still needs it. Strip Debug import fragments.
+    $ShareDir = Join-Path $StageTriplet "share"
+    if (Test-Path $ShareDir) {
+        Get-ChildItem -Recurse -File $ShareDir |
+            Where-Object {
+                $_.Name -match '(?i)(targets-debug|config-debug)\.cmake$' -or
+                $_.Name -match '(?i)-debug\.cmake$'
+            } |
+            ForEach-Object {
+                Write-Host "Removing debug CMake import $($_.FullName.Substring($StageTriplet.Length + 1))"
+                Remove-Item -Force $_.FullName
+            }
+    }
 }
 
 # Provenance: copy versions.json and stamp the resolved libheif version.

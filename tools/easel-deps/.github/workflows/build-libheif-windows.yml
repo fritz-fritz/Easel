@@ -142,7 +142,8 @@ jobs:
           $sha = "${{ steps.pkg.outputs.sha256 }}"
           if ($env:GITHUB_REF -like "refs/tags/libheif-v*") {
             $tag = $env:GITHUB_REF_NAME
-            if ($tag -ne "libheif-v$ver") {
+            # Allow rebuild tags: libheif-vX.Y.Z or libheif-vX.Y.Z-rN
+            if ($tag -notmatch "^libheif-v$([regex]::Escape($ver))(-r\d+)?$") {
               throw "git tag $tag does not match packaged libheif-v$ver"
             }
           } else {
@@ -166,11 +167,35 @@ jobs:
             "Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.",
             "The zip root must contain ``.vcpkg-root`` and ``installed/``."
           ) -join "`n"
-          $existing = gh release view $tag 2>$null
-          if ($LASTEXITCODE -ne 0) {
-            gh release create $tag $path $sum --title $tag --notes $notes
-          } else {
-            gh release upload $tag $path $sum --clobber
-            gh release edit $tag --notes $notes
+
+          function Publish-Release([string]$ReleaseTag) {
+            $view = gh release view $ReleaseTag 2>$null
+            if ($LASTEXITCODE -ne 0) {
+              gh release create $ReleaseTag $path $sum --title $ReleaseTag --notes $notes
+              return $LASTEXITCODE
+            }
+            gh release upload $ReleaseTag $path $sum --clobber
+            if ($LASTEXITCODE -ne 0) { return $LASTEXITCODE }
+            gh release edit $ReleaseTag --notes $notes
+            return $LASTEXITCODE
+          }
+
+          $code = Publish-Release $tag
+          if ($code -ne 0) {
+            # GitHub immutable releases permanently burn a tag even after deletion.
+            # Fall back to libheif-vX.Y.Z-rN rebuild tags.
+            $base = "libheif-v$ver"
+            for ($n = 2; $n -le 20; $n++) {
+              $candidate = "$base-r$n"
+              Write-Warning "Publish to $tag failed; trying rebuild tag $candidate"
+              $code = Publish-Release $candidate
+              if ($code -eq 0) {
+                $tag = $candidate
+                break
+              }
+            }
+            if ($code -ne 0) {
+              throw "failed to publish release for libheif $ver (immutable tag conflict?)"
+            }
           }
           Write-Host "Published $tag / $asset (sha256=$sha)"

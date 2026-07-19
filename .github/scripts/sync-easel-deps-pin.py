@@ -19,9 +19,13 @@ from typing import Any
 DEFAULT_REPO = "fritz-fritz/easel-deps"
 CI_YML = ".github/workflows/ci.yml"
 PREFIX_RE = re.compile(
-    r"(prefix-key:\s*)easel-deps-libheif-v[0-9]+(?:\.[0-9]+)*",
+    r"(prefix-key:\s*)easel-deps-(?:libheif-)?v?[0-9A-Za-z._-]+",
     re.MULTILINE,
 )
+
+# Prefer rebuild tags (libheif-vX.Y.Z-rN) when present; plain libheif-vX.Y.Z also ok.
+# GitHub immutable releases permanently burn a tag name even after deletion.
+TAG_RE = re.compile(r"^libheif-v(\d+\.\d+\.\d+)(?:-r(\d+))?$")
 
 
 def gh_api(path: str, token: str | None = None) -> Any:
@@ -74,13 +78,30 @@ def parse_sha256_sidecar(text: str, asset_name: str) -> str | None:
     return None
 
 
+def parse_release_tag(tag: str) -> tuple[str, int] | None:
+    m = TAG_RE.fullmatch(tag)
+    if not m:
+        return None
+    version = m.group(1)
+    rev = int(m.group(2) or "0")
+    return version, rev
+
+
 def latest_libheif_release(repo: str, token: str | None) -> dict[str, Any]:
-    releases = gh_api(f"/repos/{repo}/releases?per_page=20", token)
+    releases = gh_api(f"/repos/{repo}/releases?per_page=30", token)
+    best: tuple[tuple[int, ...], int, dict[str, Any]] | None = None
     for rel in releases:
         tag = rel.get("tag_name") or ""
-        if re.fullmatch(r"libheif-v\d+\.\d+\.\d+", tag):
-            return rel
-    raise SystemExit(f"no libheif-v* release found on {repo}")
+        parsed = parse_release_tag(tag)
+        if not parsed:
+            continue
+        version, rev = parsed
+        key = (tuple(int(p) for p in version.split(".")), rev)
+        if best is None or key > (best[0], best[1]):
+            best = (key[0], key[1], rel)
+    if best is None:
+        raise SystemExit(f"no libheif-v* release found on {repo}")
+    return best[2]
 
 
 def main() -> int:
@@ -100,7 +121,9 @@ def main() -> int:
     repo = lock.get("repo") or DEFAULT_REPO
     rel = latest_libheif_release(repo, args.token)
     tag = rel["tag_name"]
-    version = tag.removeprefix("libheif-v")
+    parsed = parse_release_tag(tag)
+    assert parsed is not None
+    version, _rev = parsed
     triplet = lock.get("triplet") or "x64-windows-static-md"
     asset_name = f"libheif-msvc-{triplet}-{version}.zip"
 
@@ -146,7 +169,8 @@ def main() -> int:
 
         with open(args.ci_yml, encoding="utf-8") as fh:
             ci = fh.read()
-        ci2, n = PREFIX_RE.subn(rf"\1easel-deps-libheif-v{version}", ci)
+        # Include the full release tag in the cache prefix so rebuild tags bust rust-cache.
+        ci2, n = PREFIX_RE.subn(rf"\1easel-deps-{tag}", ci)
         if n == 0:
             raise SystemExit("failed to update rust-cache prefix-key in ci.yml")
         with open(args.ci_yml, "w", encoding="utf-8") as fh:
@@ -156,7 +180,7 @@ def main() -> int:
         f"Automated pin update from easel-deps release `{tag}`.\n\n"
         f"- Asset: `{asset_name}`\n"
         f"- SHA256: `{sha256}`\n"
-        f"- rust-cache prefix-key: `easel-deps-libheif-v{version}`\n"
+        f"- rust-cache prefix-key: `easel-deps-{tag}`\n"
     )
     with open("pr-body.md", "w", encoding="utf-8") as fh:
         fh.write(pr_body)
