@@ -13,6 +13,21 @@ workspace. It has two distinct build scopes:
   the `qml6-module-qtquick*` modules, `ninja-build`, `clang`, `xvfb`). Build/lint it
   with `CXX=g++ CC=gcc` (matching CI), e.g. `CXX=g++ CC=gcc cargo build -p easel-desktop`.
 
+### Related repositories (multi-repo)
+
+Easel coordinates with two sibling repos under the same owner (referenced in
+`docs/ci-visual-assets-repo.md` and `docs/adr/0009-libheif-prebuilt-deps.md`):
+
+- `github.com/fritz-fritz/easel-ci-visual` — CI visual galleries / GitHub Pages.
+- `github.com/fritz-fritz/easel-deps` — prebuilt Windows libheif for CI.
+
+They are listed in `.cursor/environment.json` under `repositoryDependencies`, which is
+what scopes the Cloud Agent's generated GitHub token to include them so the agent can
+read and push. Token scoping alone is not enough: the Cursor GitHub App must also be
+authorized on each sibling repo (a one-time owner action in GitHub settings). Sibling
+repos are not auto-cloned into `/workspace`; clone on demand (e.g.
+`git clone https://github.com/fritz-fritz/easel-deps`) when you need to push to them.
+
 ### Non-obvious gotchas
 
 - `cxx-qt-build` unconditionally forces `-fuse-ld=gold` on Linux. On this VM image the
