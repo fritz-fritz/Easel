@@ -24,6 +24,8 @@ tempfile = "3"
 # Windows CI stages prebuilt MSVC libs via
 # `.github/scripts/install-libheif-windows.ps1` (strukturag releases are
 # source-only). Local Windows builds can use that script or cargo-vcpkg.
+# `build.rs` links `advapi32` on MSVC because static x265 needs it and Rust
+# 1.88+ no longer pulls that lib in via std.
 
 [lints]
 workspace = true
