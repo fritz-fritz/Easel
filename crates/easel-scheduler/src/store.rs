@@ -9,10 +9,11 @@ use std::io::Write;
 use std::path::{Path, PathBuf};
 
 use easel_core::{
-    AssetId, DisplayGroup, DisplayGroupId, DynamicStillSet, DynamicStillSetId, HotplugPolicy,
-    InstantSeconds, Profile, ProfileId, RotationQueue, RotationQueueId, Schedule, ScheduleId,
-    ScheduleRule, active_frame_at, decide_transition, explain_fire, next_fire_after,
-    next_transition_after, select_next, skip_current,
+    AppearanceMode, AssetId, DisplayGroup, DisplayGroupId, DynamicEvalContext, DynamicStillSet,
+    DynamicStillSetId, HotplugPolicy, InstantSeconds, Profile, ProfileId, RotationQueue,
+    RotationQueueId, Schedule, ScheduleId, ScheduleRule, active_frame_with_context,
+    decide_transition, explain_fire, next_fire_after, next_transition_after, select_next,
+    skip_current,
 };
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
@@ -570,10 +571,12 @@ impl AutomationStore {
     /// Profiles whose dynamic still frame should be applied at `now`.
     ///
     /// Skipped while any rotation queue is paused (shared tray/CLI pause).
+    /// `appearance` drives appearance-keyed still sets (system light/dark).
     pub fn due_dynamic_stills(
         &self,
         now: InstantSeconds,
         utc_offset_minutes: i32,
+        appearance: AppearanceMode,
     ) -> Result<Vec<DueDynamicStill>, AutomationStoreError> {
         if self.any_paused() {
             return Ok(Vec::new());
@@ -587,9 +590,17 @@ impl AutomationStore {
                 continue;
             };
             let Some(still_set) = self.still_set(still_set_id) else {
-                return Err(AutomationStoreError::MissingStillSet(still_set_id));
+                // Skip orphaned references so one bad profile cannot abort the whole tick.
+                continue;
             };
-            let selection = active_frame_at(still_set, now, utc_offset_minutes);
+            let selection = active_frame_with_context(
+                still_set,
+                DynamicEvalContext {
+                    now,
+                    utc_offset_minutes,
+                    appearance,
+                },
+            );
             let last = self.history.dynamic_still_state(profile.id)?;
             let decision = decide_transition(last.as_ref(), &selection);
             if !decision.should_apply {
@@ -979,7 +990,9 @@ mod tests {
         let now = InstantSeconds {
             unix_seconds: 1_704_119_400,
         };
-        let due = reloaded.due_dynamic_stills(now, 0).unwrap();
+        let due = reloaded
+            .due_dynamic_stills(now, 0, AppearanceMode::Light)
+            .unwrap();
         assert_eq!(due.len(), 1);
         assert_eq!(due[0].selection.asset_id, asset_b);
         assert_eq!(due[0].selection.key_label(), "tod:12:00");
@@ -995,7 +1008,9 @@ mod tests {
                 },
             )
             .unwrap();
-        let due_again = reloaded.due_dynamic_stills(now, 0).unwrap();
+        let due_again = reloaded
+            .due_dynamic_stills(now, 0, AppearanceMode::Light)
+            .unwrap();
         assert!(due_again.is_empty());
         let _ = fs::remove_dir_all(root);
     }
@@ -1018,7 +1033,32 @@ mod tests {
         let now = InstantSeconds {
             unix_seconds: 1_704_119_400,
         };
-        assert!(store.due_dynamic_stills(now, 0).unwrap().is_empty());
+        assert!(
+            store
+                .due_dynamic_stills(now, 0, AppearanceMode::Light)
+                .unwrap()
+                .is_empty()
+        );
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn missing_still_set_is_skipped() {
+        let (paths, root) = temp_paths();
+        let mut store = AutomationStore::open(paths).unwrap();
+        let mut profile = Profile::new("Orphan");
+        profile.presentation = easel_core::PresentationMode::DynamicStills;
+        profile.still_set_id = Some(easel_core::DynamicStillSetId::new());
+        store.upsert_profile(profile).unwrap();
+        let now = InstantSeconds {
+            unix_seconds: 1_704_119_400,
+        };
+        assert!(
+            store
+                .due_dynamic_stills(now, 0, AppearanceMode::Light)
+                .unwrap()
+                .is_empty()
+        );
         let _ = fs::remove_dir_all(root);
     }
 }

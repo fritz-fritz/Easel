@@ -17,6 +17,7 @@ directories = "6.0.0"
 easel-core = { path = "../../crates/easel-core" }
 easel-dynamic = { path = "../../crates/easel-dynamic" }
 easel-library = { path = "../../crates/easel-library" }
+easel-platform = { path = "../../crates/easel-platform" }
 easel-scheduler = { path = "../../crates/easel-scheduler" }
 
 [lints]

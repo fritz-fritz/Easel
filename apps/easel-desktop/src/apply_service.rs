@@ -200,11 +200,25 @@ pub fn native_host_fingerprint(
 ) -> String {
     use std::fmt::Write as _;
     let mut material = format!(
-        "v{RENDERER_VERSION}|{}|{:?}|{:?}",
+        "v{RENDERER_VERSION}|{}|{:?}|{:?}|z{:.4}|fx{:.4}|fy{:.4}|pkg={}",
         set.id.to_hyphenated_string(),
         composition.layout_mode,
-        composition.fit_mode
+        composition.fit_mode,
+        composition.zoom,
+        composition.focal_x,
+        composition.focal_y,
+        set.source_package_path.as_deref().unwrap_or("")
     );
+    for frame in &set.frames {
+        let _ = write!(
+            material,
+            "|f{}:{}",
+            frame
+                .source_index
+                .map_or_else(|| "-".into(), |index| index.to_string()),
+            frame.asset_id.to_hyphenated_string()
+        );
+    }
     for display in displays {
         let _ = write!(
             material,

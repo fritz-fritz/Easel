@@ -238,30 +238,33 @@ pub fn save_compose_profile(
     let queue = RotationQueue::from_assets(format!("{name} queue"), vec![asset_id]);
     profile.rotation_queue_id = Some(queue.id);
 
-    let schedule = AutomationStore::schedule_from_compose_index(
-        profile.id,
-        format!("{name} schedule"),
-        schedule_index,
-    )
-    .map_err(|error| error.to_string())?;
-    profile.schedule_id = Some(schedule.id);
-
-    let still_set = if profile.presentation == PresentationMode::DynamicStills {
+    let (still_set, schedule) = if profile.presentation == PresentationMode::DynamicStills {
         let set = DynamicStillSet::default_hourly(format!("{name} stills"), profile.id, asset_id)
             .map_err(|error| error.to_string())?;
         profile.still_set_id = Some(set.id);
-        Some(set)
+        // Dynamic stills are not driven by compose schedule rotation.
+        profile.schedule_id = None;
+        (Some(set), None)
     } else {
-        None
+        let schedule = AutomationStore::schedule_from_compose_index(
+            profile.id,
+            format!("{name} schedule"),
+            schedule_index,
+        )
+        .map_err(|error| error.to_string())?;
+        profile.schedule_id = Some(schedule.id);
+        (None, Some(schedule))
     };
 
     let mut store = automation_store()?;
     store
         .upsert_queue(queue)
         .map_err(|error| error.to_string())?;
-    store
-        .upsert_schedule(schedule)
-        .map_err(|error| error.to_string())?;
+    if let Some(schedule) = schedule {
+        store
+            .upsert_schedule(schedule)
+            .map_err(|error| error.to_string())?;
+    }
     if let Some(still_set) = still_set {
         store
             .upsert_still_set(still_set)
@@ -300,6 +303,8 @@ pub fn import_dynamic_heic_profile(
     profile.focal_x = focal_x;
     profile.focal_y = focal_y;
     profile.presentation = PresentationMode::DynamicStills;
+    // Dynamic stills are driven by the still-set poller / native host — not schedule rotation.
+    profile.schedule_id = None;
 
     let asset_dir =
         crate::library_session::dynamic_stills_dir().join(profile.id.to_hyphenated_string());
@@ -326,7 +331,7 @@ pub fn import_dynamic_heic_profile(
     profile.still_set_id = Some(persisted.still_set.id);
     let queue = RotationQueue::from_assets(
         format!("{name} queue"),
-        persisted.assets.iter().map(|asset| asset.id).collect(),
+        vec![persisted.still_set.fallback_asset_id],
     );
     profile.rotation_queue_id = Some(queue.id);
 

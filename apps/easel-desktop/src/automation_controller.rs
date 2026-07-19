@@ -439,12 +439,13 @@ fn sync_dynamic_stills(
 ) -> Result<Vec<String>, String> {
     use std::path::Path;
 
-    use easel_platform::select_wallpaper_backend;
+    use easel_platform::{select_wallpaper_backend, system_appearance};
 
+    let appearance = system_appearance();
     let due = {
         let store = automation_store()?;
         store
-            .due_dynamic_stills(now, utc_offset_minutes)
+            .due_dynamic_stills(now, utc_offset_minutes, appearance)
             .map_err(|error| error.to_string())?
     };
     if due.is_empty() {
@@ -468,16 +469,9 @@ fn sync_dynamic_stills(
         }
 
         let path = resolve_asset_path(item.selection.asset_id)?;
-        let ready = {
-            let store = automation_store()?;
-            store.prerender_ready_path(item.profile_id, item.selection.asset_id)
-        };
-        let apply_path = if ready.is_file() {
-            ready
-        } else {
-            Path::new(&path).to_path_buf()
-        };
-        let apply_message = apply_service::apply_still(&apply_path, &profile)?;
+        // Always apply from the original asset. Pre-rendered per-display crops must not be
+        // fed back into `apply_still`, which re-composes for every active display.
+        let apply_message = apply_service::apply_still(Path::new(&path), &profile)?;
         let fade_note = if item.request_cross_fade && !capabilities.cross_fade {
             "; cross-fade requested but unsupported (hard cut)"
         } else {
@@ -641,11 +635,8 @@ fn prerender_upcoming(now: InstantSeconds, utc_offset_minutes: i32) -> Result<()
 fn prerender_asset(profile: &Profile, asset_id: AssetId) -> Result<(), String> {
     use std::path::Path;
 
-    use easel_core::resolve_displays;
-    use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
-
-    use crate::display_session;
-
+    // Warm the ready slot with a copy of the original source. Multi-display composition
+    // stays in `apply_still` so a single cropped PNG is never reused as a virtual desktop.
     let path = resolve_asset_path(asset_id)?;
     let store = automation_store()?;
     let staging = store.prerender_staging_path(profile.id, asset_id);
@@ -653,47 +644,13 @@ fn prerender_asset(profile: &Profile, asset_id: AssetId) -> Result<(), String> {
     if ready.is_file() {
         return Ok(());
     }
-    let live = display_session::current_displays();
-    if live.is_empty() {
-        return Err("no displays available for pre-render".into());
-    }
-    let policy = store.hotplug_policy().clone();
-    let resolution = resolve_displays(profile, &live, &policy);
-    if !resolution.should_apply || resolution.active_displays.is_empty() {
-        return Ok(());
-    }
-    let displays = resolution.active_displays;
-    let mut request_profile = profile.clone();
-    request_profile.displays = displays.iter().map(|display| display.id).collect();
     if let Some(parent) = staging.parent() {
         std::fs::create_dir_all(parent).map_err(|error| error.to_string())?;
     }
-    let request = RenderRequest {
-        source_path: Path::new(&path).to_path_buf(),
-        displays: displays.clone(),
-        composition: CompositionSettings::from_profile(&request_profile),
-        purpose: RenderPurpose::StaticWallpaper,
-    };
-    // Raster into a temp dir then copy the first display output into staging.
-    let output_dir = store.prerender_dir().join("jobs").join(format!(
-        "{}-{}",
-        profile.id.to_hyphenated_string(),
-        asset_id.to_hyphenated_string()
-    ));
-    let outputs = RasterJob {
-        request,
-        output_dir: output_dir.clone(),
-    }
-    .execute()
-    .map_err(|error| error.to_string())?;
-    let first = outputs
-        .first()
-        .ok_or_else(|| "pre-render produced no outputs".to_string())?;
-    std::fs::copy(&first.path, &staging).map_err(|error| error.to_string())?;
+    std::fs::copy(Path::new(&path), &staging).map_err(|error| error.to_string())?;
     store
         .promote_prerender(&staging, &ready)
         .map_err(|error| error.to_string())?;
-    let _ = std::fs::remove_dir_all(output_dir);
     Ok(())
 }
 

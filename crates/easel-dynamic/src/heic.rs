@@ -62,6 +62,10 @@ impl ImportedDynamicDesktop {
         set.schedule_kind = self.schedule_kind;
         set.source_package_path = Some(self.source_path.display().to_string());
         set.request_cross_fade = true;
+        // Apple solar HEIC metadata does not carry observer lat/lon. Leave unset so
+        // evaluation does not silently use NYC defaults — callers must set location.
+        set.latitude_deg = None;
+        set.longitude_deg = None;
         set.frames = self
             .frames
             .iter()

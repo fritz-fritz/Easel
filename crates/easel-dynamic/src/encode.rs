@@ -38,11 +38,14 @@ pub fn encode_dynamic_heic(
     if frames.is_empty() {
         return Err(HeicEncodeError::NoFrames);
     }
-    let mut keys_by_index = HashMap::new();
+    // Decode matches metadata keys against top-level image enumeration order (0..N-1),
+    // so XMP indices must be contiguous encode ordinals — not arbitrary `EncodeFrame.index`.
     let mut ordered = frames.to_vec();
     ordered.sort_by_key(|frame| frame.index);
-    for frame in &ordered {
-        keys_by_index.insert(frame.index, frame.key);
+    let mut keys_by_index = HashMap::new();
+    for (encode_index, frame) in ordered.iter().enumerate() {
+        let index = u32::try_from(encode_index).unwrap_or(u32::MAX);
+        keys_by_index.insert(index, frame.key);
     }
     let xmp = build_apple_xmp(flavor, &keys_by_index)?;
 
@@ -272,5 +275,34 @@ mod tests {
                 mode: AppearanceMode::Light
             }
         ));
+    }
+
+    #[test]
+    fn remaps_sparse_frame_indices_to_encode_order() {
+        let dir = tempfile::tempdir().unwrap();
+        let path = dir.path().join("sparse.heic");
+        let frames = vec![
+            EncodeFrame {
+                index: 10,
+                key: DynamicStillKey::TimeOfDay {
+                    time: LocalTimeOfDay::new(18, 0).unwrap(),
+                },
+                image: solid(32, 24, [20, 20, 40, 255]),
+            },
+            EncodeFrame {
+                index: 3,
+                key: DynamicStillKey::TimeOfDay {
+                    time: LocalTimeOfDay::new(6, 0).unwrap(),
+                },
+                image: solid(32, 24, [200, 80, 40, 255]),
+            },
+        ];
+        encode_dynamic_heic(&frames, AppleMetadataFlavor::H24, &path).expect("encode");
+        let imported = import_dynamic_heic(&path).expect("import");
+        assert_eq!(imported.frames.len(), 2);
+        assert_eq!(imported.frames[0].index, 0);
+        assert_eq!(imported.frames[0].key, frames[1].key);
+        assert_eq!(imported.frames[1].index, 1);
+        assert_eq!(imported.frames[1].key, frames[0].key);
     }
 }

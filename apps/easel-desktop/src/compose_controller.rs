@@ -13,7 +13,7 @@ use std::thread;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use easel_core::{DynamicStillSet, FitMode, LayoutMode, Profile};
+use easel_core::{AssetId, AssetLocation, DynamicStillSet, FitMode, LayoutMode, Profile};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
@@ -278,29 +278,49 @@ impl qobject::ComposeController {
         let minute = ((hour.fract() * 60.0).floor() as u8).min(59);
 
         let still_set = self.as_ref().rust().timeline_still_set.clone();
-        let label = if let Some(set) = still_set.as_ref() {
-            use easel_core::{InstantSeconds, active_frame_at};
+        let (label, frame_path) = if let Some(set) = still_set.as_ref() {
+            use easel_core::{DynamicEvalContext, InstantSeconds, active_frame_with_context};
+            use easel_platform::system_appearance;
             // Anchor to a fixed UTC day so scrubbing only changes local wall time.
             let local_minutes = i64::from(whole_hour) * 60 + i64::from(minute);
             let now = InstantSeconds {
                 unix_seconds: local_minutes * 60,
             };
-            let selection = active_frame_at(set, now, 0);
-            format!(
+            let selection = active_frame_with_context(
+                set,
+                DynamicEvalContext {
+                    now,
+                    utc_offset_minutes: 0,
+                    appearance: system_appearance(),
+                },
+            );
+            let path = resolve_library_asset_path(selection.asset_id);
+            let label = format!(
                 "{} ({}) · {} frames · {:?}",
                 selection.key_label(),
                 selection.asset_id.to_hyphenated_string(),
                 set.frames.len(),
                 set.schedule_kind
-            )
+            );
+            (label, path)
         } else {
-            format!(
-                "tod:{whole_hour:02}:{minute:02} (no still set loaded — import a HEIC or save Dynamic stills)"
+            (
+                format!(
+                    "tod:{whole_hour:02}:{minute:02} (no still set loaded — import a HEIC or save Dynamic stills)"
+                ),
+                None,
             )
         };
         self.as_mut().set_timeline_preview(QString::from(
             format!("Simulated {whole_hour:02}:{minute:02} → {label}").as_str(),
         ));
+        if let Some(path) = frame_path {
+            let current = self.source_path().to_string();
+            if current != path {
+                self.as_mut().set_source_path(QString::from(path.as_str()));
+                self.refresh_preview();
+            }
+        }
     }
 
     fn import_dynamic_heic_from_url(mut self: Pin<&mut Self>, url: QString) {
@@ -596,6 +616,17 @@ fn preview_cache_dir() -> PathBuf {
 
 fn apply_cache_dir() -> PathBuf {
     std::env::temp_dir().join("easel").join("compose-apply")
+}
+
+fn resolve_library_asset_path(asset_id: AssetId) -> Option<String> {
+    use crate::library_session::library_store;
+
+    let library = library_store().ok()?;
+    let asset = library.get_asset(asset_id).ok()??;
+    match asset.location {
+        AssetLocation::Local { path } => Some(path),
+        AssetLocation::Remote { .. } => None,
+    }
 }
 
 #[cfg(test)]

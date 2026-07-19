@@ -162,10 +162,12 @@ pub struct DynamicStillSet {
     pub frames: Vec<DynamicStillFrame>,
     /// Asset used when no keyed frame can be resolved.
     pub fallback_asset_id: AssetId,
-    /// Observer latitude for solar keys (−90..=90).
-    pub latitude_deg: f64,
-    /// Observer longitude for solar keys (−180..=180).
-    pub longitude_deg: f64,
+    /// Observer latitude for solar keys (−90..=90). `None` until the user sets a location.
+    #[serde(default)]
+    pub latitude_deg: Option<f64>,
+    /// Observer longitude for solar keys (−180..=180). `None` until the user sets a location.
+    #[serde(default)]
+    pub longitude_deg: Option<f64>,
     /// Request a cross-fade when the active backend supports it without a live host.
     pub request_cross_fade: bool,
     /// Optional path to the original dynamic HEIC / Plasma package for re-export.
@@ -200,10 +202,19 @@ impl DynamicStillSet {
             schedule_kind: DynamicScheduleKind::TimeOfDay,
             frames: Vec::new(),
             fallback_asset_id,
-            latitude_deg: 40.7128,
-            longitude_deg: -74.0060,
+            latitude_deg: None,
+            longitude_deg: None,
             request_cross_fade: false,
             source_package_path: None,
+        }
+    }
+
+    /// Returns configured observer coordinates when both latitude and longitude are set.
+    #[must_use]
+    pub fn observer_location(&self) -> Option<(f64, f64)> {
+        match (self.latitude_deg, self.longitude_deg) {
+            (Some(latitude_deg), Some(longitude_deg)) => Some((latitude_deg, longitude_deg)),
+            _ => None,
         }
     }
 
@@ -299,11 +310,18 @@ impl DynamicStillSet {
         if self.name.trim().is_empty() {
             return Err(DynamicStillError::EmptyName);
         }
-        if !(-90.0..=90.0).contains(&self.latitude_deg) || !self.latitude_deg.is_finite() {
-            return Err(DynamicStillError::InvalidLatitude(self.latitude_deg));
+        if let Some(latitude_deg) = self.latitude_deg {
+            if !(-90.0..=90.0).contains(&latitude_deg) || !latitude_deg.is_finite() {
+                return Err(DynamicStillError::InvalidLatitude(latitude_deg));
+            }
         }
-        if !(-180.0..=180.0).contains(&self.longitude_deg) || !self.longitude_deg.is_finite() {
-            return Err(DynamicStillError::InvalidLongitude(self.longitude_deg));
+        if let Some(longitude_deg) = self.longitude_deg {
+            if !(-180.0..=180.0).contains(&longitude_deg) || !longitude_deg.is_finite() {
+                return Err(DynamicStillError::InvalidLongitude(longitude_deg));
+            }
+        }
+        if self.latitude_deg.is_some() != self.longitude_deg.is_some() {
+            return Err(DynamicStillError::IncompleteObserver);
         }
         let mut seen = Vec::with_capacity(self.frames.len());
         for frame in &self.frames {
@@ -532,12 +550,14 @@ fn active_time_keyed_frame(set: &DynamicStillSet, ctx: DynamicEvalContext) -> Fr
 }
 
 fn active_solar_position_frame(set: &DynamicStillSet, ctx: DynamicEvalContext) -> FrameSelection {
-    let (altitude, azimuth) = solar_position_deg(
-        ctx.now,
-        ctx.utc_offset_minutes,
-        set.latitude_deg,
-        set.longitude_deg,
-    );
+    let Some((latitude_deg, longitude_deg)) = set.observer_location() else {
+        return fallback_selection(
+            set,
+            "fallback frame (observer location unset — set latitude/longitude for solar evaluation)",
+        );
+    };
+    let (altitude, azimuth) =
+        solar_position_deg(ctx.now, ctx.utc_offset_minutes, latitude_deg, longitude_deg);
     let mut best: Option<(f64, &DynamicStillFrame)> = None;
     for frame in &set.frames {
         let DynamicStillKey::SolarPosition {
@@ -611,9 +631,10 @@ fn resolve_time_key_on_day(
             event,
             offset_minutes,
         } => {
+            let (latitude_deg, longitude_deg) = set.observer_location()?;
             let ordinal = day_of_year(year, month, day);
             let solar_minutes =
-                solar_event_local_minutes(ordinal, set.latitude_deg, set.longitude_deg, event)?;
+                solar_event_local_minutes(ordinal, latitude_deg, longitude_deg, event)?;
             let total = solar_minutes + offset_minutes;
             let wrapped_day = total.div_euclid(24 * 60);
             let minutes_in_day = total.rem_euclid(24 * 60);
@@ -688,6 +709,9 @@ pub enum DynamicStillError {
     /// Longitude must be finite and within ±180°.
     #[error("invalid longitude: {0}")]
     InvalidLongitude(f64),
+    /// Latitude and longitude must both be set or both omitted.
+    #[error("observer latitude and longitude must both be set")]
+    IncompleteObserver,
     /// Solar position sample is out of range.
     #[error("invalid solar position altitude={altitude_deg} azimuth={azimuth_deg}")]
     InvalidSolarPosition {
@@ -799,8 +823,8 @@ mod tests {
         let dusk = AssetId::new();
         let mut set = DynamicStillSet::with_fallback("Solar", ProfileId::new(), dawn);
         set.schedule_kind = DynamicScheduleKind::SolarPosition;
-        set.latitude_deg = 0.0;
-        set.longitude_deg = 0.0;
+        set.latitude_deg = Some(0.0);
+        set.longitude_deg = Some(0.0);
         set.frames = vec![
             DynamicStillFrame {
                 source_index: Some(0),

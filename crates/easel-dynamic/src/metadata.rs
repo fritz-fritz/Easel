@@ -171,7 +171,7 @@ fn parse_appearance_plist(value: &Value) -> Result<AppleDesktopMetadata, Metadat
 }
 
 fn parse_h24_plist(value: &Value) -> Result<AppleDesktopMetadata, MetadataError> {
-    // wallpapper / Apple h24 uses `ti` array with `i` index and `t` time fraction of day,
+    // Apple h24 uses `ti` array with `i` index and `t` time fraction of day,
     // or nested dicts. Accept both `ti` items with `t` in [0,1) and hour/minute fields.
     #[derive(Debug, Deserialize)]
     struct H24Root {

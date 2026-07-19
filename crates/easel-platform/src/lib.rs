@@ -6,6 +6,7 @@
 
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
+mod appearance;
 #[cfg(target_os = "macos")]
 mod macos;
 mod plasma;
@@ -18,6 +19,7 @@ use std::path::{Path, PathBuf};
 use easel_core::{DisplayId, LogicalRect, PlaybackPolicy};
 use thiserror::Error;
 
+pub use appearance::system_appearance;
 #[cfg(target_os = "macos")]
 pub use macos::MacosBackend;
 pub use plasma::{

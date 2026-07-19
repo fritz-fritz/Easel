@@ -239,6 +239,8 @@ fn import_heic(
         Profile::new(display_name.clone())
     };
     profile.presentation = PresentationMode::DynamicStills;
+    // Dynamic stills are driven by the still-set poller / native host — not schedule rotation.
+    profile.schedule_id = None;
 
     let (_, data_dir) = dirs();
     let asset_dir = data_dir
@@ -258,14 +260,8 @@ fn import_heic(
     let fallback = persisted.still_set.fallback_asset_id;
     profile.selected_asset = Some(fallback);
     profile.still_set_id = Some(persisted.still_set.id);
-    let queue = RotationQueue::from_assets(
-        format!("{display_name} queue"),
-        persisted
-            .assets
-            .iter()
-            .map(|asset| asset.id)
-            .collect::<Vec<_>>(),
-    );
+    // Keep a single-asset queue for bookkeeping; do not enqueue every frame for rotation.
+    let queue = RotationQueue::from_assets(format!("{display_name} queue"), vec![fallback]);
     profile.rotation_queue_id = Some(queue.id);
 
     store
@@ -365,7 +361,14 @@ fn show_status(store: &AutomationStore, utc_offset_minutes: i32) -> Result<(), S
         let Some(still_set) = store.still_set(still_set_id) else {
             continue;
         };
-        let selection = easel_core::active_frame_at(still_set, now, utc_offset_minutes);
+        let selection = easel_core::active_frame_with_context(
+            still_set,
+            easel_core::DynamicEvalContext {
+                now,
+                utc_offset_minutes,
+                appearance: easel_platform::system_appearance(),
+            },
+        );
         let last = store
             .history()
             .dynamic_still_state(profile.id)

@@ -51,7 +51,31 @@ impl WallpaperBackend for MacosBackend {
 }
 
 fn set_desktop_picture(path: &Path) -> Result<(), BackendError> {
-    set_desktop_picture_at(1, path)
+    let posix = path
+        .to_str()
+        .ok_or_else(|| BackendError::Platform("wallpaper path is not valid UTF-8".into()))?;
+    // VirtualDesktop is one combined image for every desktop/space the OS enumerates.
+    let script = format!(
+        r#"tell application "System Events"
+  try
+    set desktopCount to count of desktops
+    repeat with desktopIndex from 1 to desktopCount
+      set picture of desktop desktopIndex to POSIX file "{posix}"
+    end repeat
+  end try
+end tell"#
+    );
+    let status = Command::new("osascript")
+        .args(["-e", &script])
+        .status()
+        .map_err(|error| BackendError::Platform(format!("osascript failed: {error}")))?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(BackendError::Platform(format!(
+            "osascript exited with {status}"
+        )))
+    }
 }
 
 fn set_desktop_picture_at(desktop_index: usize, path: &Path) -> Result<(), BackendError> {
