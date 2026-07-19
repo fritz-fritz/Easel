@@ -35,47 +35,49 @@ if (-not $Repo) {
 
 $Base = "libheif-v$Version"
 
-function Get-OccupiedTags([string]$BaseTag) {
-    $occupied = [System.Collections.Generic.HashSet[string]]::new(
+function New-TagSet {
+    return [System.Collections.Generic.HashSet[string]]::new(
         [StringComparer]::OrdinalIgnoreCase
     )
+}
+
+function Get-OccupiedTags([string]$BaseTag) {
+    $occupied = New-TagSet
 
     $releases = gh release list --repo $Repo --limit 200 --json tagName | ConvertFrom-Json
-    foreach ($r in $releases) {
-        if ($r.tagName -eq $BaseTag -or $r.tagName -match "^$([regex]::Escape($BaseTag))-r\d+$") {
-            [void]$occupied.Add([string]$r.tagName)
+    foreach ($r in @($releases)) {
+        if ($null -eq $r) { continue }
+        $name = [string]$r.tagName
+        if ($name -eq $BaseTag -or $name -match "^$([regex]::Escape($BaseTag))-r\d+$") {
+            [void]$occupied.Add($name)
         }
     }
 
     $refs = gh api "repos/$Repo/git/matching-refs/tags/$BaseTag" | ConvertFrom-Json
-    foreach ($ref in $refs) {
+    foreach ($ref in @($refs)) {
+        if ($null -eq $ref) { continue }
         $name = ([string]$ref.ref) -replace '^refs/tags/', ''
         if ($name -eq $BaseTag -or $name -match "^$([regex]::Escape($BaseTag))-r\d+$") {
             [void]$occupied.Add($name)
         }
     }
 
-    return $occupied
+    # Leading comma stops PowerShell from unrolling HashSet -> Object[] (fixed-size).
+    return , $occupied
 }
 
 function Test-TagCreatable([string]$Tag, [string]$Sha) {
-    # Existing release or tag => not creatable for a new published release.
     gh release view $Tag --repo $Repo 2>$null | Out-Null
     if ($LASTEXITCODE -eq 0) { return $false }
 
-    try {
-        gh api "repos/$Repo/git/ref/tags/$Tag" 2>$null | Out-Null
-        if ($LASTEXITCODE -eq 0) { return $false }
-    } catch {
-        # 404 expected when absent
-    }
+    gh api "repos/$Repo/git/ref/tags/$Tag" 2>$null | Out-Null
+    if ($LASTEXITCODE -eq 0) { return $false }
 
     # Immutable-burned names reject ref creation even when no tag/release exists.
     $createOut = gh api -X POST "repos/$Repo/git/refs" `
         -f ref="refs/tags/$Tag" `
         -f sha=$Sha 2>&1
     if ($LASTEXITCODE -ne 0) {
-        # Use ${Tag} — "$Tag:" is a PowerShell parse error.
         Write-Host "tag probe ${Tag}: burned or blocked ($createOut)"
         return $false
     }
@@ -84,10 +86,10 @@ function Test-TagCreatable([string]$Tag, [string]$Sha) {
     return $true
 }
 
-function Get-MaxRebuildNumber([System.Collections.Generic.HashSet[string]]$Occupied, [string]$BaseTag) {
+function Get-MaxRebuildNumber($Occupied, [string]$BaseTag) {
     $max = 0
-    foreach ($name in $Occupied) {
-        if ($name -match "^$([regex]::Escape($BaseTag))-r(\d+)$") {
+    foreach ($name in @($Occupied)) {
+        if ([string]$name -match "^$([regex]::Escape($BaseTag))-r(\d+)$") {
             $n = [int]$Matches[1]
             if ($n -gt $max) { $max = $n }
         }
@@ -114,7 +116,7 @@ switch ($Mode) {
     }
     "first" {
         if ($occupied.Count -gt 0) {
-            $list = ($occupied | Sort-Object) -join ", "
+            $list = (@($occupied) | Sort-Object) -join ", "
             throw "a release/tag for $Base already exists ($list); use workflow_dispatch for a -rN repack"
         }
         if (-not (Test-TagCreatable $Base $HeadSha)) {
@@ -123,8 +125,8 @@ switch ($Mode) {
         Write-Output $Base
     }
     "rebuild" {
-        # Start after the highest known live tag number, then skip burned holes
-        # with create-ref probes (no gh release create retries).
+        # Walk upward from max(live)+1. Burned holes are skipped via create-ref
+        # probes; no need to mutate $occupied (avoids fixed-size-array pitfalls).
         $n = (Get-MaxRebuildNumber $occupied $Base) + 1
         if ($n -lt 1) { $n = 1 }
         $limit = $n + 200
@@ -138,7 +140,6 @@ switch ($Mode) {
                 Write-Output $candidate
                 return
             }
-            [void]$occupied.Add($candidate)
             $n++
         }
         throw "could not find a free rebuild tag under $Base through -r$limit"
