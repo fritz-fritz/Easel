@@ -13,6 +13,21 @@ workspace. It has two distinct build scopes:
   the `qml6-module-qtquick*` modules, `ninja-build`, `clang`, `xvfb`). Build/lint it
   with `CXX=g++ CC=gcc` (matching CI), e.g. `CXX=g++ CC=gcc cargo build -p easel-desktop`.
 
+### Related repositories (multi-repo)
+
+Easel coordinates with two sibling repos under the same owner (referenced in
+`docs/ci-visual-assets-repo.md` and `docs/adr/0009-libheif-prebuilt-deps.md`):
+
+- `github.com/fritz-fritz/easel-ci-visual` — CI visual galleries / GitHub Pages.
+- `github.com/fritz-fritz/easel-deps` — prebuilt Windows libheif for CI.
+
+They are listed in `.cursor/environment.json` under `repositoryDependencies`, which is
+what scopes the Cloud Agent's generated GitHub token to include them so the agent can
+read and push. Token scoping alone is not enough: the Cursor GitHub App must also be
+authorized on each sibling repo (a one-time owner action in GitHub settings). Sibling
+repos are not auto-cloned into `/workspace`; clone on demand (e.g.
+`git clone https://github.com/fritz-fritz/easel-deps`) when you need to push to them.
+
 ### Non-obvious gotchas
 
 - `cxx-qt-build` unconditionally forces `-fuse-ld=gold` on Linux. On this VM image the
@@ -40,6 +55,35 @@ workspace. It has two distinct build scopes:
 - Interactive: an XFCE desktop is available on `DISPLAY=:1`. Launch the full app with
   `DISPLAY=:1 QT_QUICK_CONTROLS_STYLE=Fusion CXX=g++ CC=gcc cargo run -p easel-desktop`.
   It enumerates the live X screen (the VNC display) rather than the smoke fixture layout.
+
+### Multi-display (3 monitors) on the live desktop
+
+- The live app enumerates `Qt.application.screens` (XRandR-backed), so the number of
+  displays it reports equals the number of RandR monitors on `DISPLAY=:1`. The VNC
+  framebuffer is a single output (`VNC-0`), i.e. **one** display by default.
+- To exercise multi-display handling like CI's `DP-1`/`DP-2`/`DP-3` fixture, run
+  `tools/dev/three-displays.sh` — it uses `xrandr --setmonitor` to split the framebuffer
+  into three staggered logical monitors (`DP-1`/`DP-2`/`DP-3`, CI-matching physical mm).
+  `tools/dev/three-displays.sh reset` restores the single monitor. The script is
+  idempotent and defensive, and is wired into `.cursor/environment.json` `start`, so fresh
+  Cloud VMs come up with three monitors already defined. If you launch the app *before*
+  splitting (or change the split while it is open), click **Refresh displays** to re-probe.
+  The split is a live X-server change and is not persisted across VNC restarts; re-run the
+  script (or rely on `start`) after a restart.
+- Actually *setting* the wallpaper on Linux is implemented **only** for KDE Plasma 6
+  (`crates/easel-platform/src/plasma.rs`, via `qdbus`/`org.kde.plasmashell`); there is no
+  XFCE/GNOME/generic-X backend yet. On the XFCE Cloud desktop `select_wallpaper_backend()`
+  returns `NoBackend`, so the Compose **Apply** button cannot push to the compositor here.
+- **Decision: do NOT install KDE Plasma on this Cloud VM.** A generic **X** wallpaper
+  backend is planned and will be the supported path for this environment; until it lands,
+  do not add a KDE/Plasma session just to make live apply work. Validate apply on this VM
+  via the per-display **apply-payload rasters** instead (this is also all CI checks — CI
+  does not set real wallpaper). Reproduce those (three `apply-display-*.png` for the
+  `DP-1/2/3` fixture) with:
+
+  ```
+  EASEL_VISUAL_OUTDIR=<outdir> cargo test -p easel-render write_apply_payload_visual_artifacts
+  ```
 - Headless automation CLI (shared store with the desktop app):
 
   ```
