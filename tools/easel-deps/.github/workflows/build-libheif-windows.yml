@@ -30,6 +30,8 @@ jobs:
           $v = Get-Content versions.json -Raw | ConvertFrom-Json
           $libheif = $v.libheif.version
           $features = ($v.libheif.vcpkg_features -join ",")
+          # actions/cache keys cannot contain commas
+          $featuresKey = ($v.libheif.vcpkg_features -join "+")
           $includeDebug = if ($v.asset.include_debug) { "true" } else { "false" }
 
           # Prefer explicit ref (commit or tag); fall back to legacy "tag" key.
@@ -52,6 +54,7 @@ jobs:
           "vcpkg_ref=$ref" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "vcpkg_ref_kind=$refKind" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "features=$features" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
+          "features_key=$featuresKey" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "include_debug=$includeDebug" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           "asset=$asset" | Out-File -FilePath $env:GITHUB_OUTPUT -Append -Encoding utf8
           Write-Host "libheif=$libheif vcpkg=$refKind/$ref features=$features asset=$asset"
@@ -63,7 +66,7 @@ jobs:
             C:/vcpkg/downloads
             C:/vcpkg/buildtrees
             C:/vcpkg/packages
-          key: vcpkg-${{ env.TRIPLET }}-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features }}
+          key: vcpkg-${{ env.TRIPLET }}-${{ steps.ver.outputs.vcpkg_ref }}-${{ steps.ver.outputs.libheif }}-${{ steps.ver.outputs.features_key }}
 
       - name: Bootstrap vcpkg
         shell: pwsh
@@ -145,17 +148,22 @@ jobs:
           } else {
             $tag = "libheif-v$ver"
           }
+          $triplet = $env:TRIPLET
+          $features = "${{ steps.ver.outputs.features }}"
+          $refKind = "${{ steps.ver.outputs.vcpkg_ref_kind }}"
+          $ref = "${{ steps.ver.outputs.vcpkg_ref }}"
+          $includeDebug = "${{ steps.ver.outputs.include_debug }}"
           $notes = @"
-          Prebuilt MSVC libheif $ver for Easel (``$env:TRIPLET``).
+Prebuilt MSVC libheif $ver for Easel ($triplet).
 
-          - Features: ${{ steps.ver.outputs.features }}
-          - vcpkg ${{ steps.ver.outputs.vcpkg_ref_kind }}: ``${{ steps.ver.outputs.vcpkg_ref }}``
-          - SHA256: ``$sha``
-          - Debug libs: ${{ steps.ver.outputs.include_debug }}
+- Features: $features
+- vcpkg ${refKind}: ``$ref``
+- SHA256: ``$sha``
+- Debug libs: $includeDebug
 
-          Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.
-          The zip root must contain ``.vcpkg-root`` and ``installed/``.
-          "@
+Extract and set ``VCPKG_ROOT`` to the extract root before building Easel.
+The zip root must contain ``.vcpkg-root`` and ``installed/``.
+"@
           $existing = gh release view $tag 2>$null
           if ($LASTEXITCODE -ne 0) {
             gh release create $tag $path $sum --title $tag --notes $notes

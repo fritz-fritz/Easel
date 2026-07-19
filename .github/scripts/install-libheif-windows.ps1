@@ -92,7 +92,7 @@ function Get-StagedLibheifVersion([string]$DestRoot) {
     return $null
 }
 
-function Install-FromEaselDepsZip([string]$ZipPath, [string]$DestRoot, [string]$ExpectedVersion) {
+function Install-FromEaselDepsZip([string]$ZipPath, [string]$DestRoot, [string]$ExpectedVersion, [bool]$StrictVersion) {
     if (Test-Path $DestRoot) { Remove-Item -Recurse -Force $DestRoot }
     $Staging = Join-Path ([System.IO.Path]::GetTempPath()) ("easel-deps-" + [guid]::NewGuid().ToString("n"))
     New-Item -ItemType Directory -Path $Staging | Out-Null
@@ -106,12 +106,21 @@ function Install-FromEaselDepsZip([string]$ZipPath, [string]$DestRoot, [string]$
     if (-not (Test-Path (Join-Path $DestRoot "installed\$Triplet\lib\heif.lib"))) {
         throw "easel-deps zip missing heif.lib"
     }
+    # Owned prebuilds ship aom; the interim vegidio fallback does not. Prefer a
+    # version-mismatched easel-deps zip over falling back when aom.lib is present.
+    if (-not (Test-Path (Join-Path $DestRoot "installed\$Triplet\lib\aom.lib"))) {
+        throw "easel-deps zip missing aom.lib (AVIF encoder required for Easel CI)"
+    }
     $actual = Get-StagedLibheifVersion $DestRoot
     if (-not $actual) {
         throw "easel-deps zip missing libheif version metadata"
     }
     if ($actual -ne $ExpectedVersion) {
-        throw "easel-deps asset claims $ExpectedVersion but heif_version.h/status report $actual"
+        $msg = "easel-deps asset claims $ExpectedVersion but heif_version.h/status report $actual"
+        if ($StrictVersion) {
+            throw $msg
+        }
+        Write-Warning "$msg; accepting until lock.sha256 is set (corrected release)."
     }
 }
 
@@ -182,7 +191,11 @@ if ((Test-Path (Join-Path $Root ".vcpkg-root")) -and (Test-Path $Marker) -and ((
             Invoke-WebRequest -Uri $EaselDepsUrl -OutFile $Zip -UseBasicParsing
             try {
                 Assert-Sha256 -Path $Zip -Expected $ExpectedSha256
-                Install-FromEaselDepsZip -ZipPath $Zip -DestRoot $Root -ExpectedVersion $LibheifVersion
+                # Enforce heif_version.h only once the lock carries a checksum from
+                # a corrected publisher (*.zip.sha256). Until then, prefer the owned
+                # zip (has aom) over the aom-less interim fallback.
+                $strict = [bool]$ExpectedSha256
+                Install-FromEaselDepsZip -ZipPath $Zip -DestRoot $Root -ExpectedVersion $LibheifVersion -StrictVersion:$strict
                 $installedOk = $true
                 Set-Content -Path $Marker -Value $Expected -Encoding ascii
             } catch {

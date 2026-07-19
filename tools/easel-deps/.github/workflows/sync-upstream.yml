@@ -3,7 +3,7 @@ name: Sync libheif upstream
 # Keep versions.json aligned with strukturag/libheif + microsoft/vcpkg.
 # When both publish a newer libheif than we pin, open a PR that bumps the pin
 # (and points vcpkg.ref at the first commit whose port matches). Merging the PR
-# triggers Build libheif (Windows MSVC) via the versions.json path filter.
+# triggers Build libheif (Windows MSVC) via push to main.
 
 on:
   workflow_dispatch:

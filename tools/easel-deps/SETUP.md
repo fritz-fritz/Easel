@@ -2,8 +2,7 @@
 
 Canonical consumer-facing notes for agents working in the Easel repo. The live
 repo is https://github.com/fritz-fritz/easel-deps — keep this scaffold in
-`tools/easel-deps/` in sync and push there when the Cursor GitHub App is
-authorized on that sibling.
+`tools/easel-deps/` in sync and push there when changing the release pipeline.
 
 ## Correctness bug in `libheif-v1.23.1` (first cut)
 
@@ -22,22 +21,20 @@ Fix (already reflected in this scaffold):
 
 ## Apply this scaffold to the sibling repo
 
-This Cloud Agent token currently cannot push to `fritz-fritz/easel-deps`
-(Cursor GitHub App must be authorized on that repo). Until then:
-
 ```bash
-git clone https://github.com/fritz-fritz/easel-deps.git
-cd easel-deps
-git checkout -b cursor/fix-release-sync-a4c5
-git am ../Easel/tools/easel-deps/pending-remote.patch
-# or: copy tools/easel-deps/* over the clone
+# From a checkout that has both repos (Cloud Agent layout):
+cd /path/to/easel-deps
+git checkout -b cursor/fix-libheif-release-<id>
+rsync -a --delete --exclude .git --exclude pending-remote.patch \
+  ../easel/tools/easel-deps/ ./
+git add -A && git commit -m "fix(release): pin real libheif 1.23.1 and automate upstream sync"
 git push -u origin HEAD
-gh pr create --fill
-# after merge:
+# open PR, merge, then:
 gh workflow run build-libheif-windows.yml --repo fritz-fritz/easel-deps
 ```
 
-Alternatively restore from the bundle: `git clone -b main tools/easel-deps.bundle easel-deps-new`.
+Alternatively apply `tools/easel-deps/pending-remote.patch` with `git am`, or restore
+from the bundle: `git clone -b main tools/easel-deps.bundle easel-deps-new`.
 
 Then refresh Easel’s `.github/libheif-windows.lock.json` (or let
 `.github/workflows/sync-easel-deps.yml` open the pin PR once the corrected
