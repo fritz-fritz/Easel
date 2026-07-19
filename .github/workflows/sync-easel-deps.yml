@@ -1,9 +1,10 @@
 name: Sync easel-deps pin
 
 # Keep .github/libheif-windows.lock.json aligned with fritz-fritz/easel-deps
-# GitHub Releases. Only accepts a release whose asset SHA256 sidecar (or API
-# digest) is present and whose tag version matches the lock's intended version
-# scheme (libheif-vX.Y.Z). Opens a PR when the pin should move.
+# GitHub Releases. Only accepts a release that publishes a `*.zip.sha256`
+# sidecar (API digests alone are not enough — the first 1.23.1 cut had a
+# digest but the wrong port) and whose tag matches libheif-vX.Y.Z[-rN].
+# Opens a PR when the pin should move.
 
 on:
   workflow_dispatch:

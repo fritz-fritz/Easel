@@ -68,30 +68,32 @@ def vcpkg_port_at(ref: str, token: str | None) -> dict[str, Any]:
 
 def find_vcpkg_commit_for(version: str, token: str | None) -> tuple[str, str]:
     """Return (commit_sha, port_version) for the newest commit with port >= version."""
-    commits = gh_api(
-        f"/repos/{VCPKG_REPO}/commits?path={VCPKG_PORT_PATH}&per_page=30", token
-    )
-    best: tuple[str, str] | None = None
-    for c in commits:
-        sha = c["sha"]
-        try:
-            port = vcpkg_port_at(sha, token)
-        except urllib.error.HTTPError:
-            continue
-        port_ver = port.get("version") or port.get("version-string")
-        if not port_ver:
-            continue
-        if version_ge(port_ver, version):
-            # First page is newest-first; keep the newest matching commit.
-            if best is None or version_ge(port_ver, best[1]):
-                best = (sha, port_ver)
-                # Newest commit that satisfies is enough.
-                break
-    if best is None:
-        raise SystemExit(
-            f"no microsoft/vcpkg commit found with libheif port >= {version}"
+    # Newest-first; paginate at the GitHub API max so older port bumps still match.
+    page = 1
+    while page <= 20:
+        commits = gh_api(
+            f"/repos/{VCPKG_REPO}/commits?path={VCPKG_PORT_PATH}&per_page=100&page={page}",
+            token,
         )
-    return best
+        if not isinstance(commits, list) or not commits:
+            break
+        for c in commits:
+            sha = c["sha"]
+            try:
+                port = vcpkg_port_at(sha, token)
+            except urllib.error.HTTPError:
+                continue
+            port_ver = port.get("version") or port.get("version-string")
+            if not port_ver:
+                continue
+            if version_ge(port_ver, version):
+                return sha, port_ver
+        if len(commits) < 100:
+            break
+        page += 1
+    raise SystemExit(
+        f"no microsoft/vcpkg commit found with libheif port >= {version}"
+    )
 
 
 def write_output(path: str | None, key: str, value: str) -> None:
