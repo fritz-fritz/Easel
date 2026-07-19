@@ -81,8 +81,8 @@ jobs:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
         with:
-          # Bust caches that still emit aom/x265 link lines from old cargo-vcpkg builds.
-          prefix-key: easel-libheif-prebuilt-v1
+          # Bust when Windows libheif install strategy changes.
+          prefix-key: easel-deps-libheif-v1.23.1
       - name: Install libheif (Linux)
         if: runner.os == 'Linux'
         run: |
@@ -193,7 +193,7 @@ jobs:
 
       - uses: Swatinem/rust-cache@v2
         with:
-          prefix-key: easel-libheif-prebuilt-v1
+          prefix-key: easel-deps-libheif-v1.23.1
 
       - name: Install libheif (Windows prebuilt)
         if: runner.os == 'Windows'

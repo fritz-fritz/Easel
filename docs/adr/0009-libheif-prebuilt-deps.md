@@ -52,8 +52,10 @@ Homebrew becomes a bottleneck.
 - Codec/CRT/library naming is under our control (avoids `x265-static` vs `x265`,
   missing `aom`, `/MD` mismatches).
 - One more repo to maintain; schedule rebuilds when bumping libheif.
-- Until the sibling repo exists, CI may use a documented interim zip with a
-  cache-bust key so old vcpkg link lines do not linger in `rust-cache`.
+- First release published: `libheif-v1.23.1` /
+  `libheif-msvc-x64-windows-static-md-1.23.1.zip` (vcpkg port libheif 1.21.2 +
+  aom/hevc). Easel CI prefers this asset via
+  `.github/scripts/install-libheif-windows.ps1`.
 
 ## References
 

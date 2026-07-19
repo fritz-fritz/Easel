@@ -1,8 +1,9 @@
 # Install prebuilt MSVC static libheif into a minimal vcpkg tree for libheif-sys.
 #
 # Preferred source: fritz-fritz/easel-deps GitHub Releases (owned prebuilds).
-# Interim fallback: vegidio/binaries-heif (HEVC only; no aom) if easel-deps has
-# not published the pinned asset yet.
+# See https://github.com/fritz-fritz/easel-deps/releases
+# Interim fallback: vegidio/binaries-heif only if the pinned easel-deps asset
+# is missing (should not happen once libheif-v* releases are cut).
 #
 # Usage (from repo root, PowerShell):
 #   .\.github\scripts\install-libheif-windows.ps1
@@ -31,11 +32,17 @@ $Root = if ($env:EASEL_VCPKG_ROOT) {
 }
 
 function Test-UrlExists([string]$Url) {
+    # GitHub release CDNs often reject HEAD; probe with a 1-byte ranged GET.
     try {
-        $resp = Invoke-WebRequest -Uri $Url -Method Head -UseBasicParsing -MaximumRedirection 5
+        $resp = Invoke-WebRequest -Uri $Url -Method Get -UseBasicParsing -Headers @{ Range = "bytes=0-0" }
         return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400)
     } catch {
-        return $false
+        try {
+            $resp = Invoke-WebRequest -Uri $Url -Method Head -UseBasicParsing -MaximumRedirection 5
+            return ($resp.StatusCode -ge 200 -and $resp.StatusCode -lt 400)
+        } catch {
+            return $false
+        }
     }
 }
 
