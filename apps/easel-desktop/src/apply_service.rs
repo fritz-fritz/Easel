@@ -280,7 +280,7 @@ mod tests {
 
     #[test]
     fn plasma_dense_solar_skips_native_host() {
-        use easel_core::{AssetId, DynamicStillSet, DynamicScheduleKind, ProfileId};
+        use easel_core::{AssetId, DynamicScheduleKind, DynamicStillSet, ProfileId};
 
         let asset = AssetId::new();
         let mut set = DynamicStillSet::default_hourly("Solar", ProfileId::new(), asset).unwrap();

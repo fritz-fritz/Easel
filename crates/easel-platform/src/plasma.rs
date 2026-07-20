@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use url::Url;
 
 use crate::plasma_state::{
-    publish_plasma_wallpaper_state, wallpaper_geometry_fingerprint, plasma_wallpaper_state_dir,
+    plasma_wallpaper_state_dir, publish_plasma_wallpaper_state, wallpaper_geometry_fingerprint,
 };
 use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
@@ -112,10 +112,8 @@ fn apply_per_display_via_easel_plugin(displays: &[DisplayWallpaper]) -> Result<(
     let state_path = publish_plasma_wallpaper_state(displays)?;
     let fingerprint = wallpaper_geometry_fingerprint(displays);
     let stamp_path = plasma_wallpaper_state_dir().join("bound.fingerprint");
-    let needs_bind = std::fs::read_to_string(&stamp_path)
-        .ok()
-        .as_deref()
-        != Some(fingerprint.as_str());
+    let needs_bind =
+        std::fs::read_to_string(&stamp_path).ok().as_deref() != Some(fingerprint.as_str());
     if needs_bind {
         let script = build_easel_plugin_bind_script(displays, &state_path)?;
         evaluate_plasma_script(&script)?;
