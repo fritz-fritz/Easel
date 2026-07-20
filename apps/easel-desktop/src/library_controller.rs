@@ -305,12 +305,11 @@ fn path_from_file_url(raw: &str) -> PathBuf {
     if trimmed.is_empty() {
         return PathBuf::new();
     }
-    if let Ok(url) = Url::parse(trimmed) {
-        if url.scheme() == "file" {
-            if let Ok(path) = url.to_file_path() {
-                return path;
-            }
-        }
+    if let Ok(url) = Url::parse(trimmed)
+        && url.scheme() == "file"
+        && let Ok(path) = url.to_file_path()
+    {
+        return path;
     }
     PathBuf::from(trimmed)
 }
@@ -327,13 +326,13 @@ fn removal_path_candidates(path: &Path) -> Vec<String> {
     push_unique(&mut candidates, path.to_string_lossy().into_owned());
     if let Ok(canonical) = fs::canonicalize(path) {
         push_unique(&mut candidates, canonical.to_string_lossy().into_owned());
-    } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name()) {
-        if let Ok(parent_canonical) = fs::canonicalize(parent) {
-            push_unique(
-                &mut candidates,
-                parent_canonical.join(name).to_string_lossy().into_owned(),
-            );
-        }
+    } else if let (Some(parent), Some(name)) = (path.parent(), path.file_name())
+        && let Ok(parent_canonical) = fs::canonicalize(parent)
+    {
+        push_unique(
+            &mut candidates,
+            parent_canonical.join(name).to_string_lossy().into_owned(),
+        );
     }
     candidates
 }

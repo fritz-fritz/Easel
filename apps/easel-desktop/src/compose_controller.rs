@@ -594,12 +594,11 @@ fn path_from_file_url(raw: &str) -> PathBuf {
         return PathBuf::new();
     }
 
-    if let Ok(url) = Url::parse(trimmed) {
-        if url.scheme() == "file" {
-            if let Ok(path) = url.to_file_path() {
-                return path;
-            }
-        }
+    if let Ok(url) = Url::parse(trimmed)
+        && url.scheme() == "file"
+        && let Ok(path) = url.to_file_path()
+    {
+        return path;
     }
 
     PathBuf::from(trimmed)

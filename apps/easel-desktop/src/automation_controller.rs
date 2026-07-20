@@ -459,13 +459,13 @@ fn sync_dynamic_stills(
 
     for item in due {
         let (profile, still_set) = load_dynamic_profile(&item)?;
-        if capabilities.native_dynamic_bundle {
-            if let Some(message) = try_apply_native_dynamic_due(&profile, &still_set, &item)? {
-                if !message.is_empty() {
-                    messages.push(message);
-                }
-                continue;
+        if capabilities.native_dynamic_bundle
+            && let Some(message) = try_apply_native_dynamic_due(&profile, &still_set, &item)?
+        {
+            if !message.is_empty() {
+                messages.push(message);
             }
+            continue;
         }
 
         let path = resolve_asset_path(item.selection.asset_id)?;
