@@ -120,11 +120,12 @@ supported live backend, within documented CPU/GPU and power budgets.
 `net.fritztech.easel.wallpaper`, `install.sh`, `easel_plasma_plugin_id()` /
 `preferred_still_wallpaper_plugin_id()`, and still apply prefers the Easel plugin when
 installed (falls back to `org.kde.image`). Local media probe + bounded posters landed:
-GIF/`ffprobe` metadata in `easel-library`, `render_poster` in `easel-render`, indexer
+GIF metadata and first-frame posters via pure Rust (`image` / `easel-render`), indexer
 writes `{data}/posters/{asset_id}.png`, Library grid prefers poster previews for
-live-surface assets. Remaining: schedule/IPC so dense solar can leave the still poller,
-Qt Multimedia preview, shared clock compositor, power/lock policies, and live-host spikes
-on Windows/macOS.
+live-surface assets. Video containers are recognized but not indexed yet (Qt Multimedia
+path, no `ffmpeg`). Remaining: schedule/IPC so dense solar can leave the still poller,
+Qt Multimedia preview + video probe/posters, shared clock compositor, power/lock policies,
+and live-host spikes on Windows/macOS.
 
 ## Stage 7 — Platform breadth and correction
 

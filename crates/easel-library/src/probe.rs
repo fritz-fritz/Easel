@@ -2,18 +2,19 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Local animated-image and video metadata probing with bounded poster extraction.
+//! Local media probing with bounded poster extraction (pure Rust).
+//!
+//! Stage 6.2 indexes still images and GIF animated images via the `image` crate.
+//! Video containers are recognized but not probed yet — decoding and posters will
+//! use Qt Multimedia (no external `ffmpeg`/`ffprobe` dependency).
 
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
-use std::time::{Duration, Instant};
 
-use easel_core::{AssetId, FrameRate, MediaDimensions, MediaMetadata};
+use easel_core::{AssetId, MediaDimensions, MediaMetadata};
 use easel_render::{POSTER_MAX_EDGE, atomic_write_png, render_poster};
 use image::AnimationDecoder;
 use image::codecs::gif::GifDecoder;
-use serde::Deserialize;
 use thiserror::Error;
 
 /// Supported still-image file extensions for library indexing.
@@ -22,7 +23,7 @@ const STILL_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", 
 /// Animated-image extensions indexed as live-surface media.
 const ANIMATED_EXTENSIONS: &[&str] = &["gif"];
 
-/// Video container extensions probed when `ffprobe` is available.
+/// Video container extensions reserved for a future Qt Multimedia probe.
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "mkv", "mov", "m4v"];
 
 /// Returns whether `extension` is a still-image type indexed by Easel.
@@ -32,12 +33,10 @@ pub fn still_image_extension(extension: &str) -> bool {
     STILL_EXTENSIONS.iter().any(|candidate| *candidate == lower)
 }
 
-/// Returns whether `extension` is a local media type Easel indexes.
+/// Returns whether `extension` is a local media type Easel indexes today.
 #[must_use]
 pub fn local_media_extension(extension: &str) -> bool {
-    still_image_extension(extension)
-        || animated_image_extension(extension)
-        || video_extension(extension)
+    still_image_extension(extension) || animated_image_extension(extension)
 }
 
 /// Returns whether `extension` is an animated image container.
@@ -49,7 +48,10 @@ pub fn animated_image_extension(extension: &str) -> bool {
         .any(|candidate| *candidate == lower)
 }
 
-/// Returns whether `extension` is a video container probed via `ffprobe`.
+/// Returns whether `extension` is a known video container.
+///
+/// Video files are not indexed yet; metadata and posters will come from Qt
+/// Multimedia rather than spawning `ffmpeg`/`ffprobe`.
 #[must_use]
 pub fn video_extension(extension: &str) -> bool {
     let lower = extension.to_ascii_lowercase();
@@ -66,10 +68,7 @@ pub fn probe_local_media(path: &Path) -> Option<MediaMetadata> {
     if animated_image_extension(extension) {
         return probe_animated_image(path);
     }
-    if video_extension(extension) {
-        return probe_video(path);
-    }
-    if crate::probe::still_image_extension(extension) {
+    if still_image_extension(extension) {
         return probe_still_image(path);
     }
     None
@@ -91,22 +90,18 @@ pub fn write_poster_for_asset(
     if !metadata.requires_live_surface() {
         return Ok(None);
     }
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if !animated_image_extension(extension) {
+        return Ok(None);
+    }
     std::fs::create_dir_all(posters_dir)?;
     let dest = poster_path_for_asset(posters_dir, asset_id);
-    if animated_image_extension(
-        source
-            .extension()
-            .and_then(|value| value.to_str())
-            .unwrap_or_default(),
-    ) {
-        let poster = render_poster(source, POSTER_MAX_EDGE)?;
-        atomic_write_png(&dest, &poster)?;
-        return Ok(Some(dest));
-    }
-    if extract_video_poster(source, &dest, POSTER_MAX_EDGE)? {
-        return Ok(Some(dest));
-    }
-    Ok(None)
+    let poster = render_poster(source, POSTER_MAX_EDGE)?;
+    atomic_write_png(&dest, &poster)?;
+    Ok(Some(dest))
 }
 
 /// Media probe or poster extraction failure.
@@ -150,18 +145,6 @@ fn probe_animated_image(path: &Path) -> Option<MediaMetadata> {
     })
 }
 
-fn probe_video(path: &Path) -> Option<MediaMetadata> {
-    let info = ffprobe_video(path)?;
-    Some(MediaMetadata::Video {
-        dimensions: info.dimensions,
-        duration_ms: info.duration_ms,
-        frame_rate: info.frame_rate,
-        container: info.container,
-        video_codec: info.video_codec,
-        has_audio: info.has_audio,
-    })
-}
-
 fn image_dimensions(path: &Path) -> Option<MediaDimensions> {
     let (width, height) = image::image_dimensions(path).ok()?;
     if width == 0 || height == 0 {
@@ -195,151 +178,6 @@ fn gif_timing(path: &Path) -> Option<(Option<u32>, Option<u64>)> {
             None
         },
     ))
-}
-
-struct FfprobeVideo {
-    dimensions: MediaDimensions,
-    duration_ms: Option<u64>,
-    frame_rate: Option<FrameRate>,
-    container: Option<String>,
-    video_codec: Option<String>,
-    has_audio: bool,
-}
-
-fn ffprobe_video(path: &Path) -> Option<FfprobeVideo> {
-    let output = Command::new("ffprobe")
-        .args([
-            "-v",
-            "quiet",
-            "-print_format",
-            "json",
-            "-show_streams",
-            "-show_format",
-        ])
-        .arg(path)
-        .stdout(Stdio::piped())
-        .stderr(Stdio::null())
-        .output()
-        .ok()?;
-    if !output.status.success() {
-        return None;
-    }
-    let parsed: FfprobeJson = serde_json::from_slice(&output.stdout).ok()?;
-    let video = parsed
-        .streams
-        .iter()
-        .find(|stream| stream.codec_type == "video")?;
-    let width = video.width?;
-    let height = video.height?;
-    if width == 0 || height == 0 {
-        return None;
-    }
-    let has_audio = parsed
-        .streams
-        .iter()
-        .any(|stream| stream.codec_type == "audio");
-    let duration_ms = parsed
-        .format
-        .as_ref()
-        .and_then(|format| format.duration.as_deref())
-        .and_then(|value| value.parse::<f64>().ok())
-        .map(|seconds| {
-            let millis = (seconds * 1000.0).round().max(0.0);
-            if !millis.is_finite() {
-                return 0;
-            }
-            #[allow(
-                clippy::cast_possible_truncation,
-                clippy::cast_sign_loss,
-                clippy::cast_precision_loss
-            )]
-            {
-                millis.min(u64::MAX as f64) as u64
-            }
-        });
-    let frame_rate = video.avg_frame_rate.as_deref().and_then(parse_frame_rate);
-    Some(FfprobeVideo {
-        dimensions: MediaDimensions { width, height },
-        duration_ms,
-        frame_rate,
-        container: parsed
-            .format
-            .as_ref()
-            .and_then(|format| format.format_name.clone()),
-        video_codec: video.codec_name.clone(),
-        has_audio,
-    })
-}
-
-fn parse_frame_rate(value: &str) -> Option<FrameRate> {
-    let (numer, denom) = value.split_once('/')?;
-    let numerator = numer.trim().parse().ok()?;
-    let denominator = denom.trim().parse().ok()?;
-    if numerator == 0 || denominator == 0 {
-        return None;
-    }
-    Some(FrameRate {
-        numerator,
-        denominator,
-    })
-}
-
-fn extract_video_poster(source: &Path, dest: &Path, max_edge: u32) -> Result<bool, ProbeError> {
-    if Command::new("ffmpeg")
-        .arg("-version")
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .is_err()
-    {
-        return Ok(false);
-    }
-    let scale = format!("scale={max_edge}:{max_edge}:force_original_aspect_ratio=decrease");
-    let mut child = Command::new("ffmpeg")
-        .args(["-y", "-loglevel", "error", "-ss", "0", "-i"])
-        .arg(source)
-        .args(["-frames:v", "1", "-vf", &scale, "-update", "1"])
-        .arg(dest)
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .map_err(|error| ProbeError::Poster(error.to_string()))?;
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(status) = child
-            .try_wait()
-            .map_err(|error| ProbeError::Poster(error.to_string()))?
-        {
-            return Ok(status.success() && dest.is_file());
-        }
-        if Instant::now() >= deadline {
-            let _ = child.kill();
-            let _ = child.wait();
-            return Ok(false);
-        }
-        std::thread::sleep(Duration::from_millis(50));
-    }
-}
-
-#[derive(Debug, Deserialize)]
-struct FfprobeJson {
-    streams: Vec<FfprobeStream>,
-    format: Option<FfprobeFormat>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FfprobeStream {
-    codec_type: String,
-    codec_name: Option<String>,
-    width: Option<u32>,
-    height: Option<u32>,
-    avg_frame_rate: Option<String>,
-}
-
-#[derive(Debug, Deserialize)]
-struct FfprobeFormat {
-    duration: Option<String>,
-    format_name: Option<String>,
 }
 
 #[cfg(test)]
@@ -394,5 +232,15 @@ mod tests {
         assert!(width <= POSTER_MAX_EDGE);
         assert!(height <= POSTER_MAX_EDGE);
         let _ = std::fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn video_extensions_are_recognized_but_not_indexed() {
+        assert!(video_extension("mp4"));
+        assert!(!local_media_extension("mp4"));
+        let path = std::env::temp_dir().join(format!("easel-probe-video-{}.mp4", Uuid::new_v4()));
+        std::fs::write(&path, b"not a real video").unwrap();
+        assert!(probe_local_media(&path).is_none());
+        let _ = std::fs::remove_file(path);
     }
 }

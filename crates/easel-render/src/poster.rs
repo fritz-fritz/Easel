@@ -60,7 +60,14 @@ mod tests {
 
     #[test]
     fn poster_scales_down_large_still() {
-        let path = std::env::temp_dir().join(format!("easel-poster-{}.png", std::process::id()));
+        let unique = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |duration| duration.as_nanos());
+        let path = std::env::temp_dir().join(format!(
+            "easel-poster-{}-{}.png",
+            std::process::id(),
+            unique
+        ));
         RgbImage::from_pixel(1024, 512, Rgb([1, 2, 3]))
             .save(&path)
             .unwrap();
