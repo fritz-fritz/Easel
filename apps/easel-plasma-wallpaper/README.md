@@ -9,14 +9,16 @@ See [ADR 0008](../../docs/adr/0008-plasma-wallpaper-plugin-host.md).
 ## Install (development)
 
 ```sh
-PLUGIN_ID=net.fritztech.easel.wallpaper
-DEST="${XDG_DATA_HOME:-$HOME/.local/share}/plasma/wallpapers/${PLUGIN_ID}"
-mkdir -p "$DEST"
-cp -a metadata.json contents "$DEST/"
+./apps/easel-plasma-wallpaper/install.sh
 # Restart plasmashell or log out/in, then choose Wallpaper type "Easel".
 ```
 
+`PlasmaBackend` detects `net.fritztech.easel.wallpaper` under the usual Plasma
+wallpaper roots and prefers it for still-frame apply. Appearance day/night
+packages still use built-in `org.kde.image` + KNightTime; dense solar HEIC still
+uses zzag when present until schedule IPC lands.
+
 ## Status
 
-Scaffold only: shows the `Image` config key (same contract as `org.kde.image`).
-Dense solar scheduling and live media IPC land with Stage 6 follow-ups.
+Stage 6.1: still-image host with `Image` config (same contract as `org.kde.image`).
+Dense solar evaluation and live media IPC are Stage 6 follow-ups.
