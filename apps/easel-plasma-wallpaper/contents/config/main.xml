@@ -6,7 +6,11 @@
   <kcfgfile name=""/>
   <group name="General">
     <entry name="Image" type="String">
-      <label>Current still image path or file URL written by Easel</label>
+      <label>Current still image path or file URL (seed / fallback)</label>
+      <default></default>
+    </entry>
+    <entry name="StateFile" type="String">
+      <label>Absolute path to Easel plasma-wallpaper active.json IPC file</label>
       <default></default>
     </entry>
   </group>

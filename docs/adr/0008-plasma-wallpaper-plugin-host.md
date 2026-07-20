@@ -43,10 +43,12 @@ tighter OS integration while Easel’s Compose/Library GUI remains the managemen
 
 - Scaffold lives at `apps/easel-plasma-wallpaper/` (KPackage + QML); desktop packaging
   installs it beside the app.
-- Detection joins `plasma_dynamic_plugin_id()` / a new `easel_plasma_plugin_id()` probe.
-- IPC contract (file watch, local socket, or D-Bus) between desktop automation and the
-  plugin is required before dense solar can leave the still poller — tracked as Stage 6
-  work started from this ADR.
+- Detection joins `plasma_dynamic_plugin_id()` / `easel_plasma_plugin_id()` probe.
+- Still-frame IPC: desktop writes `{data}/plasma-wallpaper/active.json`; the Easel
+  plugin polls it and updates `Image` without `evaluateScript` on every tick
+  (Stage 6.3). Topology/plugin bind still uses a one-shot D-Bus script.
+- In-plugin schedule evaluation for dense solar HEIC packages remains a later
+  Stage 6 item; until then zzag or the still poller + IPC path applies.
 - Docs must say: stock Plasma day/night ≠ Apple Dynamic Desktop; Easel plugin ≈ portable
   schedule host under Plasma’s wallpaper API.
 

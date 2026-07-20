@@ -123,9 +123,11 @@ installed (falls back to `org.kde.image`). Local media probe + bounded posters l
 GIF metadata and first-frame posters via pure Rust (`image` / `easel-render`), indexer
 writes `{data}/posters/{asset_id}.png`, Library grid prefers poster previews for
 live-surface assets. Video containers are recognized but not indexed yet (Qt Multimedia
-path, no `ffmpeg`). Remaining: schedule/IPC so dense solar can leave the still poller,
-Qt Multimedia preview + video probe/posters, shared clock compositor, power/lock policies,
-and live-host spikes on Windows/macOS.
+path, no `ffmpeg`). Plasma plugin still-frame IPC landed: `active.json` under
+`{data}/plasma-wallpaper/`, plugin polls + geometry match, D-Bus bind only when topology
+changes. Remaining: in-plugin dense-solar HEIC evaluation (retire zzag), Qt Multimedia
+preview + video probe/posters, shared clock compositor, power/lock policies, and
+live-host spikes on Windows/macOS.
 
 ## Stage 7 — Platform breadth and correction
 

@@ -14,11 +14,21 @@ See [ADR 0008](../../docs/adr/0008-plasma-wallpaper-plugin-host.md).
 ```
 
 `PlasmaBackend` detects `net.fritztech.easel.wallpaper` under the usual Plasma
-wallpaper roots and prefers it for still-frame apply. Appearance day/night
-packages still use built-in `org.kde.image` + KNightTime; dense solar HEIC still
-uses zzag when present until schedule IPC lands.
+wallpaper roots and prefers it for still-frame apply.
+
+## Still-frame IPC
+
+Desktop automation writes `{data}/plasma-wallpaper/active.json` after each
+still apply. The plugin polls that file (~750ms) and picks the entry whose
+geometry matches this containment’s screen. After the first bind (plugin +
+`StateFile` + seed `Image` via D-Bus), subsequent dense-solar ticks only update
+the JSON — no `PlasmaShell.evaluateScript` until display topology changes.
+
+Appearance day/night packages still use built-in `org.kde.image` + KNightTime.
+Dense solar HEIC packages still use zzag when present; still-poller frames use
+this IPC path when the Easel plugin is installed.
 
 ## Status
 
-Stage 6.1: still-image host with `Image` config (same contract as `org.kde.image`).
-Dense solar evaluation and live media IPC are Stage 6 follow-ups.
+Stage 6.3: still-image host with `Image` + `StateFile` IPC. Live media and
+in-plugin schedule evaluation remain follow-ups.
