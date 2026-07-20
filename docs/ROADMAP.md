@@ -116,6 +116,13 @@ present (ADR 0007); otherwise the still poller. Windows remains still-poller-onl
 Exit: silent local motion media spans multiple displays without visible drift on at least one
 supported live backend, within documented CPU/GPU and power budgets.
 
+**Status:** In progress. Scaffold + still-frame host path landed: package
+`net.fritztech.easel.wallpaper`, `install.sh`, `easel_plasma_plugin_id()` /
+`preferred_still_wallpaper_plugin_id()`, and still apply prefers the Easel plugin when
+installed (falls back to `org.kde.image`). Remaining: schedule/IPC so dense solar can leave
+the still poller, animated/video metadata + posters, Qt Multimedia preview, shared clock
+compositor, power/lock policies, and live-host spikes on Windows/macOS.
+
 ## Stage 7 — Platform breadth and correction
 
 - Additional Linux desktops based on explicit backend capability tests.

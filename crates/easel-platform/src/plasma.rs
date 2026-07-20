@@ -15,6 +15,12 @@ use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
 };
 
+/// Plasma `KPackage` id for the Easel wallpaper plugin (ADR 0008).
+pub const EASEL_PLASMA_WALLPAPER_PLUGIN_ID: &str = "net.fritztech.easel.wallpaper";
+
+/// Built-in Plasma still-image wallpaper plugin.
+const ORG_KDE_IMAGE: &str = "org.kde.image";
+
 /// Plasma still-image / optional native-dynamic backend using session D-Bus scripting.
 #[derive(Clone, Copy, Debug, Default)]
 pub struct PlasmaBackend;
@@ -32,7 +38,8 @@ impl WallpaperBackend for PlasmaBackend {
             workspaces: false,
             lock_screen: false,
             // Built-in Plasma day/night packages (KNightTime) always qualify; dense solar HEIC
-            // additionally needs the community dynamic plugin (see ADR 0006).
+            // additionally needs the community dynamic plugin (see ADR 0006). Easel's own
+            // Plasma wallpaper plugin hosts still frames (and later live media) when installed.
             native_dynamic_bundle: true,
             cross_fade: false,
         }
@@ -57,13 +64,15 @@ impl WallpaperBackend for PlasmaBackend {
                     })
                 });
                 let (plugin, sunrise_mode) = if uses_heic {
+                    // Dense solar HEIC stays on zzag (or similar) until the Easel plugin
+                    // evaluates schedules in-process / via IPC (Stage 6 follow-up).
                     (
                         plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?,
                         false,
                     )
                 } else {
                     // Built-in day/night wallpaper packages via org.kde.image + KNightTime.
-                    ("org.kde.image", true)
+                    (ORG_KDE_IMAGE, true)
                 };
                 let script = build_plasma_native_dynamic_script(displays, plugin, sunrise_mode)?;
                 evaluate_plasma_script(&script)
@@ -71,6 +80,25 @@ impl WallpaperBackend for PlasmaBackend {
             WallpaperOutput::VirtualDesktop(_) => Err(BackendError::UnsupportedOutput),
         }
     }
+}
+
+/// Returns the Easel Plasma wallpaper plugin id when the package is installed.
+#[must_use]
+pub fn easel_plasma_plugin_id() -> Option<&'static str> {
+    static PLUGIN: OnceLock<Option<&'static str>> = OnceLock::new();
+    *PLUGIN.get_or_init(|| {
+        if wallpaper_plugin_installed(EASEL_PLASMA_WALLPAPER_PLUGIN_ID, &plasma_wallpaper_roots()) {
+            Some(EASEL_PLASMA_WALLPAPER_PLUGIN_ID)
+        } else {
+            None
+        }
+    })
+}
+
+/// Plugin id used for still-frame apply: Easel package when present, else `org.kde.image`.
+#[must_use]
+pub fn preferred_still_wallpaper_plugin_id() -> &'static str {
+    easel_plasma_plugin_id().unwrap_or(ORG_KDE_IMAGE)
 }
 
 /// Returns the installed Plasma dynamic-wallpaper plugin id when present.
@@ -90,13 +118,15 @@ fn detect_plasma_dynamic_plugin() -> Option<&'static str> {
     ];
     let roots = plasma_wallpaper_roots();
     for id in CANDIDATES {
-        for root in &roots {
-            if root.join(id).is_dir() {
-                return Some(*id);
-            }
+        if wallpaper_plugin_installed(id, &roots) {
+            return Some(*id);
         }
     }
     None
+}
+
+fn wallpaper_plugin_installed(id: &str, roots: &[PathBuf]) -> bool {
+    roots.iter().any(|root| root.join(id).is_dir())
 }
 
 fn plasma_wallpaper_roots() -> Vec<PathBuf> {
@@ -104,11 +134,20 @@ fn plasma_wallpaper_roots() -> Vec<PathBuf> {
     if let Ok(home) = std::env::var("HOME") {
         roots.push(PathBuf::from(home).join(".local/share/plasma/wallpapers"));
     }
+    if let Ok(xdg_home) = std::env::var("XDG_DATA_HOME") {
+        let path = PathBuf::from(xdg_home).join("plasma/wallpapers");
+        if !roots.contains(&path) {
+            roots.push(path);
+        }
+    }
     roots.push(PathBuf::from("/usr/share/plasma/wallpapers"));
     roots.push(PathBuf::from("/usr/local/share/plasma/wallpapers"));
     if let Ok(xdg) = std::env::var("XDG_DATA_DIRS") {
         for dir in xdg.split(':').filter(|part| !part.is_empty()) {
-            roots.push(PathBuf::from(dir).join("plasma/wallpapers"));
+            let path = PathBuf::from(dir).join("plasma/wallpapers");
+            if !roots.contains(&path) {
+                roots.push(path);
+            }
         }
     }
     roots
@@ -117,10 +156,11 @@ fn plasma_wallpaper_roots() -> Vec<PathBuf> {
 /// Builds the JavaScript payload sent to `PlasmaShell.evaluateScript`.
 ///
 /// Matching uses compositor geometry rather than Desktop index order.
+/// Prefer the Easel wallpaper plugin when installed (ADR 0008).
 pub fn build_plasma_wallpaper_script(
     displays: &[DisplayWallpaper],
 ) -> Result<String, BackendError> {
-    build_plasma_plugin_script(displays, "org.kde.image", false)
+    build_plasma_plugin_script(displays, preferred_still_wallpaper_plugin_id(), false)
 }
 
 /// Builds a Plasma script that hosts native dynamic packages per display.
@@ -322,6 +362,7 @@ pub(crate) fn plasma_available() -> bool {
 mod tests {
     use super::*;
     use easel_core::{DisplayId, LogicalRect};
+    use std::fs;
     use std::path::PathBuf;
 
     fn sample_wallpaper(path: &str, rect: LogicalRect) -> DisplayWallpaper {
@@ -346,11 +387,49 @@ mod tests {
                 height: 2160,
             },
         );
-        let script = build_plasma_wallpaper_script(&[wallpaper]).expect("script");
+        let script =
+            build_plasma_plugin_script(&[wallpaper], ORG_KDE_IMAGE, false).expect("script");
         assert!(script.contains("setForGeometry(2560, 0, 3840, 2160"));
         assert!(script.contains("org.kde.image"));
         assert!(script.contains("reloadConfig"));
         assert!(script.contains(expected_url.as_str()));
+    }
+
+    #[test]
+    fn still_script_can_target_easel_plugin() {
+        let path = std::env::temp_dir().join("easel-plasma-easel-plugin.png");
+        let wallpaper = sample_wallpaper(
+            path.to_str().expect("temp path is UTF-8"),
+            LogicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        );
+        let script =
+            build_plasma_plugin_script(&[wallpaper], EASEL_PLASMA_WALLPAPER_PLUGIN_ID, false)
+                .expect("script");
+        assert!(script.contains(EASEL_PLASMA_WALLPAPER_PLUGIN_ID));
+        assert!(script.contains("writeConfig(\"Image\""));
+        assert!(!script.contains("org.kde.image"));
+    }
+
+    #[test]
+    fn detects_wallpaper_plugin_directory() {
+        let root = std::env::temp_dir().join("easel-plasma-plugin-roots");
+        let plugin_dir = root.join(EASEL_PLASMA_WALLPAPER_PLUGIN_ID);
+        let _ = fs::remove_dir_all(&root);
+        fs::create_dir_all(&plugin_dir).expect("temp plugin dir");
+        assert!(wallpaper_plugin_installed(
+            EASEL_PLASMA_WALLPAPER_PLUGIN_ID,
+            std::slice::from_ref(&root)
+        ));
+        assert!(!wallpaper_plugin_installed(
+            "com.example.missing",
+            std::slice::from_ref(&root)
+        ));
+        let _ = fs::remove_dir_all(&root);
     }
 
     #[test]

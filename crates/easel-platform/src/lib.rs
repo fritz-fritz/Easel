@@ -23,8 +23,9 @@ pub use appearance::system_appearance;
 #[cfg(target_os = "macos")]
 pub use macos::MacosBackend;
 pub use plasma::{
-    PlasmaBackend, build_plasma_native_dynamic_script, build_plasma_wallpaper_script,
-    escape_js_string, plasma_dynamic_plugin_id,
+    EASEL_PLASMA_WALLPAPER_PLUGIN_ID, PlasmaBackend, build_plasma_native_dynamic_script,
+    build_plasma_wallpaper_script, easel_plasma_plugin_id, escape_js_string,
+    plasma_dynamic_plugin_id, preferred_still_wallpaper_plugin_id,
 };
 pub use probe::select_wallpaper_backend;
 #[cfg(windows)]
