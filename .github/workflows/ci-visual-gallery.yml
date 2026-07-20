@@ -30,7 +30,7 @@ jobs:
     steps:
       - name: Resolve pull request metadata
         id: meta
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const run = context.payload.workflow_run;
@@ -63,7 +63,7 @@ jobs:
       # Still post a success commit status so a required "OS compare" check is not left pending.
       - name: Check for CI visual artifacts
         id: visuals
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         with:
           script: |
             const runId = Number('${{ steps.meta.outputs.run_id }}');
@@ -222,7 +222,7 @@ jobs:
 
       - name: Publish commit status for branch protection
         if: always() && steps.visuals.outputs.count != '0'
-        uses: actions/github-script@v7
+        uses: actions/github-script@v9
         env:
           GALLERY_CONCLUSION: ${{ steps.gallery.conclusion }}
           GATE_OK: ${{ steps.gallery.outputs.gate_ok }}
