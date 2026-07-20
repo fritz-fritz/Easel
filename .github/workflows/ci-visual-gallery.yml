@@ -214,7 +214,7 @@ jobs:
 
       - name: Upsert sticky PR comment
         if: steps.visuals.outputs.count != '0'
-        uses: marocchino/sticky-pull-request-comment@v2
+        uses: marocchino/sticky-pull-request-comment@v3
         with:
           number: ${{ steps.meta.outputs.pr_number }}
           header: easel-ci-visual
