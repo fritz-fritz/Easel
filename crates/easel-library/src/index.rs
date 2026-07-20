@@ -8,7 +8,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use easel_core::{AssetId, AssetLocation, HistoryAction, HistoryEvent, MediaAsset};
+use easel_core::{AssetId, AssetLocation, HistoryAction, HistoryEvent, MediaAsset, MediaMetadata};
 use thiserror::Error;
 
 use crate::probe::{local_media_extension, probe_local_media, write_poster_for_asset};
@@ -133,7 +133,7 @@ impl<'a> LocalIndexer<'a> {
             refreshed.media = media;
             refreshed.retrieved_at_unix = Some(now_unix());
             self.store.upsert_asset(&refreshed)?;
-            self.extract_poster(&canonical, refreshed.id);
+            self.extract_poster(&canonical, refreshed.id, &refreshed.media);
             return Ok(IndexOutcome::Updated);
         }
 
@@ -150,6 +150,7 @@ impl<'a> LocalIndexer<'a> {
             use_reporting_url: None,
             retrieved_at_unix: Some(now_unix()),
         };
+        self.extract_poster(&canonical, asset.id, &asset.media);
         let asset_id = asset.id;
         self.store.upsert_asset(&asset)?;
         self.store.record_history(&HistoryEvent::new(
@@ -157,15 +158,14 @@ impl<'a> LocalIndexer<'a> {
             HistoryAction::Discovered,
             now_unix(),
         ))?;
-        self.extract_poster(&canonical, asset_id);
         Ok(IndexOutcome::Created)
     }
 
-    fn extract_poster(&self, path: &Path, asset_id: AssetId) {
+    fn extract_poster(&self, path: &Path, asset_id: AssetId, media: &MediaMetadata) {
         let Some(posters_dir) = self.posters_dir else {
             return;
         };
-        let _ = write_poster_for_asset(path, asset_id, posters_dir);
+        let _ = write_poster_for_asset(path, asset_id, posters_dir, media);
     }
 }
 

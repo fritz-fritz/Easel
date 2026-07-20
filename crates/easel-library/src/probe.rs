@@ -80,16 +80,22 @@ pub fn poster_path_for_asset(posters_dir: &Path, asset_id: AssetId) -> PathBuf {
     posters_dir.join(format!("{}.png", asset_id.to_hyphenated_string()))
 }
 
-/// Writes a bounded poster PNG when the source requires a live surface.
+/// Writes a bounded poster PNG when `media` requires a live surface.
+///
+/// Callers that already probed the file should pass that metadata so this path
+/// only decodes once for the poster (avoids a second full GIF frame scan).
 pub fn write_poster_for_asset(
     source: &Path,
     asset_id: AssetId,
     posters_dir: &Path,
+    media: &MediaMetadata,
 ) -> Result<Option<PathBuf>, ProbeError> {
-    let metadata = probe_local_media(source).ok_or(ProbeError::Unsupported)?;
-    if !metadata.requires_live_surface() {
+    if !media.requires_live_surface() {
         return Ok(None);
     }
+    // Animated images are the only live-surface sources we can poster today.
+    // Video (`MediaMetadata::Video`) will use Qt Multimedia later; keep this
+    // extension guard so a future Video variant does not hit the still decode path.
     let extension = source
         .extension()
         .and_then(|value| value.to_str())
@@ -154,12 +160,17 @@ fn image_dimensions(path: &Path) -> Option<MediaDimensions> {
 }
 
 fn gif_timing(path: &Path) -> Option<(Option<u32>, Option<u64>)> {
-    const MAX_FRAMES: u32 = 256;
+    // Bound work on hostile/very long GIFs. If the cap is hit, return unknown
+    // counts rather than a truncated `Some(256)` that looks exact to callers.
+    const MAX_FRAMES: usize = 256;
     let file = std::fs::File::open(path).ok()?;
     let decoder = GifDecoder::new(BufReader::new(file)).ok()?;
     let mut frame_count = 0u32;
     let mut duration_ms = 0u64;
-    for frame in decoder.into_frames().flatten().take(MAX_FRAMES as usize) {
+    for (index, frame) in decoder.into_frames().flatten().enumerate() {
+        if index >= MAX_FRAMES {
+            return Some((None, None));
+        }
         frame_count = frame_count.saturating_add(1);
         let delay = frame.delay();
         let (numer, denom) = delay.numer_denom_ms();
@@ -189,11 +200,17 @@ mod tests {
     use uuid::Uuid;
 
     fn write_gif(path: &Path, width: u32, height: u32, delay_ms: u32) {
-        let buffer = RgbaImage::from_pixel(width, height, Rgba([4, 5, 6, 255]));
-        let frame = Frame::from_parts(buffer, 0, 0, Delay::from_numer_denom_ms(delay_ms, 1));
+        write_gif_frames(path, width, height, delay_ms, 1);
+    }
+
+    fn write_gif_frames(path: &Path, width: u32, height: u32, delay_ms: u32, frames: usize) {
         let file = File::create(path).unwrap();
         let mut encoder = GifEncoder::new(file);
-        encoder.encode_frame(frame).unwrap();
+        for _ in 0..frames {
+            let buffer = RgbaImage::from_pixel(width, height, Rgba([4, 5, 6, 255]));
+            let frame = Frame::from_parts(buffer, 0, 0, Delay::from_numer_denom_ms(delay_ms, 1));
+            encoder.encode_frame(frame).unwrap();
+        }
     }
 
     #[test]
@@ -217,6 +234,25 @@ mod tests {
     }
 
     #[test]
+    fn gif_timing_cap_reports_unknown_counts() {
+        let path = std::env::temp_dir().join(format!("easel-probe-gif-cap-{}.gif", Uuid::new_v4()));
+        write_gif_frames(&path, 1, 1, 10, 257);
+        let metadata = probe_local_media(&path).expect("gif metadata");
+        match metadata {
+            MediaMetadata::AnimatedImage {
+                frame_count,
+                duration_ms,
+                ..
+            } => {
+                assert_eq!(frame_count, None);
+                assert_eq!(duration_ms, None);
+            }
+            other => panic!("expected animated image, got {other:?}"),
+        }
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
     fn writes_poster_for_gif() {
         let root = std::env::temp_dir().join(format!("easel-probe-poster-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&root).unwrap();
@@ -224,7 +260,8 @@ mod tests {
         write_gif(&path, 64, 48, 50);
         let asset_id = AssetId::new();
         let posters = root.join("posters");
-        let written = write_poster_for_asset(&path, asset_id, &posters)
+        let media = probe_local_media(&path).expect("gif metadata");
+        let written = write_poster_for_asset(&path, asset_id, &posters, &media)
             .unwrap()
             .expect("poster path");
         assert!(written.is_file());
