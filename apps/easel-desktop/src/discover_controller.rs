@@ -460,6 +460,5 @@ fn license_from_index(index: i32) -> LicenseFilter {
 fn now_unix() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0)
+        .map_or(0, |duration| duration.as_secs())
 }

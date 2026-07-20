@@ -1,21 +1,33 @@
 version: 2
 updates:
+  # One PR for all Cargo bumps so CI exercises the combined lockfile once.
   - package-ecosystem: cargo
     directory: /
     schedule:
       interval: weekly
     open-pull-requests-limit: 5
+    groups:
+      cargo:
+        patterns:
+          - "*"
 
   # Compiler pin in rust-toolchain.toml (SSOT). Companion pins in Cargo.toml
   # (rust-version) and AGENTS.md are rewritten onto the same PR by
   # .github/workflows/sync-rust-pins.yml. CI installs via
   # .github/actions/setup-rust (no duplicate version tag in workflows).
+  #
+  # Dependabot branch prefix is rust_toolchain (underscore), not rust-toolchain.
   - package-ecosystem: rust-toolchain
     directory: /
     schedule:
       interval: weekly
 
+  # One PR for Actions bumps (monthly) so workflow changes land together.
   - package-ecosystem: github-actions
     directory: /
     schedule:
       interval: monthly
+    groups:
+      github-actions:
+        patterns:
+          - "*"

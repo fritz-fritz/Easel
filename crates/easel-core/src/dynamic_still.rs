@@ -310,15 +310,15 @@ impl DynamicStillSet {
         if self.name.trim().is_empty() {
             return Err(DynamicStillError::EmptyName);
         }
-        if let Some(latitude_deg) = self.latitude_deg {
-            if !(-90.0..=90.0).contains(&latitude_deg) || !latitude_deg.is_finite() {
-                return Err(DynamicStillError::InvalidLatitude(latitude_deg));
-            }
+        if let Some(latitude_deg) = self.latitude_deg
+            && (!(-90.0..=90.0).contains(&latitude_deg) || !latitude_deg.is_finite())
+        {
+            return Err(DynamicStillError::InvalidLatitude(latitude_deg));
         }
-        if let Some(longitude_deg) = self.longitude_deg {
-            if !(-180.0..=180.0).contains(&longitude_deg) || !longitude_deg.is_finite() {
-                return Err(DynamicStillError::InvalidLongitude(longitude_deg));
-            }
+        if let Some(longitude_deg) = self.longitude_deg
+            && (!(-180.0..=180.0).contains(&longitude_deg) || !longitude_deg.is_finite())
+        {
+            return Err(DynamicStillError::InvalidLongitude(longitude_deg));
         }
         if self.latitude_deg.is_some() != self.longitude_deg.is_some() {
             return Err(DynamicStillError::IncompleteObserver);
@@ -445,14 +445,12 @@ pub fn next_transition_after(
                 for frame in &set.frames {
                     if let Some(instant) =
                         resolve_time_key_on_day(set, frame.key, now, utc_offset_minutes, day_offset)
+                        && instant.unix_seconds > now.unix_seconds
+                        && best
+                            .as_ref()
+                            .is_none_or(|(current, _)| instant.unix_seconds < current.unix_seconds)
                     {
-                        if instant.unix_seconds > now.unix_seconds
-                            && best.as_ref().is_none_or(|(current, _)| {
-                                instant.unix_seconds < current.unix_seconds
-                            })
-                        {
-                            best = Some((instant, frame.clone()));
-                        }
+                        best = Some((instant, frame.clone()));
                     }
                 }
             }
@@ -519,14 +517,12 @@ fn active_time_keyed_frame(set: &DynamicStillSet, ctx: DynamicEvalContext) -> Fr
         for frame in &set.frames {
             if let Some(instant) =
                 resolve_time_key_on_day(set, frame.key, ctx.now, ctx.utc_offset_minutes, day_offset)
+                && instant.unix_seconds <= ctx.now.unix_seconds
+                && best
+                    .as_ref()
+                    .is_none_or(|(current, _)| instant.unix_seconds >= current.unix_seconds)
             {
-                if instant.unix_seconds <= ctx.now.unix_seconds
-                    && best
-                        .as_ref()
-                        .is_none_or(|(current, _)| instant.unix_seconds >= current.unix_seconds)
-                {
-                    best = Some((instant, frame));
-                }
+                best = Some((instant, frame));
             }
         }
     }

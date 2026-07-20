@@ -77,8 +77,7 @@ impl AcquisitionCache {
             let modified = entry.metadata()?.modified().unwrap_or(UNIX_EPOCH);
             let age = now
                 .duration_since(modified)
-                .map(|duration| duration.as_secs())
-                .unwrap_or(0);
+                .map_or(0, |duration| duration.as_secs());
             if age > max_age_secs {
                 fs::remove_file(&path)?;
                 removed += 1;
@@ -116,13 +115,13 @@ impl AcquisitionCache {
                 response.status()
             )));
         }
-        if let Some(length) = response.content_length() {
-            if length > MAX_ACQUISITION_BYTES {
-                return Err(CacheError::TooLarge {
-                    bytes: length,
-                    limit: MAX_ACQUISITION_BYTES,
-                });
-            }
+        if let Some(length) = response.content_length()
+            && length > MAX_ACQUISITION_BYTES
+        {
+            return Err(CacheError::TooLarge {
+                bytes: length,
+                limit: MAX_ACQUISITION_BYTES,
+            });
         }
 
         let temporary = destination.with_extension("partial");

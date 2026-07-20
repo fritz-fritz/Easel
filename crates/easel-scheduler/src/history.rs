@@ -257,8 +257,9 @@ impl RotationHistoryStore {
 pub fn now_unix_i64() -> i64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| i64::try_from(duration.as_secs()).unwrap_or(i64::MAX))
-        .unwrap_or(0)
+        .map_or(0, |duration| {
+            i64::try_from(duration.as_secs()).unwrap_or(i64::MAX)
+        })
 }
 
 /// History store failures.

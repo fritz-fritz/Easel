@@ -278,7 +278,7 @@ pub fn move_display_physical(
             Some(snap_threshold_mm),
         )
         .map_err(|error| error.to_string())?;
-    save_arrangement(&guard.arrangement).map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement)?;
     Ok(())
 }
 
@@ -296,7 +296,7 @@ pub fn override_display_size(id: &str, width_mm: f64, height_mm: f64) -> Result<
             },
         )
         .map_err(|error| error.to_string())?;
-    save_arrangement(&guard.arrangement).map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement)?;
     Ok(())
 }
 
@@ -308,7 +308,7 @@ pub fn set_display_bezel(id: &str, bezel_mm: f64) -> Result<(), String> {
         .arrangement
         .set_bezel(display_id, BezelInsets::uniform(bezel_mm))
         .map_err(|error| error.to_string())?;
-    save_arrangement(&guard.arrangement).map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement)?;
     Ok(())
 }
 
@@ -419,7 +419,7 @@ pub fn replace_from_probes(probes: Vec<ScreenProbe>) -> Result<DisplayArrangemen
     };
     let matched = match_displays(&previous, observed);
     matched.validate().map_err(|error| error.to_string())?;
-    save_arrangement(&matched).map_err(|error| error.to_string())?;
+    save_arrangement(&matched)?;
     guard.arrangement = matched.clone();
     guard.from_probe = true;
     Ok(matched)
