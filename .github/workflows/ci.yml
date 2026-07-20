@@ -41,6 +41,7 @@ jobs:
               - '.github/actions/setup-rust/**'
               - '.github/scripts/install-libheif-windows.ps1'
               - '.github/scripts/sync-rust-pins.py'
+              - '.github/scripts/test_sync_rust_pins.py'
               - '.github/libheif-windows.lock.json'
               - 'tools/easel-deps/**'
             desktop:
