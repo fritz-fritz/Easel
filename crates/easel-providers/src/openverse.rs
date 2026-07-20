@@ -171,8 +171,7 @@ fn normalize_search_response(
 ) -> Result<SearchPage, ProviderError> {
     let retrieved_at_unix = SystemTime::now()
         .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs())
-        .unwrap_or(0);
+        .map_or(0, |duration| duration.as_secs());
 
     let mut assets = Vec::with_capacity(response.results.len());
     for item in response.results {

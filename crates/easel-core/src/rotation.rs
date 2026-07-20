@@ -129,10 +129,10 @@ impl RotationQueue {
         if self.name.trim().is_empty() {
             return Err(RotationError::EmptyName);
         }
-        if let RotationSource::Assets { asset_ids } = &self.source {
-            if asset_ids.is_empty() {
-                return Err(RotationError::EmptyQueue);
-            }
+        if let RotationSource::Assets { asset_ids } = &self.source
+            && asset_ids.is_empty()
+        {
+            return Err(RotationError::EmptyQueue);
         }
         Ok(())
     }

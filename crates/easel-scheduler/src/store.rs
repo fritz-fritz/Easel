@@ -373,15 +373,15 @@ impl AutomationStore {
                 .history
                 .last_fired(schedule.id)?
                 .map(|unix_seconds| InstantSeconds { unix_seconds });
-            if let Some(next) = next_fire_after(schedule, now, last, utc_offset_minutes) {
-                if best.is_none_or(|current| next.unix_seconds < current) {
-                    best = Some(next.unix_seconds);
-                    next_hint = Some(format!(
-                        "{}: {}",
-                        schedule.name,
-                        explain_fire(schedule, next, utc_offset_minutes)
-                    ));
-                }
+            if let Some(next) = next_fire_after(schedule, now, last, utc_offset_minutes)
+                && best.is_none_or(|current| next.unix_seconds < current)
+            {
+                best = Some(next.unix_seconds);
+                next_hint = Some(format!(
+                    "{}: {}",
+                    schedule.name,
+                    explain_fire(schedule, next, utc_offset_minutes)
+                ));
             }
         }
         let last_apply_reason = self.history.latest()?.map(|entry| entry.reason);
@@ -399,16 +399,15 @@ impl AutomationStore {
             };
             if let Some((instant, frame)) =
                 next_transition_after(still_set, now, utc_offset_minutes)
+                && best_dynamic.is_none_or(|current| instant.unix_seconds < current)
             {
-                if best_dynamic.is_none_or(|current| instant.unix_seconds < current) {
-                    best_dynamic = Some(instant.unix_seconds);
-                    next_dynamic_hint = Some(format!(
-                        "{}: {} → {}",
-                        profile.name,
-                        frame.key.label(),
-                        frame.asset_id.to_hyphenated_string()
-                    ));
-                }
+                best_dynamic = Some(instant.unix_seconds);
+                next_dynamic_hint = Some(format!(
+                    "{}: {} → {}",
+                    profile.name,
+                    frame.key.label(),
+                    frame.asset_id.to_hyphenated_string()
+                ));
             }
         }
         Ok(AutomationSummary {

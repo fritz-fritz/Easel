@@ -77,11 +77,10 @@ pub fn parse_apple_desktop_from_xmp(xmp: &str) -> Result<AppleDesktopMetadata, M
         let close = format!("</{tag}>");
         if let (Some(start), Some(end_rel)) =
             (xmp.find(&open).map(|i| i + open.len()), xmp.find(&close))
+            && end_rel > start
         {
-            if end_rel > start {
-                let encoded = xmp[start..end_rel].trim();
-                return parse_apple_desktop_plist(encoded, flavor);
-            }
+            let encoded = xmp[start..end_rel].trim();
+            return parse_apple_desktop_plist(encoded, flavor);
         }
     }
     Err(MetadataError::NoAppleDesktopTag)

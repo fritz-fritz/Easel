@@ -8,7 +8,8 @@ name: Sync rust pins
 on:
   push:
     branches:
-      - "dependabot/rust-toolchain/**"
+      # Dependabot names this ecosystem rust_toolchain (underscore).
+      - "dependabot/rust_toolchain/**"
     paths:
       - "rust-toolchain.toml"
   workflow_dispatch:
