@@ -7,8 +7,8 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 DEST="${XDG_DATA_HOME:-$HOME/.local/share}/plasma/wallpapers/${PLUGIN_ID}"
 
 mkdir -p "$DEST"
-# Refresh package contents without deleting DEST itself (Plasma may hold locks).
-rm -rf "${DEST:?}/"*
+# Refresh package contents (including dotfiles) without deleting DEST itself.
+find "$DEST" -mindepth 1 -delete
 cp -a "$SCRIPT_DIR/metadata.json" "$DEST/"
 cp -a "$SCRIPT_DIR/contents" "$DEST/"
 
