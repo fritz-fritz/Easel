@@ -11,6 +11,9 @@ use std::sync::OnceLock;
 
 use url::Url;
 
+use crate::plasma_state::{
+    publish_plasma_wallpaper_state, wallpaper_geometry_fingerprint, plasma_wallpaper_state_dir,
+};
 use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
 };
@@ -51,8 +54,12 @@ impl WallpaperBackend for PlasmaBackend {
                 for wallpaper in displays {
                     self.validate_output_path(&wallpaper.path)?;
                 }
-                let script = build_plasma_wallpaper_script(displays)?;
-                evaluate_plasma_script(&script)
+                if easel_plasma_plugin_id().is_some() {
+                    apply_per_display_via_easel_plugin(displays)
+                } else {
+                    let script = build_plasma_wallpaper_script(displays)?;
+                    evaluate_plasma_script(&script)
+                }
             }
             WallpaperOutput::NativeDynamic(displays) => {
                 for wallpaper in displays {
@@ -65,7 +72,8 @@ impl WallpaperBackend for PlasmaBackend {
                 });
                 let (plugin, sunrise_mode) = if uses_heic {
                     // Dense solar HEIC stays on zzag (or similar) until the Easel plugin
-                    // evaluates schedules in-process / via IPC (Stage 6 follow-up).
+                    // evaluates schedules in-process. Still-poller frames already use the
+                    // Easel plugin IPC path via PerDisplay apply.
                     (
                         plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?,
                         false,
@@ -99,6 +107,93 @@ pub fn easel_plasma_plugin_id() -> Option<&'static str> {
 #[must_use]
 pub fn preferred_still_wallpaper_plugin_id() -> &'static str {
     easel_plasma_plugin_id().unwrap_or(ORG_KDE_IMAGE)
+}
+
+fn apply_per_display_via_easel_plugin(displays: &[DisplayWallpaper]) -> Result<(), BackendError> {
+    let state_path = publish_plasma_wallpaper_state(displays)?;
+    let fingerprint = wallpaper_geometry_fingerprint(displays);
+    let stamp_path = plasma_wallpaper_state_dir().join("bound.fingerprint");
+    let needs_bind = std::fs::read_to_string(&stamp_path)
+        .ok()
+        .as_deref()
+        != Some(fingerprint.as_str());
+    if needs_bind {
+        let script = build_easel_plugin_bind_script(displays, &state_path)?;
+        evaluate_plasma_script(&script)?;
+        if let Err(error) = std::fs::write(&stamp_path, &fingerprint) {
+            return Err(BackendError::Platform(format!(
+                "failed to record Plasma plugin bind stamp {}: {error}",
+                stamp_path.display()
+            )));
+        }
+    }
+    Ok(())
+}
+
+/// Binds containments to the Easel plugin and seeds Image + StateFile config.
+fn build_easel_plugin_bind_script(
+    displays: &[DisplayWallpaper],
+    state_path: &Path,
+) -> Result<String, BackendError> {
+    let state_path_text = state_path
+        .to_str()
+        .ok_or_else(|| BackendError::Platform("Plasma state path is not UTF-8".into()))?;
+    let mut assignments = String::new();
+    for wallpaper in displays {
+        let file_url = file_url_from_path(&wallpaper.path)?;
+        let rect = wallpaper.logical_rect;
+        let _ = write!(
+            assignments,
+            r#"
+bindForGeometry({left}, {top}, {width}, {height}, "{url}");
+"#,
+            left = rect.x,
+            top = rect.y,
+            width = rect.width,
+            height = rect.height,
+            url = escape_js_string(&file_url),
+        );
+    }
+
+    Ok(format!(
+        r#"
+function screenGeometrySafe(screen) {{
+    try {{
+        return screenGeometry(screen);
+    }} catch (e) {{
+        return null;
+    }}
+}}
+
+function bindForGeometry(left, top, width, height, imageUrl) {{
+    var all = desktops();
+    for (var i = 0; i < all.length; ++i) {{
+        var desktop = all[i];
+        if (desktop.screen === -1) {{
+            continue;
+        }}
+        var geometry = screenGeometrySafe(desktop.screen);
+        if (!geometry) {{
+            continue;
+        }}
+        if (geometry.x === left && geometry.y === top &&
+            geometry.width === width && geometry.height === height) {{
+            desktop.wallpaperPlugin = "{plugin}";
+            desktop.currentConfigGroup = ["Wallpaper", "{plugin}", "General"];
+            desktop.writeConfig("StateFile", "{state}");
+            desktop.writeConfig("Image", imageUrl);
+            desktop.reloadConfig();
+            return;
+        }}
+    }}
+    throw new Error("No Plasma desktop matched geometry " + left + "," + top + " " + width + "x" + height);
+}}
+{assignments}
+"#,
+        plugin = escape_js_string(EASEL_PLASMA_WALLPAPER_PLUGIN_ID),
+        state = escape_js_string(state_path_text),
+        assignments = assignments,
+    ))
 }
 
 /// Returns the installed Plasma dynamic-wallpaper plugin id when present.
@@ -413,6 +508,27 @@ mod tests {
         assert!(script.contains(EASEL_PLASMA_WALLPAPER_PLUGIN_ID));
         assert!(script.contains("writeConfig(\"Image\""));
         assert!(!script.contains("org.kde.image"));
+    }
+
+    #[test]
+    fn easel_bind_script_writes_state_file_and_image() {
+        let path = std::env::temp_dir().join("easel-plasma-bind.png");
+        let wallpaper = sample_wallpaper(
+            path.to_str().expect("temp path is UTF-8"),
+            LogicalRect {
+                x: 100,
+                y: 200,
+                width: 1280,
+                height: 720,
+            },
+        );
+        let state = std::env::temp_dir().join("easel-active.json");
+        let script = build_easel_plugin_bind_script(&[wallpaper], &state).expect("script");
+        assert!(script.contains(EASEL_PLASMA_WALLPAPER_PLUGIN_ID));
+        assert!(script.contains("writeConfig(\"StateFile\""));
+        assert!(script.contains("writeConfig(\"Image\""));
+        assert!(script.contains("bindForGeometry(100, 200, 1280, 720"));
+        assert!(script.contains(&escape_js_string(state.to_str().unwrap())));
     }
 
     #[test]
