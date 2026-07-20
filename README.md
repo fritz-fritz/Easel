@@ -5,7 +5,8 @@ desktops. It combines physically correct spanning with a modern Qt 6 interface a
 policy-aware catalog of high-quality, reusable images. Its architecture also distinguishes
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
-This repository contains the Stage 1–5 still-image vertical slice: decode/fit/raster with
+This repository contains the Stage 1–5 still-image vertical slice plus Stage 6 Plasma
+plugin hosting in progress: decode/fit/raster with
 physical multi-display composition, Compose previews, Qt display enumeration with arrangement
 persistence, Plasma 6 / Windows still apply backends, local library indexing, Openverse
 discovery with retained provenance, reusable profiles with schedule-driven rotation,
