@@ -44,6 +44,10 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   `x86_64-unknown-linux-gnu` target, so `cargo build -p easel-desktop` links out of the
   box. This lives in the VM (not the repo); do not delete it. If you ever build from a
   clean env, the equivalent is `RUSTFLAGS="-L native=/usr/lib/gcc/x86_64-linux-gnu/13"`.
+- `cxx` (Rust macros) and `cxx-gen` (C++ codegen via cxx-qt-build) must share the same
+  patch version (`1.0.N` / `0.7.N`); mismatched patches break desktop linking. After a
+  `cxx` bump: `cargo update -p cxx-gen --precise 0.7.<N>`. CI checks this with
+  `.github/scripts/check-cxx-gen-align.py`.
 
 ### Running the GUI
 

@@ -315,15 +315,15 @@ dependencies = [
 
 [[package]]
 name = "cxx-gen"
-version = "0.7.197"
+version = "0.7.198"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1fe60274ac750caecda11504eec75de8ff73c8dfdfeb50eedb485e291b2c4018"
+checksum = "fb0f24fd8cafa20f043e24372ca5d8273ab1fdce055ee977b989f82c1bcd89b5"
 dependencies = [
  "codespan-reporting 0.13.1",
  "indexmap",
  "proc-macro2",
  "quote",
- "syn 2.0.119",
+ "syn 3.0.1",
 ]
 
 [[package]]
