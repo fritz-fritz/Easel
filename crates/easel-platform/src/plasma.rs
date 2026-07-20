@@ -71,9 +71,8 @@ impl WallpaperBackend for PlasmaBackend {
                     })
                 });
                 let (plugin, sunrise_mode) = if uses_heic {
-                    // Dense solar HEIC stays on zzag (or similar) until the Easel plugin
-                    // evaluates schedules in-process. Still-poller frames already use the
-                    // Easel plugin IPC path via PerDisplay apply.
+                    // Legacy NativeDynamic HEIC path (zzag). Production dense solar uses
+                    // PerDisplay still frames + Easel plugin IPC instead.
                     (
                         plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?,
                         false,

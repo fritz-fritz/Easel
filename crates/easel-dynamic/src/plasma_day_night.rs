@@ -7,8 +7,9 @@
 //! Plasma 6.5+ can host light/dark wallpaper packages natively: a folder with
 //! `contents/images` and `contents/images_dark` plus `metadata.json`. The OS
 //! switches at sunrise/sunset via KNightTime. This is **not** Apple-style dense
-//! solar HEIC — only two appearance frames. Dense solar/h24 sets still need the
-//! Easel still poller or the community `com.github.zzag.dynamic` plugin.
+//! solar HEIC — only two appearance frames. Dense solar/h24 sets use Easel's
+//! still-frame evaluation path (Rust schedule math + Easel Plasma plugin IPC /
+//! `org.kde.image`), not this package format.
 
 use std::fs;
 use std::path::{Path, PathBuf};

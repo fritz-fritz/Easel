@@ -26,7 +26,7 @@ live-host problem (Stage 6).
 
 | Platform/session | Dynamic stills | Animated/video host | Initial position |
 | --- | --- | --- | --- |
-| KDE Plasma 6 | Appearance → built-in day/night (`org.kde.image` + KNightTime). Dense solar → still poller / zzag interim; target host is the Easel `Plasma/Wallpaper` plugin (ADR 0007 + 0008). | Easel QML wallpaper plugin (`apps/easel-plasma-wallpaper`). | First supported live target. |
+| KDE Plasma 6 | Appearance → built-in day/night (`org.kde.image` + KNightTime). Dense solar → Rust evaluation + still frames via Easel `Plasma/Wallpaper` plugin IPC (ADR 0007 + 0008); no zzag required. | Easel QML wallpaper plugin (`apps/easel-plasma-wallpaper`). | First supported live target. |
 | Other Linux desktops | Static settings backend applies each frame. | Desktop/compositor-specific; no universal Wayland attachment. | Probe individually; poster fallback. |
 | Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | Public wallpaper API does not expose video playback. | Feasibility spike; experimental if safe. |
 | macOS | Native Dynamic Desktop HEIC host (`native_dynamic_bundle`); System Events still apply as fallback. | Public `setDesktopImageURL` contract is still-image oriented. | Feasibility spike; experimental if safe. |

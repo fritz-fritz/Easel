@@ -29,7 +29,8 @@ use crate::plasma_day_night::{
 pub enum NativeDynamicFormat {
     /// Apple Dynamic Desktop HEIC (`apple_desktop` XMP).
     AppleHeic,
-    /// Community Plasma solar plugin package (zzag HEIC/AVIF interchange).
+    /// Legacy Plasma solar HEIC/AVIF interchange (zzag). Not used as an apply host;
+    /// dense solar is driven by Easel still-frame evaluation + plugin IPC instead.
     PlasmaHeic,
     /// Built-in Plasma day/night wallpaper package (`images` + `images_dark`).
     PlasmaDayNight,
@@ -46,11 +47,28 @@ pub fn preferred_native_format(
             if set.schedule_kind == easel_core::DynamicScheduleKind::Appearance {
                 NativeDynamicFormat::PlasmaDayNight
             } else {
-                // Dense solar/h24 needs the community plugin or still-poller fallback.
+                // Dense solar/h24: encode may still produce PlasmaHeic for export, but
+                // apply should use [`prefers_still_frame_host`].
                 NativeDynamicFormat::PlasmaHeic
             }
         }
         NativeDynamicFormat::AppleHeic => NativeDynamicFormat::AppleHeic,
+    }
+}
+
+/// Returns whether dense solar/h24 should use Easel's still-frame host instead of a
+/// native HEIC package (zzag or similar).
+///
+/// Appearance sets still prefer built-in Plasma day/night. Apple HEIC stays native
+/// on macOS. Dense solar/h24 is evaluated in Rust and published as stills (Easel
+/// Plasma plugin IPC when installed, otherwise `org.kde.image`).
+#[must_use]
+pub fn prefers_still_frame_host(set: &DynamicStillSet, host: NativeDynamicFormat) -> bool {
+    match host {
+        NativeDynamicFormat::PlasmaDayNight | NativeDynamicFormat::PlasmaHeic => {
+            set.schedule_kind != easel_core::DynamicScheduleKind::Appearance
+        }
+        NativeDynamicFormat::AppleHeic => false,
     }
 }
 
@@ -312,6 +330,40 @@ mod tests {
             plan.targets
                 .iter()
                 .all(|target| target.format == NativeDynamicFormat::AppleHeic)
+        );
+    }
+
+    #[test]
+    fn plasma_dense_solar_prefers_still_frame_host() {
+        let asset = AssetId::new();
+        let mut set = DynamicStillSet::default_hourly("Day", ProfileId::new(), asset).unwrap();
+        set.schedule_kind = easel_core::DynamicScheduleKind::SolarPosition;
+        assert!(prefers_still_frame_host(
+            &set,
+            NativeDynamicFormat::PlasmaDayNight
+        ));
+        assert!(prefers_still_frame_host(
+            &set,
+            NativeDynamicFormat::PlasmaHeic
+        ));
+        assert!(!prefers_still_frame_host(
+            &set,
+            NativeDynamicFormat::AppleHeic
+        ));
+    }
+
+    #[test]
+    fn plasma_appearance_keeps_day_night_native_host() {
+        let asset = AssetId::new();
+        let mut set = DynamicStillSet::default_time_of_day("Day", ProfileId::new(), asset).unwrap();
+        set.schedule_kind = easel_core::DynamicScheduleKind::Appearance;
+        assert!(!prefers_still_frame_host(
+            &set,
+            NativeDynamicFormat::PlasmaDayNight
+        ));
+        assert_eq!(
+            preferred_native_format(&set, NativeDynamicFormat::PlasmaDayNight),
+            NativeDynamicFormat::PlasmaDayNight
         );
     }
 
