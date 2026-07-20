@@ -48,6 +48,12 @@ fn cache_dir() -> PathBuf {
     )
 }
 
+/// Directory that stores bounded poster PNGs for motion-media library assets.
+#[must_use]
+pub fn posters_dir() -> PathBuf {
+    data_dir().join("posters")
+}
+
 /// Directory that stores PNG frames decoded from imported dynamic HEIC packages.
 #[must_use]
 pub fn dynamic_stills_dir() -> PathBuf {

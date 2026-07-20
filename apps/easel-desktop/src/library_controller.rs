@@ -11,12 +11,12 @@ use std::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
 use easel_core::{AssetLocation, MediaAsset, PixelBudget, assess_suitability};
-use easel_library::{FolderWatchEvent, FolderWatcher, LocalIndexer};
+use easel_library::{FolderWatchEvent, FolderWatcher, LocalIndexer, poster_path_for_asset};
 use serde_json::json;
 use url::Url;
 
 use crate::display_session::current_displays;
-use crate::library_session::library_store;
+use crate::library_session::{library_store, posters_dir};
 
 #[cxx_qt::bridge]
 mod qobject {
@@ -74,7 +74,7 @@ pub struct LibraryControllerRust {
 impl Default for LibraryControllerRust {
     fn default() -> Self {
         let mut controller = Self {
-            status_text: QString::from("Add a local folder to index still images."),
+            status_text: QString::from("Add a local folder to index images and motion media."),
             folder_model: QStringList::default(),
             asset_model: QStringList::default(),
             favorite_model: QStringList::default(),
@@ -116,8 +116,8 @@ impl LibraryControllerRust {
         let favorite_count = favorites.len();
         self.assets = assets;
         self.favorites = favorites;
-        self.asset_model = asset_model_list(&self.assets, budget);
-        self.favorite_model = asset_model_list(&self.favorites, budget);
+        self.asset_model = asset_model_list(&self.assets, budget, &posters_dir());
+        self.favorite_model = asset_model_list(&self.favorites, budget, &posters_dir());
         self.status_text = QString::from(
             format!(
                 "{folder_count} folder(s), {asset_count} indexed asset(s), {favorite_count} favorite(s)"
@@ -156,7 +156,8 @@ impl qobject::LibraryController {
         }
         let result = (|| {
             let store = library_store()?;
-            let indexer = LocalIndexer::new(&store);
+            let posters = posters_dir();
+            let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
             let count = indexer
                 .add_and_scan(&path, true)
                 .map_err(|error| error.to_string())?;
@@ -165,7 +166,7 @@ impl qobject::LibraryController {
         match result {
             Ok(count) => {
                 self.as_mut().set_status_text(QString::from(
-                    format!("Indexed {count} new still image(s) from {}", path.display()).as_str(),
+                    format!("Indexed {count} new media file(s) from {}", path.display()).as_str(),
                 ));
                 self.refresh();
             }
@@ -179,13 +180,14 @@ impl qobject::LibraryController {
     fn rescan(mut self: Pin<&mut Self>) {
         let result = (|| {
             let store = library_store()?;
-            let indexer = LocalIndexer::new(&store);
+            let posters = posters_dir();
+            let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
             indexer.rescan_all().map_err(|error| error.to_string())
         })();
         match result {
             Ok(count) => {
                 self.as_mut().set_status_text(QString::from(
-                    format!("Rescan complete; {count} new still image(s)").as_str(),
+                    format!("Rescan complete; {count} new media file(s)").as_str(),
                 ));
                 self.refresh();
             }
@@ -239,7 +241,8 @@ impl qobject::LibraryController {
         }
         let result = (|| {
             let store = library_store()?;
-            let indexer = LocalIndexer::new(&store);
+            let posters = posters_dir();
+            let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
             for event in events {
                 match event {
                     FolderWatchEvent::Upsert(path) => {
@@ -260,13 +263,26 @@ impl qobject::LibraryController {
     }
 }
 
-fn asset_model_list(assets: &[MediaAsset], budget: PixelBudget) -> QStringList {
+fn asset_model_list(assets: &[MediaAsset], budget: PixelBudget, posters_dir: &Path) -> QStringList {
     let mut list = QStringList::default();
     for asset in assets {
         let assessment = assess_suitability(asset.media.dimensions(), budget);
         let preview = match &asset.location {
-            AssetLocation::Local { path } => Url::from_file_path(Path::new(path))
-                .map_or_else(|()| path.clone(), |url| url.as_str().to_owned()),
+            AssetLocation::Local { path } => {
+                if asset.media.requires_live_surface() {
+                    let poster = poster_path_for_asset(posters_dir, asset.id);
+                    if poster.is_file() {
+                        Url::from_file_path(&poster)
+                            .map_or_else(|()| poster.display().to_string(), |url| url.to_string())
+                    } else {
+                        Url::from_file_path(Path::new(path))
+                            .map_or_else(|()| path.clone(), |url| url.as_str().to_owned())
+                    }
+                } else {
+                    Url::from_file_path(Path::new(path))
+                        .map_or_else(|()| path.clone(), |url| url.as_str().to_owned())
+                }
+            }
             AssetLocation::Remote { preview_url, .. } => preview_url.as_str().to_owned(),
         };
         let creator = asset

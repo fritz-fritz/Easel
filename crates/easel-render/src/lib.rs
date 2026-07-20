@@ -9,6 +9,7 @@
 mod decode;
 mod fit;
 mod plan;
+mod poster;
 mod raster;
 mod resize;
 
@@ -17,4 +18,5 @@ pub use plan::{
     CompositionSettings, LetterboxColor, OutputOperation, OutputPlan, PixelRect, RENDERER_VERSION,
     RenderPlan, RenderPlanError, RenderPurpose, RenderRequest,
 };
+pub use poster::{POSTER_MAX_EDGE, PosterError, render_poster};
 pub use raster::{RasterError, RasterJob, RasterOutput, atomic_write_png, render_operation};
