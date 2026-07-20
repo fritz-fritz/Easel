@@ -113,7 +113,7 @@ jobs:
       # unpacks those zips; merge-multiple flattens unique PNG/manifest names into path.
       - name: Download CI visual bundles
         if: steps.visuals.outputs.count != '0'
-        uses: actions/download-artifact@v7
+        uses: actions/download-artifact@v8
         with:
           run-id: ${{ steps.meta.outputs.run_id }}
           github-token: ${{ github.token }}
