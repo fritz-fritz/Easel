@@ -36,7 +36,7 @@ cxx = "1.0.176"
 cxx-qt = "0.9.1"
 cxx-qt-build = "0.9.1"
 cxx-qt-lib = "0.9.1"
-image = { version = "=0.25.8", default-features = false, features = [
+image = { version = "=0.25.10", default-features = false, features = [
     "bmp",
     "gif",
     "jpeg",
@@ -45,22 +45,22 @@ image = { version = "=0.25.8", default-features = false, features = [
     "webp",
 ] }
 libm = "0.2"
-notify = "7"
+notify = "8"
 reqwest = { version = "0.12", default-features = false, features = [
     "blocking",
     "json",
     "rustls-tls",
 ] }
-rusqlite = { version = "0.32", features = ["bundled"] }
+rusqlite = { version = "0.40", features = ["bundled"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 thiserror = "2.0"
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "sync"] }
-toml = "0.8"
+toml = "1.1"
 tracing = "0.1"
 url = { version = "2.5", features = ["serde"] }
 uuid = { version = "1", features = ["serde", "v4"] }
-windows = { version = "0.58", features = [
+windows = { version = "0.62", features = [
     "Win32_Foundation",
     "Win32_Graphics_Gdi",
     "Win32_System_Com",

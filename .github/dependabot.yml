@@ -1,6 +1,11 @@
 version: 2
 updates:
   # One PR for all Cargo bumps so CI exercises the combined lockfile once.
+  #
+  # After a `cxx` patch bump, Dependabot may leave transitive `cxx-gen` behind
+  # (pulled by cxx-qt-build). Align with:
+  #   cargo update -p cxx-gen --precise 0.7.<cxx-patch>
+  # CI enforces this via .github/scripts/check-cxx-gen-align.py.
   - package-ecosystem: cargo
     directory: /
     schedule:

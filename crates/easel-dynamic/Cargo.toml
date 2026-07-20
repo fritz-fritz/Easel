@@ -14,7 +14,7 @@ easel-core = { path = "../easel-core" }
 easel-render = { path = "../easel-render" }
 image = { workspace = true }
 libheif-rs = { version = "2.7", default-features = false, features = ["v1_17"] }
-plist = "=1.7.0"
+plist = "=1.10.0"
 serde = { workspace = true }
 thiserror.workspace = true
 
