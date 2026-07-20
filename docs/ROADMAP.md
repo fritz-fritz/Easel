@@ -98,8 +98,9 @@ cache, TOML persistence, SQLite last-applied catch-up, still-frame poller with a
 pre-render, Compose Import HEIC + timeline evaluation against the loaded set,
 `easel stills` / `inspect-heic` / `import-heic`). Apply prefers native dynamic bundles when
 `BackendCapabilities::native_dynamic_bundle` is true: macOS HEIC; Plasma built-in day/night
-packages for Appearance sets (KNightTime) and community zzag HEIC for dense solar when
-present (ADR 0007); otherwise the still poller. Windows remains still-poller-only.
+packages for Appearance sets (KNightTime). Dense solar/h24 on Plasma uses Rust evaluation
+plus still-frame apply (Easel plugin IPC when installed; otherwise `org.kde.image`) — no
+community zzag plugin required. Windows remains still-poller-only.
 
 ## Stage 6 — Live media + Plasma plugin host
 
@@ -125,9 +126,10 @@ writes `{data}/posters/{asset_id}.png`, Library grid prefers poster previews for
 live-surface assets. Video containers are recognized but not indexed yet (Qt Multimedia
 path, no `ffmpeg`). Plasma plugin still-frame IPC landed: `active.json` under
 `{data}/plasma-wallpaper/`, plugin polls + geometry match, D-Bus bind only when topology
-changes. Remaining: in-plugin dense-solar HEIC evaluation (retire zzag), Qt Multimedia
-preview + video probe/posters, shared clock compositor, power/lock policies, and
-live-host spikes on Windows/macOS.
+changes. Dense solar/h24 on Plasma uses Rust schedule evaluation + still IPC (no zzag);
+Appearance sets still use built-in day/night packages. Remaining: Qt Multimedia preview +
+video probe/posters, shared clock compositor, power/lock policies, and live-host spikes on
+Windows/macOS.
 
 ## Stage 7 — Platform breadth and correction
 

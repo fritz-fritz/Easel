@@ -30,11 +30,12 @@ tighter OS integration while Easel’s Compose/Library GUI remains the managemen
    | Content | Preferred host | Fallback |
    | --- | --- | --- |
    | Appearance light/dark | Built-in day/night package **or** Easel plugin | Still poller via `org.kde.image` |
-   | Dense solar / h24 | **Easel plugin** (schedule evaluation in-process or via daemon IPC) | Still poller; zzag only if user already uses it |
+   | Dense solar / h24 | **Easel plugin** (Rust schedule eval + `active.json` IPC) | Still poller via `org.kde.image` |
    | Live animated/video | **Easel plugin** (Stage 6) | Poster still |
 
 4. **Apply path:** `PlasmaBackend` prefers setting `wallpaperPlugin` to the Easel plugin id
-   when installed; otherwise retain ADR 0007 behavior (`org.kde.image` / zzag).
+   when installed; otherwise retain ADR 0007 behavior (`org.kde.image`). Dense solar never
+   requires zzag.
 5. **Built-in day/night remains valuable** for users who want zero Easel process at idle for
    Appearance-only sets. The plugin does not replace that capability; it supersedes zzag as
    Easel’s preferred dense-solar host on Plasma.
@@ -47,8 +48,9 @@ tighter OS integration while Easel’s Compose/Library GUI remains the managemen
 - Still-frame IPC: desktop writes `{data}/plasma-wallpaper/active.json`; the Easel
   plugin polls it and updates `Image` without `evaluateScript` on every tick
   (Stage 6.3). Topology/plugin bind still uses a one-shot D-Bus script.
-- In-plugin schedule evaluation for dense solar HEIC packages remains a later
-  Stage 6 item; until then zzag or the still poller + IPC path applies.
+- Dense solar/h24 schedule evaluation stays in Rust (`due_dynamic_stills` /
+  `active_frame_with_context`); `prefers_still_frame_host` skips zzag native apply
+  (Stage 6.4).
 - Docs must say: stock Plasma day/night ≠ Apple Dynamic Desktop; Easel plugin ≈ portable
   schedule host under Plasma’s wallpaper API.
 

@@ -24,11 +24,14 @@ geometry matches this containment’s screen. After the first bind (plugin +
 `StateFile` + seed `Image` via D-Bus), subsequent dense-solar ticks only update
 the JSON — no `PlasmaShell.evaluateScript` until display topology changes.
 
-Appearance day/night packages still use built-in `org.kde.image` + KNightTime.
-Dense solar HEIC packages still use zzag when present; still-poller frames use
-this IPC path when the Easel plugin is installed.
+## Dynamic stills
+
+- **Appearance** light/dark: built-in `org.kde.image` + KNightTime day/night packages.
+- **Dense solar / h24:** Rust evaluates `DynamicStillSet` and publishes cropped stills
+  through this IPC path. No community zzag (or other external) wallpaper plugin is
+  required.
 
 ## Status
 
-Stage 6.3: still-image host with `Image` + `StateFile` IPC. Live media and
-in-plugin schedule evaluation remain follow-ups.
+Stage 6.3–6.4: still-image host with `Image` + `StateFile` IPC and dense-solar
+without zzag. Live media remains a follow-up.

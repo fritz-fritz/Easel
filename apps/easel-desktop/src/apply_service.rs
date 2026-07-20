@@ -9,6 +9,7 @@ use std::path::{Path, PathBuf};
 use easel_core::{DynamicStillSet, Profile, resolve_displays};
 use easel_dynamic::{
     NativeDynamicFormat, cached_bundle_path, encode_per_display_bundles, preferred_native_format,
+    prefers_still_frame_host,
 };
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{
@@ -126,26 +127,19 @@ pub fn apply_native_dynamic(
         .or_else(|| read_native_host_fingerprint(set));
     let host_hint = native_format_for_backend();
     let format = preferred_native_format(set, host_hint);
+    // Dense solar/h24 on Plasma: evaluate in Rust and publish still frames (Easel
+    // plugin IPC when installed). Do not require zzag or other external HEIC hosts.
+    if prefers_still_frame_host(set, host_hint) {
+        return Err(
+            "dense solar/h24 uses Easel still-frame host; falling back to still poller".into(),
+        );
+    }
     if stored.as_deref() == Some(fingerprint.as_str())
         && displays
             .iter()
             .all(|display| cached_bundle_path(set, display.id, &output_dir, format).is_some())
     {
         return Ok(NativeDynamicApply::AlreadyHosting { fingerprint });
-    }
-
-    // Dense solar/h24 on Plasma without the community plugin cannot be OS-hosted.
-    if matches!(format, NativeDynamicFormat::PlasmaHeic)
-        && !plasma_solar_plugin_available()
-        && matches!(
-            host_hint,
-            NativeDynamicFormat::PlasmaDayNight | NativeDynamicFormat::PlasmaHeic
-        )
-    {
-        return Err(
-            "Plasma solar/h24 native host requires com.github.zzag.dynamic; use still poller"
-                .into(),
-        );
     }
 
     let encoded = encode_per_display_bundles(
@@ -274,10 +268,6 @@ fn native_format_for_backend() -> NativeDynamicFormat {
     }
 }
 
-fn plasma_solar_plugin_available() -> bool {
-    easel_platform::plasma_dynamic_plugin_id().is_some()
-}
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -286,5 +276,18 @@ mod tests {
     fn apply_cache_dir_is_under_temp() {
         let path = apply_cache_dir();
         assert!(path.ends_with("automation-apply"));
+    }
+
+    #[test]
+    fn plasma_dense_solar_skips_native_host() {
+        use easel_core::{AssetId, DynamicScheduleKind, DynamicStillSet, ProfileId};
+
+        let asset = AssetId::new();
+        let mut set = DynamicStillSet::default_hourly("Solar", ProfileId::new(), asset).unwrap();
+        set.schedule_kind = DynamicScheduleKind::SolarPosition;
+        assert!(prefers_still_frame_host(
+            &set,
+            NativeDynamicFormat::PlasmaDayNight
+        ));
     }
 }
