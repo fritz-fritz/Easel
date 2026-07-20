@@ -38,7 +38,10 @@ jobs:
               - 'crates/**'
               - 'apps/**'
               - '.github/workflows/ci.yml'
+              - '.github/actions/setup-rust/**'
               - '.github/scripts/install-libheif-windows.ps1'
+              - '.github/scripts/sync-rust-pins.py'
+              - '.github/scripts/test_sync_rust_pins.py'
               - '.github/libheif-windows.lock.json'
               - 'tools/easel-deps/**'
             desktop:
@@ -48,6 +51,7 @@ jobs:
               - 'crates/**'
               - 'apps/easel-desktop/**'
               - '.github/actions/ci-visual/**'
+              - '.github/actions/setup-rust/**'
               - '.github/workflows/ci.yml'
               - '.github/scripts/install-libheif-windows.ps1'
               - '.github/libheif-windows.lock.json'
@@ -82,7 +86,7 @@ jobs:
     runs-on: ${{ matrix.os }}
     steps:
       - uses: actions/checkout@v7
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: ./.github/actions/setup-rust
         with:
           components: rustfmt, clippy
       - uses: Swatinem/rust-cache@v2
@@ -105,6 +109,11 @@ jobs:
         if: runner.os == 'Windows'
         shell: pwsh
         run: .\.github\scripts\install-libheif-windows.ps1
+      - name: Check Rust companion pins
+        if: matrix.os == 'ubuntu-latest'
+        run: |
+          python3 .github/scripts/test_sync_rust_pins.py
+          python3 .github/scripts/sync-rust-pins.py --check
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check
@@ -140,7 +149,7 @@ jobs:
         with:
           # Need enough history to diff PR/push commits for selective smoke views.
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@1.85
+      - uses: ./.github/actions/setup-rust
         with:
           components: clippy
 

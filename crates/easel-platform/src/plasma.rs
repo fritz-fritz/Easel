@@ -4,6 +4,7 @@
 
 //! KDE Plasma 6 still-wallpaper backend via `org.kde.plasmashell`.
 
+use std::fmt::Write as _;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -143,7 +144,8 @@ fn build_plasma_plugin_script(
     for wallpaper in displays {
         let file_url = file_url_from_path(&wallpaper.path)?;
         let rect = wallpaper.logical_rect;
-        assignments.push_str(&format!(
+        let _ = write!(
+            assignments,
             r#"
 setForGeometry({left}, {top}, {width}, {height}, "{url}");
 "#,
@@ -152,7 +154,7 @@ setForGeometry({left}, {top}, {width}, {height}, "{url}");
             width = rect.width,
             height = rect.height,
             url = escape_js_string(&file_url),
-        ));
+        );
     }
 
     let dynamic_mode_line = if sunrise_mode {

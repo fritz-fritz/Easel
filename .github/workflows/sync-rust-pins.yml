@@ -1,0 +1,46 @@
+name: Sync rust pins
+
+# When Dependabot bumps rust-toolchain.toml, rewrite companion pins
+# (Cargo.toml rust-version, AGENTS.md) onto the same branch so CI and
+# docs stay aligned. rust-toolchain.toml remains the single source of truth;
+# CI installs via .github/actions/setup-rust.
+
+on:
+  push:
+    branches:
+      - "dependabot/rust-toolchain/**"
+    paths:
+      - "rust-toolchain.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    # Dependabot-triggered workflows need an explicit write grant; skip forks.
+    if: github.event_name == 'workflow_dispatch' || github.actor == 'dependabot[bot]'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          ref: ${{ github.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Sync companion pins from rust-toolchain.toml
+        run: python3 .github/scripts/sync-rust-pins.py
+
+      # Only push onto Dependabot branches; workflow_dispatch is local rewrite/verify.
+      - name: Commit companion pin sync
+        if: startsWith(github.ref, 'refs/heads/dependabot/')
+        run: |
+          set -euo pipefail
+          if git diff --quiet -- Cargo.toml AGENTS.md; then
+            echo "Companion pins already matched."
+            exit 0
+          fi
+          git config user.name "github-actions[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add Cargo.toml AGENTS.md
+          git commit -m "chore(rust): sync companion pins with rust-toolchain.toml"
+          git push
