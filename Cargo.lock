@@ -532,6 +532,7 @@ name = "easel-library"
 version = "0.1.0"
 dependencies = [
  "easel-core",
+ "easel-render",
  "image",
  "notify",
  "reqwest",

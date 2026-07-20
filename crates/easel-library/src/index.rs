@@ -2,28 +2,17 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Local still-image folder indexing.
+//! Local folder indexing for still images and motion media.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use easel_core::{
-    AssetId, AssetLocation, HistoryAction, HistoryEvent, MediaAsset, MediaDimensions, MediaMetadata,
-};
+use easel_core::{AssetId, AssetLocation, HistoryAction, HistoryEvent, MediaAsset};
 use thiserror::Error;
 
+use crate::probe::{local_media_extension, probe_local_media, write_poster_for_asset};
 use crate::store::{LibraryStore, LibraryStoreError};
-
-/// Supported still-image file extensions for Stage 3 indexing.
-const STILL_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", "tiff"];
-
-/// Returns whether `extension` is a still-image type indexed by Easel.
-#[must_use]
-pub fn still_image_extension(extension: &str) -> bool {
-    let lower = extension.to_ascii_lowercase();
-    STILL_EXTENSIONS.iter().any(|candidate| *candidate == lower)
-}
 
 /// A registered library folder root.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -34,19 +23,30 @@ pub struct IndexedFolder {
     pub recursive: bool,
 }
 
-/// Scans folders and upserts still-image assets into the library store.
+/// Scans folders and upserts local media assets into the library store.
 pub struct LocalIndexer<'a> {
     store: &'a LibraryStore,
+    posters_dir: Option<&'a Path>,
 }
 
 impl<'a> LocalIndexer<'a> {
     /// Creates an indexer bound to `store`.
     #[must_use]
     pub fn new(store: &'a LibraryStore) -> Self {
-        Self { store }
+        Self {
+            store,
+            posters_dir: None,
+        }
     }
 
-    /// Registers `folder` and indexes matching still images.
+    /// Writes bounded poster PNGs for motion media under `dir`.
+    #[must_use]
+    pub fn with_posters_dir(mut self, dir: &'a Path) -> Self {
+        self.posters_dir = Some(dir);
+        self
+    }
+
+    /// Registers `folder` and indexes matching media files.
     pub fn add_and_scan(&self, folder: &Path, recursive: bool) -> Result<usize, IndexError> {
         let canonical = fs::canonicalize(folder).map_err(|error| IndexError::Io {
             path: folder.to_path_buf(),
@@ -69,7 +69,7 @@ impl<'a> LocalIndexer<'a> {
         Ok(total)
     }
 
-    /// Indexes still images under `folder`.
+    /// Indexes supported media under `folder`.
     pub fn scan_path(&self, folder: &Path, recursive: bool) -> Result<usize, IndexError> {
         let mut count = 0;
         let mut stack = vec![folder.to_path_buf()];
@@ -101,7 +101,7 @@ impl<'a> LocalIndexer<'a> {
                     .extension()
                     .and_then(|value| value.to_str())
                     .unwrap_or_default();
-                if !still_image_extension(extension) {
+                if !local_media_extension(extension) {
                     continue;
                 }
                 match self.index_file(&path)? {
@@ -113,14 +113,14 @@ impl<'a> LocalIndexer<'a> {
         Ok(count)
     }
 
-    /// Indexes or refreshes one still-image file.
+    /// Indexes or refreshes one media file.
     pub fn index_file(&self, path: &Path) -> Result<IndexOutcome, IndexError> {
         let canonical = fs::canonicalize(path).map_err(|error| IndexError::Io {
             path: path.to_path_buf(),
             source: error,
         })?;
         let path_string = canonical.to_string_lossy().into_owned();
-        let Some(dimensions) = probe_dimensions(&canonical) else {
+        let Some(media) = probe_local_media(&canonical) else {
             return Ok(IndexOutcome::Skipped);
         };
         let title = canonical
@@ -130,9 +130,10 @@ impl<'a> LocalIndexer<'a> {
         if let Some(existing) = self.store.find_by_path(&path_string)? {
             let mut refreshed = existing;
             refreshed.title = title.or(refreshed.title);
-            refreshed.media = MediaMetadata::StillImage { dimensions };
+            refreshed.media = media;
             refreshed.retrieved_at_unix = Some(now_unix());
             self.store.upsert_asset(&refreshed)?;
+            self.extract_poster(&canonical, refreshed.id);
             return Ok(IndexOutcome::Updated);
         }
 
@@ -140,7 +141,7 @@ impl<'a> LocalIndexer<'a> {
             id: AssetId::new(),
             provider_id: None,
             title,
-            media: MediaMetadata::StillImage { dimensions },
+            media,
             location: AssetLocation::Local { path: path_string },
             license: None,
             attribution: None,
@@ -149,13 +150,22 @@ impl<'a> LocalIndexer<'a> {
             use_reporting_url: None,
             retrieved_at_unix: Some(now_unix()),
         };
+        let asset_id = asset.id;
         self.store.upsert_asset(&asset)?;
         self.store.record_history(&HistoryEvent::new(
-            asset.id,
+            asset_id,
             HistoryAction::Discovered,
             now_unix(),
         ))?;
+        self.extract_poster(&canonical, asset_id);
         Ok(IndexOutcome::Created)
+    }
+
+    fn extract_poster(&self, path: &Path, asset_id: AssetId) {
+        let Some(posters_dir) = self.posters_dir else {
+            return;
+        };
+        let _ = write_poster_for_asset(path, asset_id, posters_dir);
     }
 }
 
@@ -193,14 +203,6 @@ fn now_unix() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_or(0, |duration| duration.as_secs())
-}
-
-fn probe_dimensions(path: &Path) -> Option<MediaDimensions> {
-    let (width, height) = image::image_dimensions(path).ok()?;
-    if width == 0 || height == 0 {
-        return None;
-    }
-    Some(MediaDimensions { width, height })
 }
 
 #[cfg(test)]
@@ -249,5 +251,34 @@ mod tests {
             .unwrap();
         assert_eq!(asset.media.dimensions().width, 80);
         assert_eq!(asset.media.dimensions().height, 60);
+    }
+
+    #[test]
+    fn indexes_gif_as_animated_and_writes_poster() {
+        use image::codecs::gif::GifEncoder;
+        use image::{Delay, Frame, Rgba, RgbaImage};
+        use std::fs::File;
+
+        let root = std::env::temp_dir().join(format!("easel-idx-gif-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("motion.gif");
+        let frame = Frame::from_parts(
+            RgbaImage::from_pixel(40, 30, Rgba([9, 8, 7, 255])),
+            0,
+            0,
+            Delay::from_numer_denom_ms(80, 1),
+        );
+        GifEncoder::new(File::create(&path).unwrap())
+            .encode_frame(frame)
+            .unwrap();
+        let posters = root.join("posters");
+        let store = LibraryStore::open(root.join("library.db")).unwrap();
+        let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
+        assert_eq!(indexer.index_file(&path).unwrap(), IndexOutcome::Created);
+        let assets = store.list_assets(10).unwrap();
+        assert_eq!(assets.len(), 1);
+        assert!(assets[0].media.requires_live_surface());
+        let poster = crate::probe::poster_path_for_asset(&posters, assets[0].id);
+        assert!(poster.is_file());
     }
 }

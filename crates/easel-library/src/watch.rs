@@ -11,18 +11,18 @@ use std::time::Duration;
 use notify::{Config, EventKind, RecommendedWatcher, RecursiveMode, Watcher};
 use thiserror::Error;
 
-use crate::index::still_image_extension;
+use crate::probe::local_media_extension;
 
 /// Normalized folder watch notifications.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum FolderWatchEvent {
-    /// A still-image path was created or modified.
+    /// A media path was created or modified.
     Upsert(PathBuf),
-    /// A still-image path was removed.
+    /// A media path was removed.
     Remove(PathBuf),
 }
 
-/// Watches registered folders for still-image changes.
+/// Watches registered folders for indexed media changes.
 pub struct FolderWatcher {
     _watcher: RecommendedWatcher,
     receiver: Receiver<FolderWatchEvent>,
@@ -42,7 +42,7 @@ impl FolderWatcher {
                         .extension()
                         .and_then(|value| value.to_str())
                         .unwrap_or_default();
-                    if !still_image_extension(extension) {
+                    if !local_media_extension(extension) {
                         continue;
                     }
                     let message = match event.kind {
