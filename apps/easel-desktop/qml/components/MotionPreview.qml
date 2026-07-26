@@ -17,8 +17,6 @@ Frame {
     property int motionMode: 0
     property string diagnostics: ""
 
-    signal diagnosticsChanged(string text)
-
     readonly property bool isGif: {
         const s = String(root.sourceUrl).toLowerCase()
         return s.endsWith(".gif")
@@ -35,7 +33,6 @@ Frame {
 
     function setDiagnostics(text) {
         root.diagnostics = text
-        root.diagnosticsChanged(text)
     }
 
     function restartPlayback() {

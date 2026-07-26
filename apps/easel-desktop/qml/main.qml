@@ -592,7 +592,7 @@ ApplicationWindow {
                         Layout.rightMargin: 24
                         sourceUrl: compose.motion_source_url
                         motionMode: compose.motion_mode_index
-                        onDiagnosticsChanged: (text) => { compose.motion_diagnostics = text }
+                        onDiagnosticsChanged: compose.motion_diagnostics = diagnostics
                     }
 
                     Label {
