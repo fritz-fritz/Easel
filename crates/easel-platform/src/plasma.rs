@@ -12,7 +12,7 @@ use std::sync::OnceLock;
 use url::Url;
 
 use crate::plasma_state::{
-    publish_plasma_wallpaper_state, wallpaper_geometry_fingerprint, plasma_wallpaper_state_dir,
+    plasma_wallpaper_state_dir, publish_plasma_wallpaper_state, wallpaper_geometry_fingerprint,
 };
 use crate::{
     BackendCapabilities, BackendError, DisplayWallpaper, WallpaperBackend, WallpaperOutput,
@@ -71,9 +71,8 @@ impl WallpaperBackend for PlasmaBackend {
                     })
                 });
                 let (plugin, sunrise_mode) = if uses_heic {
-                    // Dense solar HEIC stays on zzag (or similar) until the Easel plugin
-                    // evaluates schedules in-process. Still-poller frames already use the
-                    // Easel plugin IPC path via PerDisplay apply.
+                    // Legacy NativeDynamic HEIC path (zzag). Production dense solar uses
+                    // PerDisplay still frames + Easel plugin IPC instead.
                     (
                         plasma_dynamic_plugin_id().ok_or(BackendError::UnsupportedOutput)?,
                         false,
@@ -113,10 +112,8 @@ fn apply_per_display_via_easel_plugin(displays: &[DisplayWallpaper]) -> Result<(
     let state_path = publish_plasma_wallpaper_state(displays)?;
     let fingerprint = wallpaper_geometry_fingerprint(displays);
     let stamp_path = plasma_wallpaper_state_dir().join("bound.fingerprint");
-    let needs_bind = std::fs::read_to_string(&stamp_path)
-        .ok()
-        .as_deref()
-        != Some(fingerprint.as_str());
+    let needs_bind =
+        std::fs::read_to_string(&stamp_path).ok().as_deref() != Some(fingerprint.as_str());
     if needs_bind {
         let script = build_easel_plugin_bind_script(displays, &state_path)?;
         evaluate_plasma_script(&script)?;

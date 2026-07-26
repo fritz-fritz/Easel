@@ -45,16 +45,16 @@ So on a stock Plasma Wayland install:
 | Capability | Available? |
 | --- | --- |
 | Light/dark package + KNightTime | Yes (built-in) |
-| Dense solar / h24 HEIC host | No (needs zzag) |
-| Apple HEIC import as native host | Only via zzag conversion |
+| Dense solar / h24 HEIC host | Via Easel still evaluation + plugin IPC (ADR 0008); zzag not required |
+| Apple HEIC import as native host | macOS native; Plasma via still frames |
 
 ### Options evaluated for Easel
 
 | Option | Pros | Cons | Verdict |
 | --- | --- | --- | --- |
 | **A. Built-in day/night packages** | Zero extra deps; Wayland-native; matches Plasma 6.4+ UX | Appearance / two-frame only | **Use for `Appearance` sets** |
-| **B. Community zzag HEIC/AVIF** | Closest to Apple solar/h24 hosting | Not installed by default; optional probe | **Use when plugin present** for dense solar |
-| **C. Easel still poller** | Correct on every Plasma; no plugin | Easel must stay running; not “OS-hosted” | **Fallback** for dense solar without zzag |
+| **B. Community zzag HEIC/AVIF** | Closest to Apple solar/h24 package hosting | External plugin; not required | **Legacy only** (not used by apply) |
+| **C. Easel still eval + plugin IPC** | Correct on every Plasma; no zzag | Desktop evaluates schedule | **Use for dense solar/h24** |
 | **D. Reduce dense solar → day/night** | Stock hosting for more imports | Loses intermediate frames | Future optional quality trade-off |
 | **E. Claim stock Plasma = Apple Dynamic Desktop** | Marketing simplicity | Factually wrong | **Rejected** |
 
@@ -65,28 +65,29 @@ Windows still has no public dynamic-HEIC API. macOS hosts Apple HEIC natively.
 | Still-set kind | Plasma host | Fallback |
 | --- | --- | --- |
 | `Appearance` (light/dark) | Built-in day/night package → `org.kde.image` + `DynamicMode=1` | Still poller |
-| `SolarPosition` / dense `TimeOfDay` | Community zzag HEIC/AVIF **if** plugin present | Still poller |
-| Authored solar sunrise/sunset keys | Still poller (or day/night reduction later) | Still poller |
+| `SolarPosition` / dense `TimeOfDay` | Rust evaluation → still frames → Easel plugin IPC (ADR 0008) | `org.kde.image` still apply |
+| Authored solar sunrise/sunset keys | Same still-frame path | Still poller |
 
 Apple HEIC remains the interchange import/export format. Plasma day/night packages are a
 **derived apply output**, like per-display HEIC crops on macOS.
 
 `PlasmaBackend::native_dynamic_bundle` is **true** because appearance sets can be
-OS-hosted without extras. Automation must still fall back to the still poller when the
-chosen native format is unavailable (dense solar without zzag).
+OS-hosted without extras. Dense solar uses `prefers_still_frame_host` so apply never
+depends on zzag.
 
-**Superseding direction (ADR 0008):** Easel will ship its own `Plasma/Wallpaper` plugin so
+**Superseding direction (ADR 0008):** Easel ships its own `Plasma/Wallpaper` plugin so
 dense solar, live media, and managed multi-display crops are OS-hosted without depending
 on zzag. Built-in day/night remains the preferred zero-daemon path for Appearance sets.
 
 ## Consequences
 
 - Appearance-keyed Mojave-style imports can be OS-hosted on stock Plasma Wayland.
-- Dense solar sets keep correct behavior via Easel's poller on stock Plasma until the
-  Easel wallpaper plugin (ADR 0008) is wired; zzag remains an optional interim host.
+- Dense solar sets are correct via Rust schedule evaluation + still-frame apply; with the
+  Easel wallpaper plugin installed, ticks update `active.json` without per-frame D-Bus.
 - Docs and Compose copy must not claim Apple-parity solar hosting on stock Plasma.
-- Future work: Easel plugin host (0008); optional AVIF writer; optional reduction of dense
-  solar → day/night for built-in-only users.
+- zzag is no longer part of the supported apply path (encode may still emit PlasmaHeic for
+  optional export).
+
 
 ## References
 

@@ -18,7 +18,7 @@ mod plasma_day_night;
 pub use bundle::{
     BundleEncodeError, BundlePlanError, DynamicBundlePlan, DynamicBundleTarget,
     EncodedDynamicBundle, NativeDynamicFormat, cached_bundle_path, encode_per_display_bundles,
-    plan_per_display_bundles, preferred_native_format,
+    plan_per_display_bundles, preferred_native_format, prefers_still_frame_host,
 };
 pub use encode::{EncodeFrame, HeicEncodeError, encode_dynamic_heic, encode_still_set_heic};
 pub use heic::{
