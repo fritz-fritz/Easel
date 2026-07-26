@@ -4,9 +4,10 @@
 
 //! Multi-display live crop planning for a shared media clock.
 //!
-//! Live surfaces reuse the same crop/placement math as still posters
-//! ([`RenderPurpose::LiveCompositorFrame`]) so a Plasma (or other) host can
-//! apply one decoded frame with synchronized per-display transforms.
+//! [`plan_live_crops`] is the canonical live crop/placement path. It plans with
+//! [`RenderPurpose::LiveCompositorFrame`]. Still poster rasters use
+//! [`RenderPurpose::LivePosterFrame`] but must share the same
+//! [`RenderPlan::operations`] math so poster fallback and live playback stay aligned.
 
 use easel_core::{Display, DisplayId, LogicalRect, NativePixelSize};
 
@@ -48,6 +49,7 @@ pub struct LiveDisplayCrop {
 
 /// Plans per-display live crops for one source size and composition.
 ///
+/// Uses [`RenderPurpose::LiveCompositorFrame`] as the unified live crop purpose.
 /// Every crop shares the same source media timeline; hosts must not open an
 /// independent player per display.
 pub fn plan_live_crops(
@@ -57,13 +59,15 @@ pub fn plan_live_crops(
 ) -> Result<Vec<LiveDisplayCrop>, RenderPlanError> {
     let plan = RenderPlan::for_purpose(displays, RenderPurpose::LiveCompositorFrame)?;
     let operations = plan.operations(source_size, composition)?;
-    let mut crops = Vec::with_capacity(operations.len());
-    for operation in operations {
-        let display = displays
-            .iter()
-            .find(|candidate| candidate.id == operation.display_id)
-            .ok_or(RenderPlanError::NoDisplays)?;
-        crops.push(LiveDisplayCrop {
+    debug_assert_eq!(
+        operations.len(),
+        displays.len(),
+        "RenderPlan preserves display order and count"
+    );
+    Ok(operations
+        .into_iter()
+        .zip(displays.iter())
+        .map(|(operation, display)| LiveDisplayCrop {
             display_id: operation.display_id,
             native_size: operation.native_size,
             logical_rect: display.logical_rect,
@@ -71,9 +75,8 @@ pub fn plan_live_crops(
             destination_rect: operation.destination_rect,
             source_uv: normalized_source_uv(operation.source_crop, source_size),
             letterbox_color: operation.letterbox_color,
-        });
-    }
-    Ok(crops)
+        })
+        .collect())
 }
 
 fn normalized_source_uv(crop: PixelRect, source: NativePixelSize) -> NormalizedRect {
@@ -125,7 +128,7 @@ mod tests {
     }
 
     #[test]
-    fn live_crops_match_still_operations() {
+    fn live_crops_use_compositor_purpose_aligned_with_poster() {
         let displays = two_equal_row().displays;
         let source = NativePixelSize {
             width: 400,
@@ -138,13 +141,21 @@ mod tests {
             focal_x: 0.5,
             focal_y: 0.5,
         };
-        let crops = plan_live_crops(source, &displays, &composition).expect("crops");
-        let ops = RenderPlan::for_purpose(&displays, RenderPurpose::LivePosterFrame)
-            .expect("plan")
+
+        let compositor_ops = RenderPlan::for_purpose(&displays, RenderPurpose::LiveCompositorFrame)
+            .expect("compositor plan")
             .operations(source, &composition)
-            .expect("ops");
-        assert_eq!(crops.len(), ops.len());
-        for (crop, op) in crops.iter().zip(ops.iter()) {
+            .expect("compositor ops");
+        let poster_ops = RenderPlan::for_purpose(&displays, RenderPurpose::LivePosterFrame)
+            .expect("poster plan")
+            .operations(source, &composition)
+            .expect("poster ops");
+        // Poster fallback and live playback must stay on one crop/placement math.
+        assert_eq!(compositor_ops, poster_ops);
+
+        let crops = plan_live_crops(source, &displays, &composition).expect("crops");
+        assert_eq!(crops.len(), compositor_ops.len());
+        for (crop, op) in crops.iter().zip(compositor_ops.iter()) {
             assert_eq!(crop.display_id, op.display_id);
             assert_eq!(crop.source_crop, op.source_crop);
             assert_eq!(crop.destination_rect, op.destination_rect);

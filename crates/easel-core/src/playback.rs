@@ -12,6 +12,9 @@ use thiserror::Error;
 
 use crate::profile::{LoopMode, PlaybackPolicy};
 
+/// Largest integer exactly representable in `f64` (2⁵³ − 1).
+const MAX_EXACT_MS: u64 = (1_u64 << 53) - 1;
+
 /// One logical media clock shared by all live display surfaces in a session.
 #[derive(Clone, Debug, PartialEq)]
 pub struct PlaybackClock {
@@ -72,8 +75,9 @@ impl PlaybackClock {
     #[must_use]
     pub fn position_ms(&self) -> u64 {
         let clamped = self.position_ms.max(0.0).floor();
-        if clamped >= f64::from(u32::MAX) {
-            u64::from(u32::MAX)
+        let max_exact = max_exact_ms_f64();
+        if clamped >= max_exact {
+            MAX_EXACT_MS
         } else {
             #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
             {
@@ -115,6 +119,7 @@ impl PlaybackClock {
 
     /// Seeks to an absolute media position (clamped to the known duration).
     pub fn seek_ms(&mut self, position_ms: u64) {
+        let was_ended = self.ended;
         let clamped = match self.duration_ms {
             Some(duration) if duration > 0 => position_ms.min(duration),
             _ => position_ms,
@@ -136,6 +141,10 @@ impl PlaybackClock {
             }
         } else {
             self.ended = false;
+            // Seeking away from Once EOF must not leave the clock stuck paused.
+            if was_ended {
+                self.paused = false;
+            }
         }
         self.since_present_ms = 0.0;
     }
@@ -154,11 +163,20 @@ impl PlaybackClock {
             };
         }
 
+        let was_ended = self.ended;
         self.position_ms += wall * self.rate;
         self.apply_end_of_stream();
+        let reached_end = !was_ended && self.ended;
 
         self.since_present_ms += wall;
-        let should_present = self.take_present_gate();
+        // Once EOF must always present the final frame even if the FPS gate
+        // would otherwise skip; later ticks stay paused/ended.
+        let should_present = if reached_end {
+            self.since_present_ms = 0.0;
+            true
+        } else {
+            self.take_present_gate()
+        };
         PresentationSample {
             media_time_ms: self.position_ms(),
             should_present,
@@ -202,15 +220,19 @@ impl PlaybackClock {
     }
 }
 
+fn max_exact_ms_f64() -> f64 {
+    #[allow(clippy::cast_precision_loss)]
+    {
+        MAX_EXACT_MS as f64
+    }
+}
+
 fn u64_to_f64(value: u64) -> f64 {
-    // Media timelines stay well below 2^53 ms in practice; clamp for safety.
-    if value >= u64::from(u32::MAX) {
-        f64::from(u32::MAX)
-    } else {
-        #[allow(clippy::cast_precision_loss)]
-        {
-            value as f64
-        }
+    // Keep conversions inside the exact integer range of f64 (2⁵³ − 1).
+    let clamped = value.min(MAX_EXACT_MS);
+    #[allow(clippy::cast_precision_loss)]
+    {
+        clamped as f64
     }
 }
 
@@ -271,11 +293,40 @@ mod tests {
         let sample = clock.tick(150);
         assert_eq!(sample.media_time_ms, 100);
         assert!(sample.ended);
+        assert!(sample.should_present);
         assert!(clock.is_paused());
         let after = clock.tick(50);
         assert_eq!(after.media_time_ms, 100);
         assert!(!after.should_present);
         assert!(after.ended);
+    }
+
+    #[test]
+    fn once_end_presents_even_when_fps_gate_would_skip() {
+        let mut clock =
+            PlaybackClock::from_policy(&policy(1.0, LoopMode::Once, Some(30)), Some(50)).unwrap();
+        let mid = clock.tick(20);
+        assert_eq!(mid.media_time_ms, 20);
+        assert!(!mid.should_present);
+        assert!(!mid.ended);
+        let end = clock.tick(40);
+        assert_eq!(end.media_time_ms, 50);
+        assert!(end.ended);
+        assert!(
+            end.should_present,
+            "final Once frame must present despite FPS gate"
+        );
+    }
+
+    #[test]
+    fn seek_after_once_end_resumes_playback() {
+        let mut clock =
+            PlaybackClock::from_policy(&policy(1.0, LoopMode::Once, None), Some(100)).unwrap();
+        assert!(clock.tick(150).ended);
+        clock.seek_ms(10);
+        assert!(!clock.is_ended());
+        assert!(!clock.is_paused());
+        assert_eq!(clock.tick(5).media_time_ms, 15);
     }
 
     #[test]
@@ -320,6 +371,14 @@ mod tests {
         assert_eq!(
             PlaybackClock::from_policy(&policy(0.0, LoopMode::Loop, None), None),
             Err(PlaybackClockError::InvalidRate)
+        );
+    }
+
+    #[test]
+    fn zero_frame_rate_limit_is_rejected() {
+        assert_eq!(
+            PlaybackClock::from_policy(&policy(1.0, LoopMode::Loop, Some(0)), None),
+            Err(PlaybackClockError::InvalidFrameRateLimit)
         );
     }
 }
