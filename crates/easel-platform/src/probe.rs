@@ -79,22 +79,23 @@ pub fn select_live_wallpaper_backend() -> Result<Box<dyn LiveWallpaperBackend>, 
 }
 
 fn live_unsupported_reason() -> String {
+    // Keep this focused on why live is unsupported; callers describe poster fallback.
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
         if plasma_available() {
-            "Plasma session detected; Easel wallpaper plugin live playback is not enabled yet — using poster fallback".into()
-        } else {
-            "no validated live wallpaper host in this desktop session — using poster fallback"
+            "Plasma session detected; Easel wallpaper plugin live playback is not enabled yet"
                 .into()
+        } else {
+            "no validated live wallpaper host in this desktop session".into()
         }
     }
     #[cfg(windows)]
     {
-        "Windows live wallpaper host is experimental and not enabled — using poster fallback".into()
+        "Windows live wallpaper host is experimental and not enabled".into()
     }
     #[cfg(target_os = "macos")]
     {
-        "macOS live wallpaper host is experimental and not enabled — using poster fallback".into()
+        "macOS live wallpaper host is experimental and not enabled".into()
     }
 }
 

@@ -396,7 +396,11 @@ mod tests {
             std::env::temp_dir().join(format!("easel-live-poster-{}.mp4", std::process::id()));
         std::fs::write(&path, b"not a real video").unwrap();
         let err = resolve_live_poster_source(&path).expect_err("video needs poster");
-        assert!(err.contains("library poster") || err.contains("Library"));
+        // Unindexed path vs indexed-but-missing-poster PNG both fail Apply honestly.
+        assert!(
+            err.contains("no library poster") || err.contains("poster PNG is missing"),
+            "unexpected error: {err}"
+        );
         let _ = std::fs::remove_file(path);
     }
 }
