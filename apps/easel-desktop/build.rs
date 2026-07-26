@@ -12,9 +12,13 @@ fn main() {
             .qml_file("qml/main.qml")
             .qml_files([
                 "qml/components/MonitorPreview.qml",
+                "qml/components/MotionPreview.qml",
                 "qml/components/PhotoCard.qml",
+                "qml/components/VideoProbeHost.qml",
             ]),
     )
+    // Qt Multimedia powers Compose motion preview and library video probe/posters.
+    .qt_module("Multimedia")
     .files([
         "src/app_controller.rs",
         "src/automation_controller.rs",

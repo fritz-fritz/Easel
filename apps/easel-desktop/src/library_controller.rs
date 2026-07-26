@@ -10,8 +10,12 @@ use std::pin::Pin;
 
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
-use easel_core::{AssetLocation, MediaAsset, PixelBudget, assess_suitability};
-use easel_library::{FolderWatchEvent, FolderWatcher, LocalIndexer, poster_path_for_asset};
+use easel_core::{
+    AssetLocation, MediaAsset, MediaDimensions, MediaMetadata, PixelBudget, assess_suitability,
+};
+use easel_library::{
+    FolderWatchEvent, FolderWatcher, LocalIndexer, poster_path_for_asset, video_extension,
+};
 use serde_json::json;
 use url::Url;
 
@@ -35,6 +39,7 @@ mod qobject {
         #[qproperty(QStringList, asset_model)]
         #[qproperty(QStringList, favorite_model)]
         #[qproperty(QString, selected_file_url)]
+        #[qproperty(QStringList, video_probe_queue)]
         type LibraryController = super::LibraryControllerRust;
 
         #[qinvokable]
@@ -56,6 +61,23 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "poll_watch"]
         fn pollWatch(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[rust_name = "video_probe_temp_path"]
+        fn videoProbeTempPath(self: &Self, path: QString) -> QString;
+
+        #[qinvokable]
+        #[rust_name = "complete_video_probe"]
+        fn completeVideoProbe(
+            self: Pin<&mut Self>,
+            path: QString,
+            probe_json: QString,
+            poster_path: QString,
+        );
+
+        #[qinvokable]
+        #[rust_name = "skip_video_probe"]
+        fn skipVideoProbe(self: Pin<&mut Self>, path: QString, error: QString);
     }
 }
 
@@ -66,9 +88,11 @@ pub struct LibraryControllerRust {
     asset_model: QStringList,
     favorite_model: QStringList,
     selected_file_url: QString,
+    video_probe_queue: QStringList,
     assets: Vec<MediaAsset>,
     favorites: Vec<MediaAsset>,
     watcher: Option<FolderWatcher>,
+    pending_videos: Vec<PathBuf>,
 }
 
 impl Default for LibraryControllerRust {
@@ -79,9 +103,11 @@ impl Default for LibraryControllerRust {
             asset_model: QStringList::default(),
             favorite_model: QStringList::default(),
             selected_file_url: QString::default(),
+            video_probe_queue: QStringList::default(),
             assets: Vec::new(),
             favorites: Vec::new(),
             watcher: None,
+            pending_videos: Vec::new(),
         };
         let _ = controller.reload_models();
         controller
@@ -118,13 +144,43 @@ impl LibraryControllerRust {
         self.favorites = favorites;
         self.asset_model = asset_model_list(&self.assets, budget, &posters_dir());
         self.favorite_model = asset_model_list(&self.favorites, budget, &posters_dir());
+        let pending = self.pending_videos.len();
         self.status_text = QString::from(
             format!(
-                "{folder_count} folder(s), {asset_count} indexed asset(s), {favorite_count} favorite(s)"
+                "{folder_count} folder(s), {asset_count} indexed asset(s), {favorite_count} favorite(s){}",
+                if pending > 0 {
+                    format!(", probing {pending} video(s)")
+                } else {
+                    String::new()
+                }
             )
             .as_str(),
         );
         Ok(())
+    }
+
+    fn publish_probe_queue(&mut self) {
+        self.video_probe_queue = qstring_list(self.pending_videos.iter().map(|path| {
+            Url::from_file_path(path).map_or_else(
+                |()| path.to_string_lossy().into_owned(),
+                |url| url.to_string(),
+            )
+        }));
+    }
+
+    fn enqueue_videos(&mut self, paths: impl IntoIterator<Item = PathBuf>) {
+        for path in paths {
+            if self.pending_videos.iter().any(|existing| existing == &path) {
+                continue;
+            }
+            self.pending_videos.push(path);
+        }
+        self.publish_probe_queue();
+    }
+
+    fn pop_pending(&mut self, path: &Path) {
+        self.pending_videos.retain(|existing| existing != path);
+        self.publish_probe_queue();
     }
 }
 
@@ -136,10 +192,12 @@ impl qobject::LibraryController {
                 let folders = self.as_ref().rust().folder_model.clone();
                 let assets = self.as_ref().rust().asset_model.clone();
                 let favorites = self.as_ref().rust().favorite_model.clone();
+                let queue = self.as_ref().rust().video_probe_queue.clone();
                 self.as_mut().set_status_text(status);
                 self.as_mut().set_folder_model(folders);
                 self.as_mut().set_asset_model(assets);
                 self.as_mut().set_favorite_model(favorites);
+                self.as_mut().set_video_probe_queue(queue);
             }
             Err(error) => {
                 self.as_mut().set_status_text(QString::from(error.as_str()));
@@ -161,12 +219,22 @@ impl qobject::LibraryController {
             let count = indexer
                 .add_and_scan(&path, true)
                 .map_err(|error| error.to_string())?;
-            Ok::<usize, String>(count)
+            let videos = LocalIndexer::collect_video_paths(&path, true)
+                .map_err(|error| error.to_string())?;
+            Ok::<(usize, Vec<PathBuf>), String>((count, videos))
         })();
         match result {
-            Ok(count) => {
+            Ok((count, videos)) => {
+                let video_count = videos.len();
+                self.as_mut().rust_mut().enqueue_videos(videos);
+                let queue = self.as_ref().rust().video_probe_queue.clone();
+                self.as_mut().set_video_probe_queue(queue);
                 self.as_mut().set_status_text(QString::from(
-                    format!("Indexed {count} new media file(s) from {}", path.display()).as_str(),
+                    format!(
+                        "Indexed {count} still/GIF file(s) from {}; queued {video_count} video(s) for Qt probe",
+                        path.display()
+                    )
+                    .as_str(),
                 ));
                 self.refresh();
             }
@@ -182,12 +250,27 @@ impl qobject::LibraryController {
             let store = library_store()?;
             let posters = posters_dir();
             let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
-            indexer.rescan_all().map_err(|error| error.to_string())
+            let count = indexer.rescan_all().map_err(|error| error.to_string())?;
+            let mut videos = Vec::new();
+            for (folder, recursive) in store.list_folders().map_err(|error| error.to_string())? {
+                videos.extend(
+                    LocalIndexer::collect_video_paths(Path::new(&folder), recursive)
+                        .map_err(|error| error.to_string())?,
+                );
+            }
+            Ok::<(usize, Vec<PathBuf>), String>((count, videos))
         })();
         match result {
-            Ok(count) => {
+            Ok((count, videos)) => {
+                let video_count = videos.len();
+                self.as_mut().rust_mut().enqueue_videos(videos);
+                let queue = self.as_ref().rust().video_probe_queue.clone();
+                self.as_mut().set_video_probe_queue(queue);
                 self.as_mut().set_status_text(QString::from(
-                    format!("Rescan complete; {count} new media file(s)").as_str(),
+                    format!(
+                        "Rescan complete; {count} still/GIF file(s), queued {video_count} video(s)"
+                    )
+                    .as_str(),
                 ));
                 self.refresh();
             }
@@ -218,8 +301,12 @@ impl qobject::LibraryController {
             Ok(url) => {
                 self.as_mut()
                     .set_selected_file_url(QString::from(url.as_str()));
-                self.as_mut()
-                    .set_status_text(QString::from("Opening local image in Compose"));
+                let label = if asset.media.requires_live_surface() {
+                    "Opening motion media in Compose"
+                } else {
+                    "Opening local image in Compose"
+                };
+                self.as_mut().set_status_text(QString::from(label));
             }
             Err(()) => {
                 self.as_mut()
@@ -228,7 +315,7 @@ impl qobject::LibraryController {
         }
     }
 
-    fn poll_watch(self: Pin<&mut Self>) {
+    fn poll_watch(mut self: Pin<&mut Self>) {
         let events = self
             .as_ref()
             .rust()
@@ -239,6 +326,7 @@ impl qobject::LibraryController {
         if events.is_empty() {
             return;
         }
+        let mut videos = Vec::new();
         let result = (|| {
             let store = library_store()?;
             let posters = posters_dir();
@@ -246,7 +334,15 @@ impl qobject::LibraryController {
             for event in events {
                 match event {
                     FolderWatchEvent::Upsert(path) => {
-                        let _ = indexer.index_file(&path);
+                        let extension = path
+                            .extension()
+                            .and_then(|value| value.to_str())
+                            .unwrap_or_default();
+                        if video_extension(extension) {
+                            videos.push(path);
+                        } else {
+                            let _ = indexer.index_file(&path);
+                        }
                     }
                     FolderWatchEvent::Remove(path) => {
                         for candidate in removal_path_candidates(&path) {
@@ -258,9 +354,122 @@ impl qobject::LibraryController {
             Ok::<(), String>(())
         })();
         if result.is_ok() {
+            if !videos.is_empty() {
+                self.as_mut().rust_mut().enqueue_videos(videos);
+                let queue = self.as_ref().rust().video_probe_queue.clone();
+                self.as_mut().set_video_probe_queue(queue);
+            }
             self.refresh();
         }
     }
+
+    #[allow(clippy::unused_self)]
+    fn video_probe_temp_path(&self, path: QString) -> QString {
+        let source = PathBuf::from(path.to_string());
+        let stem = source.file_stem().map_or_else(
+            || "video".into(),
+            |value| value.to_string_lossy().into_owned(),
+        );
+        let dest = std::env::temp_dir().join(format!(
+            "easel-video-poster-{}-{}.png",
+            std::process::id(),
+            stem
+        ));
+        QString::from(dest.to_string_lossy().as_ref())
+    }
+
+    fn complete_video_probe(
+        mut self: Pin<&mut Self>,
+        path: QString,
+        probe_json: QString,
+        poster_path: QString,
+    ) {
+        let path_buf = PathBuf::from(path.to_string());
+        let Ok(probe) = serde_json::from_str::<VideoProbePayload>(&probe_json.to_string()) else {
+            self.skip_video_probe(path, QString::from("Invalid video probe payload"));
+            return;
+        };
+        if probe.width == 0 || probe.height == 0 {
+            self.skip_video_probe(path, QString::from("Decoder reported empty resolution"));
+            return;
+        }
+        let media = MediaMetadata::Video {
+            dimensions: MediaDimensions {
+                width: probe.width,
+                height: probe.height,
+            },
+            duration_ms: probe.duration_ms.filter(|value| *value > 0),
+            frame_rate: None,
+            container: non_empty_owned(probe.container),
+            video_codec: non_empty_owned(probe.video_codec),
+            has_audio: probe.has_audio,
+        };
+        let poster = {
+            let value = poster_path.to_string();
+            if value.trim().is_empty() {
+                None
+            } else {
+                Some(PathBuf::from(value))
+            }
+        };
+        let result = (|| {
+            let store = library_store()?;
+            let posters = posters_dir();
+            let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
+            indexer
+                .index_with_metadata(&path_buf, media, poster.as_deref())
+                .map_err(|error| error.to_string())
+        })();
+        self.as_mut().rust_mut().pop_pending(&path_buf);
+        let queue = self.as_ref().rust().video_probe_queue.clone();
+        self.as_mut().set_video_probe_queue(queue);
+        if let Err(error) = result {
+            self.as_mut().set_status_text(QString::from(
+                format!("Video probe index failed: {error}").as_str(),
+            ));
+        }
+        if let Some(temp) = poster {
+            let _ = fs::remove_file(temp);
+        }
+        self.refresh();
+    }
+
+    fn skip_video_probe(mut self: Pin<&mut Self>, path: QString, error: QString) {
+        let path_buf = PathBuf::from(path.to_string());
+        self.as_mut().rust_mut().pop_pending(&path_buf);
+        let queue = self.as_ref().rust().video_probe_queue.clone();
+        self.as_mut().set_video_probe_queue(queue);
+        self.as_mut().set_status_text(QString::from(
+            format!("Skipped video {}: {error}", path_buf.display()).as_str(),
+        ));
+        self.refresh();
+    }
+}
+
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoProbePayload {
+    width: u32,
+    height: u32,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
+    container: Option<String>,
+    #[serde(default)]
+    video_codec: Option<String>,
+    #[serde(default)]
+    has_audio: bool,
+}
+
+fn non_empty_owned(value: Option<String>) -> Option<String> {
+    value.and_then(|text| {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
 }
 
 fn asset_model_list(assets: &[MediaAsset], budget: PixelBudget, posters_dir: &Path) -> QStringList {
