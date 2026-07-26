@@ -10,6 +10,7 @@ mod appearance;
 #[cfg(target_os = "macos")]
 mod macos;
 mod plasma;
+mod plasma_state;
 mod probe;
 #[cfg(windows)]
 mod windows_desktop;
@@ -26,6 +27,13 @@ pub use plasma::{
     EASEL_PLASMA_WALLPAPER_PLUGIN_ID, PlasmaBackend, build_plasma_native_dynamic_script,
     build_plasma_wallpaper_script, easel_plasma_plugin_id, escape_js_string,
     plasma_dynamic_plugin_id, preferred_still_wallpaper_plugin_id,
+};
+pub use plasma_state::{
+    PLASMA_WALLPAPER_STATE_DIR, PLASMA_WALLPAPER_STATE_FILE, PLASMA_WALLPAPER_STATE_VERSION,
+    PlasmaStateError, PlasmaWallpaperDisplayState, PlasmaWallpaperGeometry, PlasmaWallpaperState,
+    default_plasma_wallpaper_state_path, plasma_wallpaper_state_dir,
+    publish_plasma_wallpaper_state, read_plasma_wallpaper_state, wallpaper_geometry_fingerprint,
+    write_plasma_wallpaper_state,
 };
 pub use probe::select_wallpaper_backend;
 #[cfg(windows)]

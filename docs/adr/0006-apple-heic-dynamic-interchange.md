@@ -39,9 +39,11 @@ evaluate.
 
 3. **Apply path prefers native dynamic bundles when the backend can host them.**
    Pipeline: deconstruct HEIC → plan per-display crops for every frame → encode one native
-   dynamic package per display (macOS HEIC, Plasma HEIC/AVIF) → hand packages to the OS.
-   Where the backend cannot host a dynamic package (**Windows** today), Easel falls back to
-   the Stage 5 still poller: evaluate the domain set and apply the active cropped still.
+   dynamic package per display (macOS HEIC; Plasma day/night for Appearance) → hand
+   packages to the OS. Dense solar/h24 on Plasma uses Easel’s still-frame host instead
+   (Rust schedule evaluation + plugin IPC / `org.kde.image`). Where the backend cannot
+   host a dynamic package (**Windows** today), Easel falls back to the Stage 5 still
+   poller: evaluate the domain set and apply the active cropped still.
 
 4. **`BackendCapabilities` grows `native_dynamic_bundle`.** Plasma and future macOS backends
    may report true once encode/apply is wired; Windows reports false and keeps still apply.
@@ -58,8 +60,10 @@ evaluate.
   correct; pre-render/cache keys include arrangement geometry and renderer version.
 - Windows users still get dynamic behavior via Easel's poller; they do not get a native HEIC
   host until Microsoft exposes one.
-- Plasma hosting is split (ADR 0007): built-in day/night packages for Appearance sets;
-  community zzag HEIC for dense solar when installed; still poller otherwise.
+- Plasma hosting is split (ADR 0007 + 0008): built-in day/night packages for Appearance
+  sets; dense solar/h24 via Rust schedule evaluation + still-frame apply (Easel Plasma
+  plugin IPC when installed, otherwise `org.kde.image`). External HEIC hosts such as zzag
+  are not part of the supported apply path.
 - Encode + per-display crop cache keys include arrangement geometry and renderer version.
 
 ## References
