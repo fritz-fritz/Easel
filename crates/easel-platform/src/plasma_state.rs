@@ -233,8 +233,12 @@ mod tests {
                 .map_or(0, |duration| duration.as_nanos())
         ));
         let path = root.join("active.json");
+        // Use a host-absolute path so `Url::from_file_path` succeeds on Windows too
+        // (Unix-style `/tmp/...` is not absolute on Windows and falls back to display).
+        let image_path = root.join("easel-wall.png");
+        let expected_image = path_to_image_ref(&image_path);
         let wallpapers = [sample(
-            "/tmp/easel-wall.png",
+            image_path.to_str().expect("temp path is utf-8"),
             LogicalRect {
                 x: 2560,
                 y: 0,
@@ -247,9 +251,13 @@ mod tests {
         let loaded = read_plasma_wallpaper_state(&path).unwrap();
         assert_eq!(loaded.version, PLASMA_WALLPAPER_STATE_VERSION);
         assert_eq!(loaded.displays.len(), 1);
+        assert!(
+            expected_image.starts_with("file://"),
+            "absolute image path should serialize as a file URL, got {expected_image}"
+        );
         assert_eq!(
             loaded.image_for_geometry(2560, 0, 1920, 1080),
-            Some("file:///tmp/easel-wall.png")
+            Some(expected_image.as_str())
         );
         assert!(loaded.image_for_geometry(0, 0, 800, 600).is_none());
         let _ = fs::remove_dir_all(root);
