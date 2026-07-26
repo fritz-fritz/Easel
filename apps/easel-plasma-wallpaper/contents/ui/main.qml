@@ -32,7 +32,9 @@ WallpaperItem {
         if (configured && configured.toString().length > 0) {
             return configured.toString()
         }
-        // Match directories::ProjectDirs("net","fritztech","Easel").data_dir()/plasma-wallpaper
+        // Linux ProjectDirs("net","fritztech","Easel").data_dir() is
+        // $XDG_DATA_HOME/easel (not reverse-DNS). GenericDataLocation is the
+        // XDG data root, so this matches the desktop writer path.
         return Platform.StandardPaths.writableLocation(Platform.StandardPaths.GenericDataLocation)
             + "/easel/plasma-wallpaper/active.json"
     }

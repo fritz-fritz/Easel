@@ -150,7 +150,7 @@ pub fn write_plasma_wallpaper_state(
 pub fn read_plasma_wallpaper_state(path: &Path) -> Result<PlasmaWallpaperState, PlasmaStateError> {
     let bytes = fs::read(path)?;
     let state: PlasmaWallpaperState = serde_json::from_slice(&bytes)?;
-    if state.version == 0 {
+    if state.version != PLASMA_WALLPAPER_STATE_VERSION {
         return Err(PlasmaStateError::UnsupportedVersion(state.version));
     }
     Ok(state)
@@ -260,6 +260,37 @@ mod tests {
             Some(expected_image.as_str())
         );
         assert!(loaded.image_for_geometry(0, 0, 800, 600).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn linux_default_state_dir_matches_qml_fallback() {
+        // QML uses GenericDataLocation + "/easel/plasma-wallpaper/active.json".
+        // directories on Linux lowercases the app name into $XDG_DATA_HOME/easel.
+        let dir = plasma_wallpaper_state_dir();
+        let dir = dir.to_string_lossy();
+        assert!(
+            dir.ends_with("/easel/plasma-wallpaper")
+                || dir.ends_with("/easel/data/plasma-wallpaper"),
+            "unexpected plasma state dir {dir}"
+        );
+    }
+
+    #[test]
+    fn rejects_unsupported_state_version() {
+        let root = std::env::temp_dir().join(format!(
+            "easel-plasma-state-ver-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        let path = root.join("active.json");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(&path, r#"{"version":2,"updated_at":1,"displays":[]}"#).unwrap();
+        let error = read_plasma_wallpaper_state(&path).unwrap_err();
+        assert!(matches!(error, PlasmaStateError::UnsupportedVersion(2)));
         let _ = fs::remove_dir_all(root);
     }
 
