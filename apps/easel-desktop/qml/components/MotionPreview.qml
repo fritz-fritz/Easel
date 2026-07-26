@@ -7,7 +7,8 @@ import QtQuick.Controls
 import QtMultimedia
 
 // Compose preview for local GIF / video. Still multi-display crop preview remains
-// in MonitorPreview; Stage 6.5 is single-surface muted playback + diagnostics.
+// in MonitorPreview. Stage 6.6 Apply uses poster-fallback rasters; this surface
+// remains single-display muted preview + diagnostics until the live host lands.
 Frame {
     id: root
     padding: 12

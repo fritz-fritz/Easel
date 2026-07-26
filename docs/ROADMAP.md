@@ -129,9 +129,11 @@ changes. Dense solar/h24 on Plasma uses Rust schedule evaluation + still IPC (no
 Appearance sets still use built-in day/night packages. Qt Multimedia preview + video
 probe/posters landed: Compose muted GIF/video preview with diagnostics; library watches
 video extensions and indexes `MediaMetadata::Video` after a Qt Multimedia probe writes a
-poster (no `ffmpeg`). Live desktop apply remains gated. Remaining: shared clock
-compositor, Plasma plugin live playback, power/lock policies, and live-host spikes on
-Windows/macOS.
+poster (no `ffmpeg`). Live desktop apply poster fallback landed: session live-host probe
+stays unsupported until plugin playback exists; Compose Apply / LiveMedia profiles use
+per-display `LivePosterFrame` rasters through the still wallpaper backend (GIF first
+frame; video requires a library poster). Remaining: shared clock compositor, Plasma
+plugin live playback, power/lock policies, and live-host spikes on Windows/macOS.
 
 ## Stage 7 — Platform breadth and correction
 

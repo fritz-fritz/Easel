@@ -146,3 +146,56 @@ fn apply_payload_fixture_digests_are_stable() {
 
     assert_eq!(digests, [0x93a6_71f4, 0xc5e4_1d19, 0xb393_529c,]);
 }
+
+#[test]
+fn live_poster_purpose_matches_static_wallpaper_pixels() {
+    // LivePosterFrame is a semantic consumer tag; crop/resample math matches static apply.
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");
+    let out_dir =
+        std::env::temp_dir().join(format!("easel-live-poster-digest-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir).expect("outdir");
+
+    let displays = fixture_displays();
+    let mut profile = Profile::new("visual");
+    profile.fit_mode = FitMode::Cover;
+    profile.layout_mode = LayoutMode::PhysicalSpan;
+    profile.displays = displays.iter().map(|display| display.id).collect();
+    let composition = CompositionSettings::from_profile(&profile);
+
+    let static_outputs = RasterJob {
+        request: RenderRequest {
+            source_path: source.clone(),
+            displays: displays.clone(),
+            composition,
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir.join("static"),
+    }
+    .execute()
+    .expect("static raster");
+
+    let poster_outputs = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition,
+            purpose: RenderPurpose::LivePosterFrame,
+        },
+        output_dir: out_dir.join("poster"),
+    }
+    .execute()
+    .expect("poster raster");
+
+    assert_eq!(static_outputs.len(), poster_outputs.len());
+    for (static_out, poster_out) in static_outputs.iter().zip(poster_outputs.iter()) {
+        let static_bytes = std::fs::read(&static_out.path).expect("static png");
+        let poster_bytes = std::fs::read(&poster_out.path).expect("poster png");
+        assert_eq!(
+            crc32fast::hash(&static_bytes),
+            crc32fast::hash(&poster_bytes)
+        );
+        assert_ne!(static_out.path, poster_out.path);
+    }
+    let _ = std::fs::remove_dir_all(out_dir);
+}

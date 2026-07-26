@@ -15,10 +15,13 @@ use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
 use easel_core::{AssetId, AssetLocation, DynamicStillSet, FitMode, LayoutMode, Profile};
 use easel_library::{animated_image_extension, video_extension};
-use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
+use easel_platform::{
+    DisplayWallpaper, WallpaperOutput, probe_live_wallpaper_backend, select_wallpaper_backend,
+};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
 
+use crate::apply_service::{apply_live_poster_fallback, resolve_live_poster_source};
 use crate::display_session::{current_displays, current_preview_displays};
 
 #[cxx_qt::bridge]
@@ -151,8 +154,13 @@ impl qobject::ComposeController {
                 self.as_mut().set_motion_source_url(QString::default());
             }
             self.as_mut().set_preview_ready(false);
+            let live = probe_live_wallpaper_backend();
             self.as_mut().set_preview_status(QString::from(
-                "Motion preview active — live desktop apply lands with the Plasma host",
+                format!(
+                    "Motion preview active — Apply uses poster fallback ({})",
+                    live.reason
+                )
+                .as_str(),
             ));
             return;
         }
@@ -165,8 +173,13 @@ impl qobject::ComposeController {
     fn refresh_preview(mut self: Pin<&mut Self>) {
         if *self.media_mode_index() == 2 {
             self.as_mut().set_preview_ready(false);
+            let live = probe_live_wallpaper_backend();
             self.as_mut().set_preview_status(QString::from(
-                "Motion preview active — live desktop apply lands with the Plasma host",
+                format!(
+                    "Motion preview active — Apply uses poster fallback ({})",
+                    live.reason
+                )
+                .as_str(),
             ));
             return;
         }
@@ -202,12 +215,6 @@ impl qobject::ComposeController {
     }
 
     fn apply_wallpaper(mut self: Pin<&mut Self>) {
-        if *self.media_mode_index() == 2 {
-            self.as_mut().set_preview_status(QString::from(
-                "Live wallpaper apply is not enabled yet; use motion preview only for now",
-            ));
-            return;
-        }
         let source = self.source_path().to_string();
         if source.trim().is_empty() {
             self.as_mut()
@@ -222,11 +229,43 @@ impl qobject::ComposeController {
             .fetch_add(1, Ordering::SeqCst)
             + 1;
 
+        let qt_thread = self.qt_thread();
+        let job_tx = self.as_ref().rust().job_tx.clone();
+
+        if *self.media_mode_index() == 2 {
+            let poster = match resolve_live_poster_source(Path::new(&source)) {
+                Ok(path) => path,
+                Err(error) => {
+                    self.as_mut().set_preview_status(QString::from(
+                        format!("Apply failed: {error}").as_str(),
+                    ));
+                    return;
+                }
+            };
+            let profile = compose_profile_snapshot(self.as_ref());
+            self.as_mut().set_apply_busy(true);
+            self.as_mut()
+                .set_preview_status(QString::from("Rendering poster-fallback wallpaper…"));
+            if job_tx
+                .send(WorkerJob::ApplyLivePoster(ApplyLivePosterJob {
+                    generation,
+                    poster_source: poster,
+                    profile,
+                    qt_thread,
+                }))
+                .is_err()
+            {
+                self.as_mut().set_apply_busy(false);
+                self.as_mut().set_preview_status(QString::from(
+                    "Apply failed: background worker is unavailable",
+                ));
+            }
+            return;
+        }
+
         let displays = current_displays();
         let request = build_request(&source, displays.clone(), self.as_ref());
         let output_dir = apply_cache_dir();
-        let qt_thread = self.qt_thread();
-        let job_tx = self.as_ref().rust().job_tx.clone();
 
         self.as_mut().set_apply_busy(true);
         self.as_mut()
@@ -430,6 +469,17 @@ fn build_request(
     displays: Vec<easel_core::Display>,
     controller: Pin<&qobject::ComposeController>,
 ) -> RenderRequest {
+    let mut profile = compose_profile_snapshot(controller);
+    profile.displays = displays.iter().map(|display| display.id).collect();
+    RenderRequest {
+        source_path: PathBuf::from(source),
+        displays,
+        composition: CompositionSettings::from_profile(&profile),
+        purpose: RenderPurpose::StaticWallpaper,
+    }
+}
+
+fn compose_profile_snapshot(controller: Pin<&qobject::ComposeController>) -> Profile {
     let mut profile = Profile::new("Compose");
     profile.fit_mode = fit_mode_from_index(*controller.fit_mode_index());
     profile.layout_mode = layout_mode_from_index(*controller.layout_mode_index());
@@ -440,19 +490,20 @@ fn build_request(
     };
     profile.focal_x = (*controller.focal_x()).clamp(0.0, 1.0);
     profile.focal_y = (*controller.focal_y()).clamp(0.0, 1.0);
-    profile.displays = displays.iter().map(|display| display.id).collect();
-
-    RenderRequest {
-        source_path: PathBuf::from(source),
-        displays,
-        composition: CompositionSettings::from_profile(&profile),
-        purpose: RenderPurpose::StaticWallpaper,
+    profile.displays = current_displays()
+        .iter()
+        .map(|display| display.id)
+        .collect();
+    if *controller.media_mode_index() == 2 {
+        profile.presentation = easel_core::PresentationMode::LiveMedia;
     }
+    profile
 }
 
 enum WorkerJob {
     Preview(PreviewJob),
     Apply(ApplyJob),
+    ApplyLivePoster(ApplyLivePosterJob),
 }
 
 struct PreviewJob {
@@ -467,6 +518,13 @@ struct ApplyJob {
     request: RenderRequest,
     displays: Vec<easel_core::Display>,
     output_dir: PathBuf,
+    qt_thread: CxxQtThread<qobject::ComposeController>,
+}
+
+struct ApplyLivePosterJob {
+    generation: u64,
+    poster_source: PathBuf,
+    profile: Profile,
     qt_thread: CxxQtThread<qobject::ComposeController>,
 }
 
@@ -491,19 +549,31 @@ fn worker_loop(rx: Receiver<WorkerJob>) {
         // first so busy-state clearing cannot be skipped if Preview was newer.
         let mut preview: Option<PreviewJob> = None;
         let mut apply: Option<ApplyJob> = None;
+        let mut apply_live: Option<ApplyLivePosterJob> = None;
         match first {
             WorkerJob::Preview(job) => preview = Some(job),
             WorkerJob::Apply(job) => apply = Some(job),
+            WorkerJob::ApplyLivePoster(job) => apply_live = Some(job),
         }
         while let Ok(newer) = rx.try_recv() {
             match newer {
                 WorkerJob::Preview(job) => preview = Some(job),
-                WorkerJob::Apply(job) => apply = Some(job),
+                WorkerJob::Apply(job) => {
+                    apply = Some(job);
+                    apply_live = None;
+                }
+                WorkerJob::ApplyLivePoster(job) => {
+                    apply_live = Some(job);
+                    apply = None;
+                }
             }
         }
 
         if let Some(job) = apply {
             run_apply(job);
+        }
+        if let Some(job) = apply_live {
+            run_apply_live_poster(job);
         }
         if let Some(job) = preview {
             run_preview(job);
@@ -584,7 +654,25 @@ fn run_apply(job: ApplyJob) {
         Ok(())
     })();
 
-    let _ = job.qt_thread.queue(move |mut controller| {
+    finish_apply(
+        job.qt_thread,
+        generation,
+        apply_result.map(|()| "Wallpaper applied".into()),
+    );
+}
+
+fn run_apply_live_poster(job: ApplyLivePosterJob) {
+    let generation = job.generation;
+    let apply_result = apply_live_poster_fallback(&job.poster_source, &job.profile);
+    finish_apply(job.qt_thread, generation, apply_result);
+}
+
+fn finish_apply(
+    qt_thread: CxxQtThread<qobject::ComposeController>,
+    generation: u64,
+    apply_result: Result<String, String>,
+) {
+    let _ = qt_thread.queue(move |mut controller| {
         let current = controller
             .as_ref()
             .rust()
@@ -596,10 +684,10 @@ fn run_apply(job: ApplyJob) {
 
         controller.as_mut().set_apply_busy(false);
         match apply_result {
-            Ok(()) => {
+            Ok(message) => {
                 controller
                     .as_mut()
-                    .set_preview_status(QString::from("Wallpaper applied"));
+                    .set_preview_status(QString::from(message.as_str()));
             }
             Err(error) => {
                 controller

@@ -169,7 +169,45 @@ fn qstring_list(items: impl IntoIterator<Item = String>) -> QStringList {
     list
 }
 
+fn media_metadata_for_compose_source(source_path: &str) -> easel_core::MediaMetadata {
+    use std::path::Path;
+
+    use easel_core::{MediaDimensions, MediaMetadata};
+    use easel_library::{probe_local_media, video_extension};
+
+    let path = Path::new(source_path);
+    if let Some(media) = probe_local_media(path) {
+        return media;
+    }
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if video_extension(extension) {
+        return MediaMetadata::Video {
+            dimensions: MediaDimensions {
+                width: 1,
+                height: 1,
+            },
+            duration_ms: None,
+            frame_rate: None,
+            container: Some(extension.to_ascii_lowercase()),
+            video_codec: None,
+            has_audio: false,
+        };
+    }
+    MediaMetadata::StillImage {
+        dimensions: MediaDimensions {
+            width: 1,
+            height: 1,
+        },
+    }
+}
+
 /// Saves a Compose snapshot as a named profile with optional schedule.
+///
+/// Live-media profiles are allowed with poster-fallback semantics until a live
+/// host is validated for the session (Stage 6.6).
 #[allow(clippy::too_many_arguments)]
 pub fn save_compose_profile(
     name: &str,
@@ -183,8 +221,8 @@ pub fn save_compose_profile(
     media_mode_index: i32,
 ) -> Result<Profile, String> {
     use easel_core::{
-        AssetId, AssetLocation, ContentSafety, DynamicStillSet, MediaAsset, MediaDimensions,
-        MediaMetadata, PresentationMode, RotationQueue,
+        AssetId, AssetLocation, ContentSafety, DynamicStillSet, MediaAsset, PresentationMode,
+        RotationQueue,
     };
     use easel_scheduler::AutomationStore;
 
@@ -203,57 +241,70 @@ pub fn save_compose_profile(
         2 => PresentationMode::LiveMedia,
         _ => PresentationMode::Static,
     };
-    if profile.presentation == PresentationMode::LiveMedia {
-        return Err(
-            "live media profiles require Stage 6; choose Still image or Dynamic stills".into(),
-        );
-    }
 
-    let asset_id = AssetId::new();
-    let asset = MediaAsset {
-        id: asset_id,
-        provider_id: None,
-        title: Some(name.to_owned()),
-        media: MediaMetadata::StillImage {
-            dimensions: MediaDimensions {
-                width: 1,
-                height: 1,
+    let library = library_store()?;
+    let canonical_source = std::fs::canonicalize(source_path).map_or_else(
+        |_| source_path.to_owned(),
+        |path| path.to_string_lossy().into_owned(),
+    );
+    let asset_id = if let Some(existing) = library
+        .find_by_path(&canonical_source)
+        .map_err(|error| error.to_string())?
+    {
+        existing.id
+    } else {
+        let asset_id = AssetId::new();
+        let media = media_metadata_for_compose_source(source_path);
+        let asset = MediaAsset {
+            id: asset_id,
+            provider_id: None,
+            title: Some(name.to_owned()),
+            media,
+            location: AssetLocation::Local {
+                path: canonical_source.clone(),
             },
-        },
-        location: AssetLocation::Local {
-            path: source_path.to_owned(),
-        },
-        license: None,
-        attribution: None,
-        content_safety: ContentSafety::Safe,
-        source: None,
-        use_reporting_url: None,
-        retrieved_at_unix: None,
+            license: None,
+            attribution: None,
+            content_safety: ContentSafety::Safe,
+            source: None,
+            use_reporting_url: None,
+            retrieved_at_unix: None,
+        };
+        library
+            .upsert_asset(&asset)
+            .map_err(|error| error.to_string())?;
+        asset_id
     };
-    library_store()?
-        .upsert_asset(&asset)
-        .map_err(|error| error.to_string())?;
     profile.selected_asset = Some(asset_id);
 
     let queue = RotationQueue::from_assets(format!("{name} queue"), vec![asset_id]);
     profile.rotation_queue_id = Some(queue.id);
 
-    let (still_set, schedule) = if profile.presentation == PresentationMode::DynamicStills {
-        let set = DynamicStillSet::default_hourly(format!("{name} stills"), profile.id, asset_id)
+    let (still_set, schedule) = match profile.presentation {
+        PresentationMode::DynamicStills => {
+            let set =
+                DynamicStillSet::default_hourly(format!("{name} stills"), profile.id, asset_id)
+                    .map_err(|error| error.to_string())?;
+            profile.still_set_id = Some(set.id);
+            // Dynamic stills are not driven by compose schedule rotation.
+            profile.schedule_id = None;
+            (Some(set), None)
+        }
+        PresentationMode::LiveMedia => {
+            // Live sessions use poster fallback until a live host exists; not schedule-rotated.
+            profile.schedule_id = None;
+            (None, None)
+        }
+        PresentationMode::Static => {
+            let schedule = AutomationStore::schedule_from_compose_index(
+                profile.id,
+                format!("{name} schedule"),
+                schedule_index,
+            )
             .map_err(|error| error.to_string())?;
-        profile.still_set_id = Some(set.id);
-        // Dynamic stills are not driven by compose schedule rotation.
-        profile.schedule_id = None;
-        (Some(set), None)
-    } else {
-        let schedule = AutomationStore::schedule_from_compose_index(
-            profile.id,
-            format!("{name} schedule"),
-            schedule_index,
-        )
-        .map_err(|error| error.to_string())?;
-        profile.schedule_id = Some(schedule.id);
-        (None, Some(schedule))
+            profile.schedule_id = Some(schedule.id);
+            (None, Some(schedule))
+        }
     };
 
     let mut store = automation_store()?;
