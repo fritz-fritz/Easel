@@ -56,9 +56,13 @@ Frame {
         if (!root.hasSource) {
             root.setDiagnostics(qsTr("Open a local GIF or video to preview motion."))
             player.stop()
+            player.source = ""
             return
         }
         if (root.isGif) {
+            // Stop any previous video decode; AnimatedImage owns GIF playback.
+            player.stop()
+            player.source = ""
             root.setDiagnostics(qsTr("GIF preview (AnimatedImage)"))
             return
         }
@@ -67,8 +71,11 @@ Frame {
     }
 
     onMotionModeChanged: {
-        if (!root.hasSource || root.isGif)
+        if (!root.hasSource || root.isGif) {
+            player.stop()
+            player.source = ""
             return
+        }
         root.restartPlayback()
     }
 

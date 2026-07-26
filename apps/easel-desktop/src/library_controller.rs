@@ -4,8 +4,6 @@
 
 //! Library-page folder index and favorites presentation model.
 
-#![allow(clippy::too_many_arguments)]
-
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::pin::Pin;
@@ -73,12 +71,7 @@ mod qobject {
         fn completeVideoProbe(
             self: Pin<&mut Self>,
             path: QString,
-            width: i32,
-            height: i32,
-            duration_ms: i64,
-            container: QString,
-            codec: QString,
-            has_audio: bool,
+            probe_json: QString,
             poster_path: QString,
         );
 
@@ -388,28 +381,28 @@ impl qobject::LibraryController {
     fn complete_video_probe(
         mut self: Pin<&mut Self>,
         path: QString,
-        width: i32,
-        height: i32,
-        duration_ms: i64,
-        container: QString,
-        codec: QString,
-        has_audio: bool,
+        probe_json: QString,
         poster_path: QString,
     ) {
         let path_buf = PathBuf::from(path.to_string());
-        let width = u32::try_from(width).unwrap_or(0);
-        let height = u32::try_from(height).unwrap_or(0);
-        if width == 0 || height == 0 {
+        let Ok(probe) = serde_json::from_str::<VideoProbePayload>(&probe_json.to_string()) else {
+            self.skip_video_probe(path, QString::from("Invalid video probe payload"));
+            return;
+        };
+        if probe.width == 0 || probe.height == 0 {
             self.skip_video_probe(path, QString::from("Decoder reported empty resolution"));
             return;
         }
         let media = MediaMetadata::Video {
-            dimensions: MediaDimensions { width, height },
-            duration_ms: u64::try_from(duration_ms).ok().filter(|value| *value > 0),
+            dimensions: MediaDimensions {
+                width: probe.width,
+                height: probe.height,
+            },
+            duration_ms: probe.duration_ms.filter(|value| *value > 0),
             frame_rate: None,
-            container: non_empty_string(container),
-            video_codec: non_empty_string(codec),
-            has_audio,
+            container: non_empty_owned(probe.container),
+            video_codec: non_empty_owned(probe.video_codec),
+            has_audio: probe.has_audio,
         };
         let poster = {
             let value = poster_path.to_string();
@@ -453,14 +446,30 @@ impl qobject::LibraryController {
     }
 }
 
-fn non_empty_string(value: QString) -> Option<String> {
-    let text = value.to_string();
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        None
-    } else {
-        Some(trimmed.to_owned())
-    }
+#[derive(Debug, serde::Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct VideoProbePayload {
+    width: u32,
+    height: u32,
+    #[serde(default)]
+    duration_ms: Option<u64>,
+    #[serde(default)]
+    container: Option<String>,
+    #[serde(default)]
+    video_codec: Option<String>,
+    #[serde(default)]
+    has_audio: bool,
+}
+
+fn non_empty_owned(value: Option<String>) -> Option<String> {
+    value.and_then(|text| {
+        let trimmed = text.trim();
+        if trimmed.is_empty() {
+            None
+        } else {
+            Some(trimmed.to_owned())
+        }
+    })
 }
 
 fn asset_model_list(assets: &[MediaAsset], budget: PixelBudget, posters_dir: &Path) -> QStringList {

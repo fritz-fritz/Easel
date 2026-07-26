@@ -80,22 +80,25 @@ Item {
                 return
             }
             const size = videoOutput.videoSink.videoSize
-            const codec = player.metaData.stringValue(MediaMetaData.VideoCodec) || ""
-            const container = player.metaData.stringValue(MediaMetaData.FileFormat) || ""
-            const hasAudio = !!player.metaData.value(MediaMetaData.AudioBitRate)
-                    || !!player.metaData.value(MediaMetaData.AudioCodec)
             libraryController.completeVideoProbe(
                         path,
-                        size.width,
-                        size.height,
-                        player.duration > 0 ? player.duration : 0,
-                        container,
-                        codec,
-                        hasAudio,
+                        root.probePayloadJson(size.width, size.height),
                         dest)
             player.stop()
             busy = false
             Qt.callLater(root.maybeStart)
+        })
+    }
+
+    function probePayloadJson(width, height) {
+        return JSON.stringify({
+            width: width,
+            height: height,
+            durationMs: player.duration > 0 ? player.duration : 0,
+            container: player.metaData.stringValue(MediaMetaData.FileFormat) || "",
+            videoCodec: player.metaData.stringValue(MediaMetaData.VideoCodec) || "",
+            hasAudio: !!player.metaData.value(MediaMetaData.AudioBitRate)
+                    || !!player.metaData.value(MediaMetaData.AudioCodec)
         })
     }
 
@@ -107,19 +110,7 @@ Item {
             root.fail(path, qsTr("No video resolution from decoder"))
             return
         }
-        const codec = player.metaData.stringValue(MediaMetaData.VideoCodec) || ""
-        const container = player.metaData.stringValue(MediaMetaData.FileFormat) || ""
-        const hasAudio = !!player.metaData.value(MediaMetaData.AudioBitRate)
-                || !!player.metaData.value(MediaMetaData.AudioCodec)
-        libraryController.completeVideoProbe(
-                    path,
-                    width,
-                    height,
-                    player.duration > 0 ? player.duration : 0,
-                    container,
-                    codec,
-                    hasAudio,
-                    "")
+        libraryController.completeVideoProbe(path, root.probePayloadJson(width, height), "")
         player.stop()
         busy = false
         Qt.callLater(root.maybeStart)
