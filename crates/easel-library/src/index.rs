@@ -11,7 +11,10 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use easel_core::{AssetId, AssetLocation, HistoryAction, HistoryEvent, MediaAsset, MediaMetadata};
 use thiserror::Error;
 
-use crate::probe::{local_media_extension, probe_local_media, write_poster_for_asset};
+use crate::probe::{
+    install_poster_image, local_media_extension, probe_local_media, video_extension,
+    write_poster_for_asset,
+};
 use crate::store::{LibraryStore, LibraryStoreError};
 
 /// A registered library folder root.
@@ -113,16 +116,86 @@ impl<'a> LocalIndexer<'a> {
         Ok(count)
     }
 
-    /// Indexes or refreshes one media file.
+    /// Indexes or refreshes one media file using the pure-Rust probe.
+    ///
+    /// Video files are skipped here; use [`Self::index_with_metadata`] after a
+    /// Qt Multimedia probe supplies [`MediaMetadata::Video`].
     pub fn index_file(&self, path: &Path) -> Result<IndexOutcome, IndexError> {
         let canonical = fs::canonicalize(path).map_err(|error| IndexError::Io {
             path: path.to_path_buf(),
             source: error,
         })?;
-        let path_string = canonical.to_string_lossy().into_owned();
         let Some(media) = probe_local_media(&canonical) else {
             return Ok(IndexOutcome::Skipped);
         };
+        self.upsert_probed(&canonical, media, None)
+    }
+
+    /// Indexes or refreshes a media file with caller-supplied decoder metadata.
+    ///
+    /// Used for video after Qt Multimedia probe. When `poster_png` is set, it is
+    /// resized and installed under the configured posters directory.
+    pub fn index_with_metadata(
+        &self,
+        path: &Path,
+        media: MediaMetadata,
+        poster_png: Option<&Path>,
+    ) -> Result<IndexOutcome, IndexError> {
+        let canonical = fs::canonicalize(path).map_err(|error| IndexError::Io {
+            path: path.to_path_buf(),
+            source: error,
+        })?;
+        self.upsert_probed(&canonical, media, poster_png)
+    }
+
+    /// Lists video files under `folder` that need a Qt Multimedia probe.
+    pub fn collect_video_paths(folder: &Path, recursive: bool) -> Result<Vec<PathBuf>, IndexError> {
+        let mut videos = Vec::new();
+        let mut stack = vec![folder.to_path_buf()];
+        while let Some(dir) = stack.pop() {
+            let entries = fs::read_dir(&dir).map_err(|error| IndexError::Io {
+                path: dir.clone(),
+                source: error,
+            })?;
+            for entry in entries {
+                let entry = entry.map_err(|error| IndexError::Io {
+                    path: dir.clone(),
+                    source: error,
+                })?;
+                let path = entry.path();
+                let file_type = entry.file_type().map_err(|error| IndexError::Io {
+                    path: path.clone(),
+                    source: error,
+                })?;
+                if file_type.is_dir() {
+                    if recursive {
+                        stack.push(path);
+                    }
+                    continue;
+                }
+                if !file_type.is_file() {
+                    continue;
+                }
+                let extension = path
+                    .extension()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or_default();
+                if video_extension(extension) {
+                    videos.push(path);
+                }
+            }
+        }
+        videos.sort();
+        Ok(videos)
+    }
+
+    fn upsert_probed(
+        &self,
+        canonical: &Path,
+        media: MediaMetadata,
+        poster_png: Option<&Path>,
+    ) -> Result<IndexOutcome, IndexError> {
+        let path_string = canonical.to_string_lossy().into_owned();
         let title = canonical
             .file_stem()
             .map(|value| value.to_string_lossy().into_owned());
@@ -133,7 +206,7 @@ impl<'a> LocalIndexer<'a> {
             refreshed.media = media;
             refreshed.retrieved_at_unix = Some(now_unix());
             self.store.upsert_asset(&refreshed)?;
-            self.extract_poster(&canonical, refreshed.id, &refreshed.media);
+            self.extract_poster(canonical, refreshed.id, &refreshed.media, poster_png);
             return Ok(IndexOutcome::Updated);
         }
 
@@ -150,7 +223,7 @@ impl<'a> LocalIndexer<'a> {
             use_reporting_url: None,
             retrieved_at_unix: Some(now_unix()),
         };
-        self.extract_poster(&canonical, asset.id, &asset.media);
+        self.extract_poster(canonical, asset.id, &asset.media, poster_png);
         let asset_id = asset.id;
         self.store.upsert_asset(&asset)?;
         self.store.record_history(&HistoryEvent::new(
@@ -161,10 +234,20 @@ impl<'a> LocalIndexer<'a> {
         Ok(IndexOutcome::Created)
     }
 
-    fn extract_poster(&self, path: &Path, asset_id: AssetId, media: &MediaMetadata) {
+    fn extract_poster(
+        &self,
+        path: &Path,
+        asset_id: AssetId,
+        media: &MediaMetadata,
+        poster_png: Option<&Path>,
+    ) {
         let Some(posters_dir) = self.posters_dir else {
             return;
         };
+        if let Some(grab) = poster_png {
+            let _ = install_poster_image(grab, asset_id, posters_dir);
+            return;
+        }
         let _ = write_poster_for_asset(path, asset_id, posters_dir, media);
     }
 }
@@ -251,6 +334,48 @@ mod tests {
             .unwrap();
         assert_eq!(asset.media.dimensions().width, 80);
         assert_eq!(asset.media.dimensions().height, 60);
+    }
+
+    #[test]
+    fn indexes_video_with_external_metadata_and_poster() {
+        use easel_core::{MediaDimensions, MediaMetadata};
+
+        let root = std::env::temp_dir().join(format!("easel-idx-video-{}", Uuid::new_v4()));
+        fs::create_dir_all(&root).unwrap();
+        let path = root.join("clip.mp4");
+        fs::write(&path, b"not a real container").unwrap();
+        let grab = root.join("grab.png");
+        RgbImage::from_pixel(640, 360, Rgb([40, 50, 60]))
+            .save(&grab)
+            .unwrap();
+        let posters = root.join("posters");
+        let store = LibraryStore::open(root.join("library.db")).unwrap();
+        let indexer = LocalIndexer::new(&store).with_posters_dir(&posters);
+        assert_eq!(indexer.index_file(&path).unwrap(), IndexOutcome::Skipped);
+        let media = MediaMetadata::Video {
+            dimensions: MediaDimensions {
+                width: 1920,
+                height: 1080,
+            },
+            duration_ms: Some(1_500),
+            frame_rate: None,
+            container: Some("mp4".into()),
+            video_codec: Some("h264".into()),
+            has_audio: false,
+        };
+        assert_eq!(
+            indexer
+                .index_with_metadata(&path, media, Some(&grab))
+                .unwrap(),
+            IndexOutcome::Created
+        );
+        let assets = store.list_assets(10).unwrap();
+        assert_eq!(assets.len(), 1);
+        assert!(assets[0].media.requires_live_surface());
+        let poster = crate::probe::poster_path_for_asset(&posters, assets[0].id);
+        assert!(poster.is_file());
+        let collected = LocalIndexer::collect_video_paths(&root, false).unwrap();
+        assert_eq!(collected.len(), 1);
     }
 
     #[test]

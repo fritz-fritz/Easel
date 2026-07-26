@@ -61,6 +61,10 @@ ApplicationWindow {
         }
     }
 
+    VideoProbeHost {
+        libraryController: library
+    }
+
     ProfileController {
         id: profiles
     }
@@ -348,8 +352,13 @@ ApplicationWindow {
 
     FileDialog {
         id: imageDialog
-        title: qsTr("Open local image")
-        nameFilters: [qsTr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif)"), qsTr("All files (*)")]
+        title: qsTr("Open local image or motion media")
+        nameFilters: [
+            qsTr("Media (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif *.mp4 *.webm *.mkv *.mov *.m4v)"),
+            qsTr("Images (*.png *.jpg *.jpeg *.webp *.bmp *.tif *.tiff *.gif)"),
+            qsTr("Video (*.mp4 *.webm *.mkv *.mov *.m4v)"),
+            qsTr("All files (*)")
+        ]
         onAccepted: compose.setSourcePathFromUrl(selectedFile)
     }
 
@@ -531,7 +540,7 @@ ApplicationWindow {
                         }
 
                         Button {
-                            text: qsTr("Open image")
+                            text: qsTr("Open media")
                             Accessible.name: text
                             onClicked: imageDialog.open()
                         }
@@ -549,6 +558,7 @@ ApplicationWindow {
 
                     MonitorPreview {
                         id: monitorPreview
+                        visible: compose.media_mode_index !== 2
                         Layout.fillWidth: true
                         // Fixed height keeps smoke grab aspect stable across CI window chrome.
                         Layout.preferredHeight: 330
@@ -568,6 +578,31 @@ ApplicationWindow {
                             controller.moveSelectedDisplay(originXmm, originYmm)
                             compose.refreshPreview()
                         }
+                    }
+
+                    MotionPreview {
+                        id: motionPreview
+                        visible: compose.media_mode_index === 2
+                        Layout.fillWidth: true
+                        Layout.preferredHeight: 330
+                        Layout.preferredWidth: 900
+                        Layout.maximumWidth: 900
+                        Layout.alignment: Qt.AlignHCenter
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
+                        sourceUrl: compose.motion_source_url
+                        motionMode: compose.motion_mode_index
+                        onDiagnosticsChanged: (text) => { compose.motion_diagnostics = text }
+                    }
+
+                    Label {
+                        visible: compose.media_mode_index === 2
+                        text: compose.motion_diagnostics
+                        opacity: 0.72
+                        wrapMode: Text.WordWrap
+                        Layout.fillWidth: true
+                        Layout.leftMargin: 24
+                        Layout.rightMargin: 24
                     }
 
                     GroupBox {
@@ -686,9 +721,12 @@ ApplicationWindow {
                             }
                             Label { text: qsTr("Motion") }
                             ComboBox {
-                                model: [qsTr("Loop at 30 fps"), qsTr("Play once"), qsTr("Poster frame only")]
+                                id: motionMode
+                                model: [qsTr("Loop"), qsTr("Play once"), qsTr("Poster frame only")]
                                 enabled: mediaMode.currentIndex === 2
+                                currentIndex: compose.motion_mode_index
                                 Layout.fillWidth: true
+                                onActivated: compose.motion_mode_index = currentIndex
                             }
 
                             Label {

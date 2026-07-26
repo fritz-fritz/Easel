@@ -5,16 +5,19 @@
 //! Local media probing with bounded poster extraction (pure Rust).
 //!
 //! Stage 6.2 indexes still images and GIF animated images via the `image` crate.
-//! Video containers are recognized but not probed yet — decoding and posters will
-//! use Qt Multimedia (no external `ffmpeg`/`ffprobe` dependency).
+//! Stage 6.5 watches video containers and accepts Qt Multimedia probe results
+//! (no external `ffmpeg`/`ffprobe` dependency). Pure Rust cannot decode video;
+//! [`probe_local_media`] returns `None` for video paths so the desktop Qt probe
+//! can supply [`MediaMetadata::Video`] via [`crate::LocalIndexer::index_with_metadata`].
 
 use std::io::BufReader;
 use std::path::{Path, PathBuf};
 
 use easel_core::{AssetId, MediaDimensions, MediaMetadata};
 use easel_render::{POSTER_MAX_EDGE, atomic_write_png, render_poster};
-use image::AnimationDecoder;
 use image::codecs::gif::GifDecoder;
+use image::imageops::FilterType;
+use image::{AnimationDecoder, DynamicImage, GenericImageView};
 use thiserror::Error;
 
 /// Supported still-image file extensions for library indexing.
@@ -23,7 +26,7 @@ const STILL_EXTENSIONS: &[&str] = &["jpg", "jpeg", "png", "webp", "bmp", "tif", 
 /// Animated-image extensions indexed as live-surface media.
 const ANIMATED_EXTENSIONS: &[&str] = &["gif"];
 
-/// Video container extensions reserved for a future Qt Multimedia probe.
+/// Video container extensions probed by Qt Multimedia in easel-desktop.
 const VIDEO_EXTENSIONS: &[&str] = &["mp4", "webm", "mkv", "mov", "m4v"];
 
 /// Returns whether `extension` is a still-image type indexed by Easel.
@@ -33,10 +36,15 @@ pub fn still_image_extension(extension: &str) -> bool {
     STILL_EXTENSIONS.iter().any(|candidate| *candidate == lower)
 }
 
-/// Returns whether `extension` is a local media type Easel indexes today.
+/// Returns whether `extension` is a local media type Easel indexes or watches.
+///
+/// Video extensions are included so folder watches surface them; probing still
+/// requires Qt Multimedia ([`probe_local_media`] returns `None` for video).
 #[must_use]
 pub fn local_media_extension(extension: &str) -> bool {
-    still_image_extension(extension) || animated_image_extension(extension)
+    still_image_extension(extension)
+        || animated_image_extension(extension)
+        || video_extension(extension)
 }
 
 /// Returns whether `extension` is an animated image container.
@@ -50,8 +58,8 @@ pub fn animated_image_extension(extension: &str) -> bool {
 
 /// Returns whether `extension` is a known video container.
 ///
-/// Video files are not indexed yet; metadata and posters will come from Qt
-/// Multimedia rather than spawning `ffmpeg`/`ffprobe`.
+/// Metadata and posters come from Qt Multimedia in easel-desktop rather than
+/// spawning `ffmpeg`/`ffprobe`.
 #[must_use]
 pub fn video_extension(extension: &str) -> bool {
     let lower = extension.to_ascii_lowercase();
@@ -93,9 +101,8 @@ pub fn write_poster_for_asset(
     if !media.requires_live_surface() {
         return Ok(None);
     }
-    // Animated images are the only live-surface sources we can poster today.
-    // Video (`MediaMetadata::Video`) will use Qt Multimedia later; keep this
-    // extension guard so a future Video variant does not hit the still decode path.
+    // Animated images use the still/GIF decode path. Video posters are installed
+    // by the desktop Qt Multimedia probe via [`install_poster_image`].
     let extension = source
         .extension()
         .and_then(|value| value.to_str())
@@ -108,6 +115,44 @@ pub fn write_poster_for_asset(
     let poster = render_poster(source, POSTER_MAX_EDGE)?;
     atomic_write_png(&dest, &poster)?;
     Ok(Some(dest))
+}
+
+/// Installs a bounded poster PNG from an already-decoded image file (Qt grab).
+pub fn install_poster_image(
+    source_png: &Path,
+    asset_id: AssetId,
+    posters_dir: &Path,
+) -> Result<PathBuf, ProbeError> {
+    std::fs::create_dir_all(posters_dir)?;
+    let dest = poster_path_for_asset(posters_dir, asset_id);
+    let image = image::open(source_png).map_err(|error| ProbeError::Poster(error.to_string()))?;
+    let resized = fit_poster(image, POSTER_MAX_EDGE).to_rgba8();
+    atomic_write_png(&dest, &resized)?;
+    Ok(dest)
+}
+
+fn fit_poster(image: DynamicImage, max_edge: u32) -> DynamicImage {
+    let (width, height) = image.dimensions();
+    if width == 0 || height == 0 || max_edge == 0 {
+        return image;
+    }
+    if width <= max_edge && height <= max_edge {
+        return image;
+    }
+    let (target_w, target_h) = if width >= height {
+        let w = max_edge;
+        let h = u32::try_from(u64::from(height) * u64::from(max_edge) / u64::from(width).max(1))
+            .unwrap_or(1)
+            .max(1);
+        (w, h)
+    } else {
+        let h = max_edge;
+        let w = u32::try_from(u64::from(width) * u64::from(max_edge) / u64::from(height).max(1))
+            .unwrap_or(1)
+            .max(1);
+        (w, h)
+    };
+    image.resize(target_w, target_h, FilterType::Triangle)
 }
 
 /// Media probe or poster extraction failure.
@@ -272,12 +317,30 @@ mod tests {
     }
 
     #[test]
-    fn video_extensions_are_recognized_but_not_indexed() {
+    fn video_extensions_are_watched_but_not_rust_probed() {
         assert!(video_extension("mp4"));
-        assert!(!local_media_extension("mp4"));
+        assert!(local_media_extension("mp4"));
         let path = std::env::temp_dir().join(format!("easel-probe-video-{}.mp4", Uuid::new_v4()));
         std::fs::write(&path, b"not a real video").unwrap();
         assert!(probe_local_media(&path).is_none());
         let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn installs_external_poster_image() {
+        let root = std::env::temp_dir().join(format!("easel-probe-install-{}", Uuid::new_v4()));
+        std::fs::create_dir_all(&root).unwrap();
+        let source = root.join("grab.png");
+        image::RgbImage::from_pixel(800, 600, image::Rgb([1, 2, 3]))
+            .save(&source)
+            .unwrap();
+        let posters = root.join("posters");
+        let asset_id = AssetId::new();
+        let written = install_poster_image(&source, asset_id, &posters).unwrap();
+        assert!(written.is_file());
+        let (width, height) = image::image_dimensions(&written).unwrap();
+        assert!(width <= POSTER_MAX_EDGE);
+        assert!(height <= POSTER_MAX_EDGE);
+        let _ = std::fs::remove_dir_all(root);
     }
 }

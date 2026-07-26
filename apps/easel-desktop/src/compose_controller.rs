@@ -14,6 +14,7 @@ use std::thread;
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
 use easel_core::{AssetId, AssetLocation, DynamicStillSet, FitMode, LayoutMode, Profile};
+use easel_library::{animated_image_extension, video_extension};
 use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
@@ -45,6 +46,9 @@ mod qobject {
         #[qproperty(i32, schedule_index)]
         #[qproperty(QString, profile_name)]
         #[qproperty(i32, media_mode_index)]
+        #[qproperty(i32, motion_mode_index)]
+        #[qproperty(QString, motion_source_url)]
+        #[qproperty(QString, motion_diagnostics)]
         #[qproperty(QString, timeline_preview)]
         type ComposeController = super::ComposeControllerRust;
 
@@ -91,6 +95,9 @@ pub struct ComposeControllerRust {
     schedule_index: i32,
     profile_name: QString,
     media_mode_index: i32,
+    motion_mode_index: i32,
+    motion_source_url: QString,
+    motion_diagnostics: QString,
     timeline_preview: QString,
     /// Still set loaded from a HEIC import (drives timeline scrub evaluation).
     timeline_still_set: Option<DynamicStillSet>,
@@ -115,6 +122,9 @@ impl Default for ComposeControllerRust {
             schedule_index: 0,
             profile_name: QString::from("Compose"),
             media_mode_index: 0,
+            motion_mode_index: 0,
+            motion_source_url: QString::default(),
+            motion_diagnostics: QString::from("Open a local GIF or video to preview motion."),
             timeline_preview: QString::from(
                 "Select Dynamic stills and import a HEIC, or save an hourly placeholder set.",
             ),
@@ -131,12 +141,35 @@ impl qobject::ComposeController {
         let path = path_from_file_url(&url.to_string());
         self.as_mut()
             .set_source_path(QString::from(path.to_string_lossy().as_ref()));
+        let motion = is_motion_path(&path);
+        if motion {
+            self.as_mut().set_media_mode_index(2);
+            if let Ok(file_url) = Url::from_file_path(&path) {
+                self.as_mut()
+                    .set_motion_source_url(QString::from(file_url.as_str()));
+            } else {
+                self.as_mut().set_motion_source_url(QString::default());
+            }
+            self.as_mut().set_preview_ready(false);
+            self.as_mut().set_preview_status(QString::from(
+                "Motion preview active — live desktop apply lands with the Plasma host",
+            ));
+            return;
+        }
+        self.as_mut().set_motion_source_url(QString::default());
         self.as_mut()
             .set_preview_status(QString::from("Rendering preview…"));
         self.refresh_preview();
     }
 
     fn refresh_preview(mut self: Pin<&mut Self>) {
+        if *self.media_mode_index() == 2 {
+            self.as_mut().set_preview_ready(false);
+            self.as_mut().set_preview_status(QString::from(
+                "Motion preview active — live desktop apply lands with the Plasma host",
+            ));
+            return;
+        }
         let source = self.source_path().to_string();
         if source.trim().is_empty() {
             self.as_mut()
@@ -169,6 +202,12 @@ impl qobject::ComposeController {
     }
 
     fn apply_wallpaper(mut self: Pin<&mut Self>) {
+        if *self.media_mode_index() == 2 {
+            self.as_mut().set_preview_status(QString::from(
+                "Live wallpaper apply is not enabled yet; use motion preview only for now",
+            ));
+            return;
+        }
         let source = self.source_path().to_string();
         if source.trim().is_empty() {
             self.as_mut()
@@ -602,6 +641,14 @@ fn path_from_file_url(raw: &str) -> PathBuf {
     }
 
     PathBuf::from(trimmed)
+}
+
+fn is_motion_path(path: &Path) -> bool {
+    let extension = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    animated_image_extension(extension) || video_extension(extension)
 }
 
 /// Builds a `file://` URL suitable for QML `Image` sources on all platforms.

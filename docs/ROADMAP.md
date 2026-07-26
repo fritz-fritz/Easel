@@ -123,12 +123,14 @@ supported live backend, within documented CPU/GPU and power budgets.
 installed (falls back to `org.kde.image`). Local media probe + bounded posters landed:
 GIF metadata and first-frame posters via pure Rust (`image` / `easel-render`), indexer
 writes `{data}/posters/{asset_id}.png`, Library grid prefers poster previews for
-live-surface assets. Video containers are recognized but not indexed yet (Qt Multimedia
-path, no `ffmpeg`). Plasma plugin still-frame IPC landed: `active.json` under
+live-surface assets. Plasma plugin still-frame IPC landed: `active.json` under
 `{data}/plasma-wallpaper/`, plugin polls + geometry match, D-Bus bind only when topology
 changes. Dense solar/h24 on Plasma uses Rust schedule evaluation + still IPC (no zzag);
-Appearance sets still use built-in day/night packages. Remaining: Qt Multimedia preview +
-video probe/posters, shared clock compositor, power/lock policies, and live-host spikes on
+Appearance sets still use built-in day/night packages. Qt Multimedia preview + video
+probe/posters landed: Compose muted GIF/video preview with diagnostics; library watches
+video extensions and indexes `MediaMetadata::Video` after a Qt Multimedia probe writes a
+poster (no `ffmpeg`). Live desktop apply remains gated. Remaining: shared clock
+compositor, Plasma plugin live playback, power/lock policies, and live-host spikes on
 Windows/macOS.
 
 ## Stage 7 — Platform breadth and correction

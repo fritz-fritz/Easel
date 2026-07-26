@@ -195,12 +195,13 @@ jobs:
             build-essential clang cmake ninja-build pkg-config g++ \
             libheif-dev libheif-plugin-libde265 \
             libheif-plugin-aomenc libheif-plugin-x265 \
-            qt6-base-dev qt6-declarative-dev xvfb \
+            qt6-base-dev qt6-declarative-dev qt6-multimedia-dev xvfb \
             qml6-module-qtquick qml6-module-qtquick-controls \
             qml6-module-qtquick-layouts qml6-module-qtquick-window \
             qml6-module-qtquick-dialogs qml6-module-qtqml \
             qml6-module-qtqml-workerscript qml6-module-qtqml-models \
-            qml6-module-qtquick-templates
+            qml6-module-qtquick-templates qml6-module-qtmultimedia \
+            gstreamer1.0-plugins-good gstreamer1.0-libav
 
       - name: Install Qt (Windows)
         if: runner.os == 'Windows'
@@ -208,8 +209,10 @@ jobs:
         with:
           # Full desktop install already includes Qt Declarative / Quick.
           # Do not pass `qtdeclarative` as `modules` — that is an archive name.
+          # `qtmultimedia` is required for Compose motion preview + video probe.
           version: "6.6.3"
           arch: win64_msvc2019_64
+          modules: qtmultimedia
           cache: true
           install-deps: "true"
 

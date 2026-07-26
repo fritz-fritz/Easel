@@ -61,18 +61,17 @@ cargo test
 cargo clippy --all-targets -- -D warnings
 ```
 
-The desktop application additionally requires Qt 6 Core, Gui, Qml, Quick, and Quick
-Controls plus a C++ toolchain. On openSUSE Tumbleweed, the package names are generally:
+The desktop application additionally requires Qt 6 Core, Gui, Qml, Quick, Quick Controls,
+and Multimedia plus a C++ toolchain. On openSUSE Tumbleweed, the package names are generally:
 
 ```sh
 sudo zypper install rust cargo clang cmake ninja \
-  qt6-base-devel qt6-declarative-devel
+  qt6-base-devel qt6-declarative-devel qt6-multimedia-devel
 cargo run -p easel-desktop
 ```
 
-Qt Multimedia becomes a desktop dependency when the live playback stage is implemented; it is
-not linked by the current UI-only scaffold. Distribution package names can change; the CI
-workflow is the canonical Ubuntu setup.
+Qt Multimedia is linked for Compose motion preview and library video probe/posters (Stage 6.5).
+Distribution package names can change; the CI workflow is the canonical Ubuntu setup.
 
 Read [the product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),
 [dynamic and live wallpaper plan](docs/LIVE_WALLPAPERS.md),
