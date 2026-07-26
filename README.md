@@ -70,7 +70,8 @@ sudo zypper install rust cargo clang cmake ninja \
 cargo run -p easel-desktop
 ```
 
-Qt Multimedia is linked for Compose motion preview and library video probe/posters (Stage 6.5).
+Qt Multimedia is linked for Compose motion preview and library video probe/posters.
+Live Apply uses poster-fallback rasters until a live host is validated (Stage 6.6).
 Distribution package names can change; the CI workflow is the canonical Ubuntu setup.
 
 Read [the product plan](docs/PRODUCT.md), [architecture](docs/ARCHITECTURE.md),

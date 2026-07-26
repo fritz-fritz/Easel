@@ -11,16 +11,94 @@ use easel_dynamic::{
     NativeDynamicFormat, cached_bundle_path, encode_per_display_bundles, preferred_native_format,
     prefers_still_frame_host,
 };
-use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
+use easel_library::{
+    animated_image_extension, poster_path_for_asset, still_image_extension, video_extension,
+};
+use easel_platform::{
+    DisplayWallpaper, WallpaperOutput, probe_live_wallpaper_backend, select_wallpaper_backend,
+};
 use easel_render::{
     CompositionSettings, RENDERER_VERSION, RasterJob, RenderPurpose, RenderRequest,
 };
 
 use crate::automation_session::automation_store;
 use crate::display_session;
+use crate::library_session::{library_store, posters_dir};
 
 /// Applies a local still image using the profile composition and hotplug policy.
 pub fn apply_still(source: &Path, profile: &Profile) -> Result<String, String> {
+    apply_per_display_rasters(source, profile, RenderPurpose::StaticWallpaper, None)
+}
+
+/// Applies per-display poster crops for live media when no live host is available.
+///
+/// `poster_source` must be a still-decodable path (GIF first frame, library video
+/// poster PNG, or still image). Live playback is probed for an honest status line;
+/// Stage 6.6 always falls back to the still wallpaper backend.
+pub fn apply_live_poster_fallback(
+    poster_source: &Path,
+    profile: &Profile,
+) -> Result<String, String> {
+    let live = probe_live_wallpaper_backend();
+    let note = if live.supported {
+        format!("live host {}", live.backend_id.unwrap_or("unknown"))
+    } else {
+        live.reason
+    };
+    apply_per_display_rasters(
+        poster_source,
+        profile,
+        RenderPurpose::LivePosterFrame,
+        Some(note.as_str()),
+    )
+}
+
+/// Resolves a still-decodable poster path for a Compose/library motion source.
+///
+/// Animated images use the container itself (`decode_still` yields the first frame).
+/// Video requires a library poster written by the Qt Multimedia probe.
+pub fn resolve_live_poster_source(source: &Path) -> Result<PathBuf, String> {
+    if !source.is_file() {
+        return Err(format!("media file does not exist: {}", source.display()));
+    }
+    let extension = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default();
+    if animated_image_extension(extension) || still_image_extension(extension) {
+        return Ok(source.to_path_buf());
+    }
+    if !video_extension(extension) {
+        return Err(format!(
+            "unsupported live media extension '.{extension}' for poster fallback"
+        ));
+    }
+
+    let canonical = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let path_key = canonical.to_string_lossy();
+    let library = library_store()?;
+    let asset = library
+        .find_by_path(path_key.as_ref())
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "video has no library poster yet — add the folder in Library so Qt can probe a frame"
+                .to_owned()
+        })?;
+    let poster = poster_path_for_asset(&posters_dir(), asset.id);
+    if !poster.is_file() {
+        return Err(
+            "video library entry exists but poster PNG is missing — re-index the folder".into(),
+        );
+    }
+    Ok(poster)
+}
+
+fn apply_per_display_rasters(
+    source: &Path,
+    profile: &Profile,
+    purpose: RenderPurpose,
+    live_note: Option<&str>,
+) -> Result<String, String> {
     let live = display_session::current_displays();
     if live.is_empty() {
         return Err("no displays available".into());
@@ -43,7 +121,7 @@ pub fn apply_still(source: &Path, profile: &Profile) -> Result<String, String> {
         source_path: source.to_path_buf(),
         displays: displays.clone(),
         composition: CompositionSettings::from_profile(&request_profile),
-        purpose: RenderPurpose::StaticWallpaper,
+        purpose,
     };
     let output_dir = apply_cache_dir();
     let outputs = RasterJob {
@@ -72,11 +150,14 @@ pub fn apply_still(source: &Path, profile: &Profile) -> Result<String, String> {
         .apply(&WallpaperOutput::PerDisplay(wallpapers))
         .map_err(|error| error.to_string())?;
 
-    Ok(format!(
-        "applied via {} ({})",
-        backend.id(),
-        resolution.reason
-    ))
+    let mut message = format!("applied via {} ({})", backend.id(), resolution.reason);
+    if purpose == RenderPurpose::LivePosterFrame {
+        message = format!("poster fallback {message}");
+    }
+    if let Some(note) = live_note {
+        message = format!("{message}; {note}");
+    }
+    Ok(message)
 }
 
 /// Outcome of preferring a native dynamic HEIC host.
@@ -289,5 +370,37 @@ mod tests {
             &set,
             NativeDynamicFormat::PlasmaDayNight
         ));
+    }
+
+    #[test]
+    fn resolve_live_poster_source_uses_still_path() {
+        let path =
+            std::env::temp_dir().join(format!("easel-live-poster-{}.png", std::process::id()));
+        // Minimal valid 1×1 PNG.
+        let png = [
+            0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, 0x00, 0x00, 0x00, 0x0d, 0x49, 0x48,
+            0x44, 0x52, 0x00, 0x00, 0x00, 0x01, 0x00, 0x00, 0x00, 0x01, 0x08, 0x02, 0x00, 0x00,
+            0x00, 0x90, 0x77, 0x53, 0xde, 0x00, 0x00, 0x00, 0x0c, 0x49, 0x44, 0x41, 0x54, 0x08,
+            0xd7, 0x63, 0xf8, 0xcf, 0xc0, 0x00, 0x00, 0x00, 0x03, 0x00, 0x01, 0x00, 0x05, 0xfe,
+            0xd4, 0xef, 0x00, 0x00, 0x00, 0x00, 0x49, 0x45, 0x4e, 0x44, 0xae, 0x42, 0x60, 0x82,
+        ];
+        std::fs::write(&path, png).unwrap();
+        let resolved = resolve_live_poster_source(&path).expect("still poster source");
+        assert_eq!(resolved, path);
+        let _ = std::fs::remove_file(path);
+    }
+
+    #[test]
+    fn resolve_live_poster_source_rejects_unindexed_video() {
+        let path =
+            std::env::temp_dir().join(format!("easel-live-poster-{}.mp4", std::process::id()));
+        std::fs::write(&path, b"not a real video").unwrap();
+        let err = resolve_live_poster_source(&path).expect_err("video needs poster");
+        // Unindexed path vs indexed-but-missing-poster PNG both fail Apply honestly.
+        assert!(
+            err.contains("no library poster") || err.contains("poster PNG is missing"),
+            "unexpected error: {err}"
+        );
+        let _ = std::fs::remove_file(path);
     }
 }

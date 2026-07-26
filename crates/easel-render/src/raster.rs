@@ -73,6 +73,7 @@ impl RasterJob {
             operation.display_id,
             &self.request.composition,
             arrangement_token,
+            self.request.purpose,
             operation.native_size.width,
             operation.native_size.height,
         );
@@ -188,16 +189,18 @@ fn cache_file_name(
     display_id: DisplayId,
     composition: &CompositionSettings,
     arrangement_token: &str,
+    purpose: crate::plan::RenderPurpose,
     width: u32,
     height: u32,
 ) -> String {
     let fit = format!("{:?}", composition.fit_mode).to_ascii_lowercase();
     let layout = format!("{:?}", composition.layout_mode).to_ascii_lowercase();
+    let purpose = format!("{purpose:?}").to_ascii_lowercase();
     let zoom = format!("{:.4}", composition.zoom);
     let focal = format!("{:.4}x{:.4}", composition.focal_x, composition.focal_y);
     let display = display_id.to_hyphenated_string().replace('-', "");
     format!(
-        "v{RENDERER_VERSION}_{source_token}_{arrangement_token}_{display}_{layout}_{fit}_z{zoom}_f{focal}_{width}x{height}.png"
+        "v{RENDERER_VERSION}_{source_token}_{arrangement_token}_{display}_{layout}_{fit}_{purpose}_z{zoom}_f{focal}_{width}x{height}.png"
     )
 }
 
