@@ -9,7 +9,7 @@ repository.workspace = true
 description = "Apple HEIC / Plasma dynamic still import and native bundle planning"
 
 [dependencies]
-base64 = "0.22"
+base64 = "0.23"
 easel-core = { path = "../easel-core" }
 easel-render = { path = "../easel-render" }
 image = { workspace = true }
