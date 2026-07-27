@@ -24,8 +24,14 @@ pub enum RenderPurpose {
     #[default]
     StaticWallpaper,
     /// The safe fallback shown before or instead of live playback.
+    ///
+    /// Crop/placement math must match [`Self::LiveCompositorFrame`] so poster
+    /// fallback and live surfaces stay pixel-aligned for the same composition.
     LivePosterFrame,
-    /// A frame consumed by a live compositor when native video transforms are unavailable.
+    /// Canonical live crop/placement purpose for a shared-clock compositor.
+    ///
+    /// [`crate::plan_live_crops`] plans with this purpose. Hosts that cannot
+    /// apply native video transforms rasterize these ops instead.
     LiveCompositorFrame,
 }
 

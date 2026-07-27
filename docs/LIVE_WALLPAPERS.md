@@ -54,6 +54,10 @@ The session lifecycle is `prepare → poster → play ↔ pause → stop`. Prepa
 source, decoder, poster, surfaces, and policy without removing the current wallpaper. Playback
 starts only after every requested surface is ready. A partial multi-monitor start is a failure.
 
+Stage 6.7 models the shared timeline in Rust (`PlaybackClock`) and derives per-display crops
+with the same planner as still posters (`plan_live_crops`). Plasma plugin live playback will
+consume that clock + crop plan; until then Apply continues to use poster-fallback stills.
+
 ## Media and policy defaults
 
 - Local files only for the initial motion implementation.

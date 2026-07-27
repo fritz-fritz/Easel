@@ -8,12 +8,14 @@
 
 mod decode;
 mod fit;
+mod live;
 mod plan;
 mod poster;
 mod raster;
 mod resize;
 
 pub use decode::{DecodeError, DecodedImage, MAX_EDGE_PIXELS, MAX_TOTAL_PIXELS, decode_still};
+pub use live::{LiveDisplayCrop, NormalizedRect, plan_live_crops};
 pub use plan::{
     CompositionSettings, LetterboxColor, OutputOperation, OutputPlan, PixelRect, RENDERER_VERSION,
     RenderPlan, RenderPlanError, RenderPurpose, RenderRequest,

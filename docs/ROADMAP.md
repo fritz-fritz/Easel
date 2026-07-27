@@ -132,8 +132,10 @@ video extensions and indexes `MediaMetadata::Video` after a Qt Multimedia probe 
 poster (no `ffmpeg`). Live desktop apply poster fallback landed: session live-host probe
 stays unsupported until plugin playback exists; Compose Apply / LiveMedia profiles use
 per-display `LivePosterFrame` rasters through the still wallpaper backend (GIF first
-frame; video requires a library poster). Remaining: shared clock compositor, Plasma
-plugin live playback, power/lock policies, and live-host spikes on Windows/macOS.
+frame; video requires a library poster). Shared playback clock + multi-display live crop
+plan landed (`PlaybackClock` / `plan_live_crops`); hosts must consume one timeline for
+all surfaces. Remaining: Plasma plugin live playback consuming that plan, power/lock
+policies wired to `clock.pause()`, and live-host spikes on Windows/macOS.
 
 ## Stage 7 — Platform breadth and correction
 

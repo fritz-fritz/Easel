@@ -16,6 +16,7 @@ mod history;
 mod hotplug;
 mod layout_fixtures;
 mod physical;
+mod playback;
 mod profile;
 mod rotation;
 mod schedule;
@@ -55,6 +56,7 @@ pub use physical::{
     BezelInsets, MM_PER_INCH, PhysicalLayoutError, PhysicalRect, PhysicalSizeSource, Ppi,
     content_bounds, content_rect, panel_rect, physical_size_for_ppi, snap_origin,
 };
+pub use playback::{PlaybackClock, PlaybackClockError, PresentationSample};
 pub use profile::{
     FitMode, LayoutMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode,
     Profile, ProfileId, ProfileValidationError,
