@@ -91,19 +91,40 @@ impl AngularPerspective {
     }
 
     /// Maps a destination pixel center to continuous source coordinates.
+    ///
+    /// Returns [`None`] when the wall point lies outside the mapped image rectangle
+    /// (Contain letterbox), so the raster path can keep the canvas fill color.
     #[must_use]
-    pub fn source_xy(self, dest_x: u32, dest_y: u32, dest_w: u32, dest_h: u32) -> (f64, f64) {
+    pub fn source_xy(
+        self,
+        dest_x: u32,
+        dest_y: u32,
+        dest_w: u32,
+        dest_h: u32,
+    ) -> Option<(f64, f64)> {
         let nx = (f64::from(dest_x) + 0.5) / f64::from(dest_w.max(1));
         let ny = (f64::from(dest_y) + 0.5) / f64::from(dest_h.max(1));
         let wall_x = self.content_x_mm + nx * self.content_w_mm;
         let wall_y = self.content_y_mm + ny * self.content_h_mm;
+        if !self.wall_in_map(wall_x, wall_y) {
+            return None;
+        }
         let ax = angle(wall_x - self.eye_x_mm, self.distance_mm);
         let ay = angle(wall_y - self.eye_y_mm, self.distance_mm);
 
         let (aleft, aright, atop, abottom) = self.map_angle_bounds();
         let u = normalize(ax, aleft, aright);
         let v = normalize(ay, atop, abottom);
-        (self.src_x + u * self.src_w, self.src_y + v * self.src_h)
+        Some((self.src_x + u * self.src_w, self.src_y + v * self.src_h))
+    }
+
+    /// True when a wall-space point falls inside the placed image map rectangle.
+    #[must_use]
+    pub fn wall_in_map(self, wall_x: f64, wall_y: f64) -> bool {
+        wall_x >= self.map_x_mm
+            && wall_x <= self.map_x_mm + self.map_w_mm
+            && wall_y >= self.map_y_mm
+            && wall_y <= self.map_y_mm + self.map_h_mm
     }
 
     /// Conservative axis-aligned source crop covering the angular map extremes.
@@ -115,9 +136,12 @@ impl AngularPerspective {
         let mut max_x = f64::NEG_INFINITY;
         let mut max_y = f64::NEG_INFINITY;
         for (u, v) in corners {
-            // Sample content corners through the angular map.
+            // Sample content corners through the angular map (skip letterboxed corners).
             let wall_x = self.content_x_mm + u * self.content_w_mm;
             let wall_y = self.content_y_mm + v * self.content_h_mm;
+            if !self.wall_in_map(wall_x, wall_y) {
+                continue;
+            }
             let ax = angle(wall_x - self.eye_x_mm, self.distance_mm);
             let ay = angle(wall_y - self.eye_y_mm, self.distance_mm);
             let (aleft, aright, atop, abottom) = self.map_angle_bounds();
@@ -129,6 +153,15 @@ impl AngularPerspective {
             min_y = min_y.min(sy);
             max_x = max_x.max(sx);
             max_y = max_y.max(sy);
+        }
+        if !min_x.is_finite() {
+            // Entire content is outside the mapped image (full letterbox).
+            return PixelRect {
+                x: 0,
+                y: 0,
+                width: 1,
+                height: 1,
+            };
         }
         let left = min_x
             .floor()
@@ -198,11 +231,29 @@ mod tests {
             50.0,
         )
         .expect("map");
-        let (sx, sy) = map.source_xy(0, 0, 100, 50);
+        let (sx, sy) = map.source_xy(0, 0, 100, 50).expect("inside map");
         assert!((0.0..2.0).contains(&sx), "sx={sx}");
         assert!((0.0..2.0).contains(&sy), "sy={sy}");
-        let (sx2, _) = map.source_xy(99, 0, 100, 50);
+        let (sx2, _) = map.source_xy(99, 0, 100, 50).expect("inside map");
         assert!(sx2 > 90.0, "sx2={sx2}");
         let _ = DEFAULT_VIEW_DISTANCE_MM;
+    }
+
+    #[test]
+    fn wall_outside_map_returns_none() {
+        let pose = ViewerPose {
+            enabled: true,
+            view_distance_mm: DEFAULT_VIEW_DISTANCE_MM,
+            eye_offset_x_mm: 0.0,
+            eye_offset_y_mm: 0.0,
+        };
+        // Content spans 0..600; mapped image is only the centered half-width strip.
+        let map = AngularPerspective::new(
+            pose, 300.0, 150.0, 0.0, 0.0, 600.0, 300.0, 150.0, 0.0, 300.0, 300.0, 0.0, 0.0, 100.0,
+            50.0,
+        )
+        .expect("map");
+        assert!(map.source_xy(0, 25, 100, 50).is_none());
+        assert!(map.source_xy(50, 25, 100, 50).is_some());
     }
 }
