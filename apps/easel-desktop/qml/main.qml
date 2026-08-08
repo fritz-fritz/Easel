@@ -781,7 +781,6 @@ ApplicationWindow {
                         Layout.fillWidth: true
                         Layout.leftMargin: 24
                         Layout.rightMargin: 24
-                        enabled: controller.selected_display_id.length > 0
 
                         GridLayout {
                             columns: 6
@@ -797,6 +796,7 @@ ApplicationWindow {
                                 value: Math.round(controller.selected_origin_x_mm)
                                 editable: true
                                 Layout.fillWidth: true
+                                enabled: controller.selected_display_id.length > 0
                                 onValueModified: {
                                     controller.moveSelectedDisplay(value, controller.selected_origin_y_mm)
                                     compose.refreshPreview()
