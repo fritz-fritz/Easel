@@ -15,8 +15,9 @@ infer support from the OS name alone; see ADR 0003, ADR 0010, and ADR 0011.
 | macOS | `macos` | always on macOS builds | yes | yes | System Events / AppKit still path. |
 
 Automated coverage: `easel-platform` unit tests for XRandR parsing, XFCE/feh planning, and
-`select_wallpaper_backend` probe shape. Manual validation on the Cloud XFCE multi-monitor
-session (three-displays) exercises live Apply through `xfce-xfconf`.
+`select_wallpaper_backend` probe shape. Manual validation: Cloud XFCE Apply via
+`xfce-xfconf` on the default single-monitor VNC desktop; opt into
+`tools/dev/three-displays.sh` when exercising multi-monitor Apply.
 
 ## Dynamic stills
 
