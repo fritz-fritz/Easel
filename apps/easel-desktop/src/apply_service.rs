@@ -15,15 +15,18 @@ use easel_library::{
     animated_image_extension, poster_path_for_asset, still_image_extension, video_extension,
 };
 use easel_platform::{
-    DisplayWallpaper, WallpaperOutput, probe_live_wallpaper_backend, select_wallpaper_backend,
+    DisplayWallpaper, LiveDisplaySurface, LiveMediaOutput, LiveWallpaperOutput, SourceUvRect,
+    WallpaperOutput, probe_live_wallpaper_backend, select_live_wallpaper_backend,
+    select_wallpaper_backend,
 };
 use easel_render::{
-    CompositionSettings, RENDERER_VERSION, RasterJob, RenderPurpose, RenderRequest,
+    CompositionSettings, RENDERER_VERSION, RasterJob, RenderPurpose, RenderRequest, plan_live_crops,
 };
 
 use crate::automation_session::automation_store;
 use crate::display_session;
 use crate::library_session::{library_store, posters_dir};
+use crate::live_session::{replace_live_session, stop_live_session};
 
 /// Applies a local still image using the profile composition and hotplug policy.
 pub fn apply_still(source: &Path, profile: &Profile) -> Result<String, String> {
@@ -33,8 +36,7 @@ pub fn apply_still(source: &Path, profile: &Profile) -> Result<String, String> {
 /// Applies per-display poster crops for live media when no live host is available.
 ///
 /// `poster_source` must be a still-decodable path (GIF first frame, library video
-/// poster PNG, or still image). Live playback is probed for an honest status line;
-/// Stage 6.6 always falls back to the still wallpaper backend.
+/// poster PNG, or still image). Prefer [`apply_live`] which tries a live host first.
 pub fn apply_live_poster_fallback(
     poster_source: &Path,
     profile: &Profile,
@@ -45,12 +47,121 @@ pub fn apply_live_poster_fallback(
     } else {
         live.reason
     };
+    let _ = stop_live_session();
     apply_per_display_rasters(
         poster_source,
         profile,
         RenderPurpose::LivePosterFrame,
         Some(note.as_str()),
     )
+}
+
+/// Starts a live wallpaper session when the session has a validated host; otherwise
+/// falls back to per-display poster rasters through the still backend.
+pub fn apply_live(
+    source: &Path,
+    poster_source: &Path,
+    profile: &Profile,
+) -> Result<String, String> {
+    let live = probe_live_wallpaper_backend();
+    if !live.supported {
+        return apply_live_poster_fallback(poster_source, profile);
+    }
+
+    let backend = select_live_wallpaper_backend().map_err(|error| error.to_string())?;
+    let displays = resolve_profile_displays(profile)?;
+    let source_size = resolve_live_source_size(source)?;
+    let composition = CompositionSettings::from_profile(profile);
+    let crops =
+        plan_live_crops(source_size, &displays, &composition).map_err(|error| error.to_string())?;
+
+    let media = LiveMediaOutput {
+        source: source.to_path_buf(),
+        poster_frame: poster_source.to_path_buf(),
+    };
+    let mut surfaces = Vec::with_capacity(crops.len());
+    for crop in crops {
+        let logical_rect = displays
+            .iter()
+            .find(|display| display.id == crop.display_id)
+            .map(|display| display.logical_rect)
+            .ok_or_else(|| "display missing for live crop".to_owned())?;
+        surfaces.push(LiveDisplaySurface {
+            display_id: crop.display_id,
+            logical_rect,
+            media: media.clone(),
+            source_uv: SourceUvRect {
+                x: crop.source_uv.x,
+                y: crop.source_uv.y,
+                width: crop.source_uv.width,
+                height: crop.source_uv.height,
+            },
+            source_width: source_size.width,
+            source_height: source_size.height,
+        });
+    }
+
+    // Stop any prior live tick publisher before seeding posters so it cannot
+    // overwrite active.json while we prepare the new session.
+    stop_live_session()?;
+
+    // Seed posters through the still path so the plugin has a fallback frame, then
+    // start the live session (which republishes live IPC + keeps posters).
+    apply_per_display_rasters(poster_source, profile, RenderPurpose::LivePosterFrame, None)?;
+
+    let session = backend
+        .start(&LiveWallpaperOutput::PerDisplay(surfaces), profile.playback)
+        .map_err(|error| error.to_string())?;
+    replace_live_session(session)?;
+
+    Ok(format!("live via {} ({})", backend.id(), live.reason))
+}
+
+/// Resolves oriented source pixel size for live crop planning.
+pub fn resolve_live_source_size(source: &Path) -> Result<easel_core::NativePixelSize, String> {
+    use easel_core::NativePixelSize;
+    use easel_library::probe_local_media;
+
+    if let Some(meta) = probe_local_media(source) {
+        let dimensions = meta.dimensions();
+        return Ok(NativePixelSize {
+            width: dimensions.width.max(1),
+            height: dimensions.height.max(1),
+        });
+    }
+
+    // Video: dimensions come from the library Qt probe.
+    let canonical = std::fs::canonicalize(source).unwrap_or_else(|_| source.to_path_buf());
+    let path_key = canonical.to_string_lossy();
+    let library = library_store()?;
+    let asset = library
+        .find_by_path(path_key.as_ref())
+        .map_err(|error| error.to_string())?
+        .ok_or_else(|| {
+            "video has no library metadata yet — add the folder in Library so Qt can probe it"
+                .to_owned()
+        })?;
+    let dimensions = asset.media.dimensions();
+    Ok(NativePixelSize {
+        width: dimensions.width.max(1),
+        height: dimensions.height.max(1),
+    })
+}
+
+fn resolve_profile_displays(profile: &Profile) -> Result<Vec<easel_core::Display>, String> {
+    let live = display_session::current_displays();
+    if live.is_empty() {
+        return Err("no displays available".into());
+    }
+    let policy = automation_store()?.hotplug_policy().clone();
+    let resolution = resolve_displays(profile, &live, &policy);
+    if !resolution.should_apply {
+        return Err(resolution.reason);
+    }
+    if resolution.active_displays.is_empty() {
+        return Err("hotplug resolution produced no displays".into());
+    }
+    Ok(resolution.active_displays)
 }
 
 /// Resolves a still-decodable poster path for a Compose/library motion source.
@@ -143,6 +254,10 @@ fn apply_per_display_rasters(
             path: output.path,
             logical_rect,
         });
+    }
+
+    if purpose != RenderPurpose::LivePosterFrame {
+        let _ = stop_live_session();
     }
 
     let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;

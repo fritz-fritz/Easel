@@ -206,8 +206,8 @@ fn media_metadata_for_compose_source(source_path: &str) -> easel_core::MediaMeta
 
 /// Saves a Compose snapshot as a named profile with optional schedule.
 ///
-/// Live-media profiles are allowed with poster-fallback semantics until a live
-/// host is validated for the session (Stage 6.6).
+/// Live-media profiles start a live session on Apply when a host is validated;
+/// otherwise they keep poster-fallback semantics.
 #[allow(clippy::too_many_arguments)]
 pub fn save_compose_profile(
     name: &str,
@@ -291,7 +291,7 @@ pub fn save_compose_profile(
             (Some(set), None)
         }
         PresentationMode::LiveMedia => {
-            // Live sessions use poster fallback until a live host exists; not schedule-rotated.
+            // Live sessions are not schedule-rotated; Apply owns the live host.
             profile.schedule_id = None;
             (None, None)
         }

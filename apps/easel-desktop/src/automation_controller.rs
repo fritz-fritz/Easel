@@ -19,6 +19,7 @@ use crate::apply_service;
 use crate::automation_session::automation_store;
 use crate::display_session::current_displays;
 use crate::library_session::library_store;
+use crate::live_session::{live_session_active, pause_live_session, resume_live_session};
 
 #[cxx_qt::bridge]
 mod qobject {
@@ -130,11 +131,16 @@ impl AutomationControllerRust {
         };
         self.status_text = QString::from(
             format!(
-                "{} schedule(s), {} still set(s), paused={}, hotplug={:?}",
+                "{} schedule(s), {} still set(s), paused={}, hotplug={:?}, live={}",
                 store.schedules().len(),
                 store.still_sets().len(),
                 self.paused,
-                store.hotplug_policy().on_missing
+                store.hotplug_policy().on_missing,
+                if live_session_active() {
+                    "active"
+                } else {
+                    "idle"
+                }
             )
             .as_str(),
         );
@@ -178,7 +184,20 @@ impl qobject::AutomationController {
                 .set_all_paused(paused)
                 .map_err(|error| error.to_string())
         }) {
-            Ok(()) => self.refresh(),
+            Ok(()) => {
+                // Keep any active live wallpaper clock aligned with automation pause.
+                let live_result = if paused {
+                    pause_live_session()
+                } else {
+                    resume_live_session()
+                };
+                if let Err(error) = live_result {
+                    self.as_mut().set_status_text(QString::from(
+                        format!("Rotation paused state saved; live session: {error}").as_str(),
+                    ));
+                }
+                self.refresh();
+            }
             Err(error) => {
                 self.as_mut().set_status_text(QString::from(error.as_str()));
             }

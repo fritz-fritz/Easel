@@ -7,9 +7,12 @@
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
 mod appearance;
+mod live_policy;
 #[cfg(target_os = "macos")]
 mod macos;
 mod plasma;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+mod plasma_live;
 mod plasma_state;
 mod probe;
 #[cfg(windows)]
@@ -21,6 +24,9 @@ use easel_core::{DisplayId, LogicalRect, PlaybackPolicy};
 use thiserror::Error;
 
 pub use appearance::system_appearance;
+pub use live_policy::{
+    LivePauseReason, LivePolicySensors, pause_reason_for, probe_live_policy_sensors,
+};
 #[cfg(target_os = "macos")]
 pub use macos::MacosBackend;
 pub use plasma::{
@@ -28,12 +34,15 @@ pub use plasma::{
     build_plasma_wallpaper_script, easel_plasma_plugin_id, escape_js_string,
     plasma_dynamic_plugin_id, preferred_still_wallpaper_plugin_id,
 };
+#[cfg(all(not(windows), not(target_os = "macos")))]
+pub use plasma_live::PlasmaLiveBackend;
 pub use plasma_state::{
     PLASMA_WALLPAPER_STATE_DIR, PLASMA_WALLPAPER_STATE_FILE, PLASMA_WALLPAPER_STATE_VERSION,
-    PlasmaStateError, PlasmaWallpaperDisplayState, PlasmaWallpaperGeometry, PlasmaWallpaperState,
-    default_plasma_wallpaper_state_path, plasma_wallpaper_state_dir,
-    publish_plasma_wallpaper_state, read_plasma_wallpaper_state, wallpaper_geometry_fingerprint,
-    write_plasma_wallpaper_state,
+    PlasmaLiveClockSnapshot, PlasmaLiveDisplayCrop, PlasmaLiveState, PlasmaSourceUv,
+    PlasmaStateError, PlasmaWallpaperDisplayState, PlasmaWallpaperGeometry, PlasmaWallpaperMode,
+    PlasmaWallpaperState, default_plasma_wallpaper_state_path, live_geometry_fingerprint,
+    plasma_wallpaper_state_dir, publish_plasma_live_state, publish_plasma_wallpaper_state,
+    read_plasma_wallpaper_state, wallpaper_geometry_fingerprint, write_plasma_wallpaper_state,
 };
 pub use probe::{
     LiveBackendProbe, probe_live_wallpaper_backend, select_live_wallpaper_backend,
@@ -100,6 +109,19 @@ pub struct LiveBackendCapabilities {
     pub pause_when_occluded: bool,
 }
 
+/// Normalized source UV window (`0..=1`) shared by live hosts and Plasma IPC.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct SourceUvRect {
+    /// Left edge of the source sample window.
+    pub x: f64,
+    /// Top edge of the source sample window.
+    pub y: f64,
+    /// Width of the source sample window.
+    pub width: f64,
+    /// Height of the source sample window.
+    pub height: f64,
+}
+
 /// One playable source and its mandatory safe static fallback.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveMediaOutput {
@@ -109,13 +131,30 @@ pub struct LiveMediaOutput {
     pub poster_frame: PathBuf,
 }
 
+/// Per-display live surface with a crop into the shared media timeline.
+#[derive(Clone, Debug, PartialEq)]
+pub struct LiveDisplaySurface {
+    /// Stable Easel display identity.
+    pub display_id: DisplayId,
+    /// Logical compositor rectangle used to match the platform output.
+    pub logical_rect: LogicalRect,
+    /// Source media and poster for this surface (typically shared across displays).
+    pub media: LiveMediaOutput,
+    /// UV window into the shared source (from [`easel_render::plan_live_crops`]).
+    pub source_uv: SourceUvRect,
+    /// Oriented source width used when planning crops.
+    pub source_width: u32,
+    /// Oriented source height used when planning crops.
+    pub source_height: u32,
+}
+
 /// Prepared live content passed to a platform host.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Debug, PartialEq)]
 pub enum LiveWallpaperOutput {
     /// One media composition spans the virtual desktop.
     VirtualDesktop(LiveMediaOutput),
     /// Independently cropped media for each display, sharing one logical clock.
-    PerDisplay(Vec<(DisplayId, LiveMediaOutput)>),
+    PerDisplay(Vec<LiveDisplaySurface>),
 }
 
 /// OS/desktop adapter selected after explicit probing.

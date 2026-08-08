@@ -10,7 +10,9 @@ use crate::{BackendError, LiveBackendCapabilities, LiveWallpaperBackend, Wallpap
 use crate::macos::MacosBackend;
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
-use crate::plasma::{PlasmaBackend, plasma_available};
+use crate::plasma::{PlasmaBackend, easel_plasma_plugin_id, plasma_available};
+#[cfg(all(not(windows), not(target_os = "macos")))]
+use crate::plasma_live::PlasmaLiveBackend;
 
 #[cfg(windows)]
 use crate::windows_desktop::WindowsDesktopBackend;
@@ -56,47 +58,95 @@ pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendEr
 
 /// Probes whether a persistent live-wallpaper host is available in this session.
 ///
-/// Stage 6.6: no live host is gated as supported yet. Plasma still-frame IPC and
-/// Qt Multimedia preview exist; plugin live playback and Win/macOS hosts follow.
+/// Plasma: supported when the Easel wallpaper plugin package is installed
+/// (`net.fritztech.easel.wallpaper`). Windows/macOS remain unsupported after the
+/// Stage 6 feasibility spikes (public wallpaper APIs are still-image only).
 #[must_use]
 pub fn probe_live_wallpaper_backend() -> LiveBackendProbe {
-    LiveBackendProbe {
-        supported: false,
-        backend_id: None,
-        capabilities: LiveBackendCapabilities::default(),
-        reason: live_unsupported_reason(),
+    #[cfg(all(not(windows), not(target_os = "macos")))]
+    {
+        if plasma_available() {
+            if easel_plasma_plugin_id().is_some() {
+                let backend = PlasmaLiveBackend;
+                return LiveBackendProbe {
+                    supported: true,
+                    backend_id: Some(backend.id()),
+                    capabilities: backend.capabilities(),
+                    reason: "Plasma session with Easel wallpaper plugin; live playback via shared clock IPC"
+                        .into(),
+                };
+            }
+            return LiveBackendProbe {
+                supported: false,
+                backend_id: None,
+                capabilities: LiveBackendCapabilities::default(),
+                reason:
+                    "Plasma session detected; install the Easel wallpaper plugin for live playback"
+                        .into(),
+            };
+        }
+        LiveBackendProbe {
+            supported: false,
+            backend_id: None,
+            capabilities: LiveBackendCapabilities::default(),
+            reason: "no validated live wallpaper host in this desktop session".into(),
+        }
+    }
+
+    #[cfg(windows)]
+    {
+        LiveBackendProbe {
+            supported: false,
+            backend_id: None,
+            capabilities: LiveBackendCapabilities::default(),
+            reason: windows_live_spike_reason().into(),
+        }
+    }
+
+    #[cfg(target_os = "macos")]
+    {
+        LiveBackendProbe {
+            supported: false,
+            backend_id: None,
+            capabilities: LiveBackendCapabilities::default(),
+            reason: macos_live_spike_reason().into(),
+        }
     }
 }
 
 /// Returns a live backend only when the current session has a validated host.
 ///
-/// Until Plasma plugin live playback (and later Win/macOS spikes) land, this always
-/// returns [`BackendError::LiveWallpaperUnsupported`]. Callers must apply the
-/// poster frame through [`select_wallpaper_backend`] instead.
+/// Callers must apply the poster frame through [`select_wallpaper_backend`] when
+/// this returns [`BackendError::LiveWallpaperUnsupported`].
 pub fn select_live_wallpaper_backend() -> Result<Box<dyn LiveWallpaperBackend>, BackendError> {
-    let _ = probe_live_wallpaper_backend();
-    Err(BackendError::LiveWallpaperUnsupported)
-}
+    let probe = probe_live_wallpaper_backend();
+    if !probe.supported {
+        return Err(BackendError::LiveWallpaperUnsupported);
+    }
 
-fn live_unsupported_reason() -> String {
-    // Keep this focused on why live is unsupported; callers describe poster fallback.
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
-        if plasma_available() {
-            "Plasma session detected; Easel wallpaper plugin live playback is not enabled yet"
-                .into()
-        } else {
-            "no validated live wallpaper host in this desktop session".into()
-        }
+        let _ = probe;
+        Ok(Box::new(PlasmaLiveBackend))
     }
-    #[cfg(windows)]
+
+    #[cfg(any(windows, target_os = "macos"))]
     {
-        "Windows live wallpaper host is experimental and not enabled".into()
+        let _ = probe;
+        Err(BackendError::LiveWallpaperUnsupported)
     }
-    #[cfg(target_os = "macos")]
-    {
-        "macOS live wallpaper host is experimental and not enabled".into()
-    }
+}
+
+#[cfg(windows)]
+fn windows_live_spike_reason() -> &'static str {
+    // ADR 0010: IDesktopWallpaper / SystemParametersInfo accept still images only.
+    "Windows live wallpaper unsupported — IDesktopWallpaper has no public video surface (ADR 0010); poster fallback"
+}
+
+#[cfg(target_os = "macos")]
+fn macos_live_spike_reason() -> &'static str {
+    // ADR 0010: NSWorkspace setDesktopImageURL is still-image oriented.
+    "macOS live wallpaper unsupported — setDesktopImageURL is still-image only (ADR 0010); poster fallback"
 }
 
 #[cfg(test)]
@@ -116,20 +166,25 @@ mod tests {
     }
 
     #[test]
-    fn live_probe_is_unsupported_until_host_lands() {
+    fn live_probe_is_honest_about_session() {
         let probe = probe_live_wallpaper_backend();
-        assert!(!probe.supported);
-        assert!(probe.backend_id.is_none());
-        assert!(!probe.capabilities.animated_images);
-        assert!(!probe.capabilities.video);
-        assert!(!probe.capabilities.shared_media_clock);
         assert!(!probe.reason.is_empty());
-        assert!(
-            matches!(
+        if probe.supported {
+            assert_eq!(probe.backend_id, Some("plasma6-live"));
+            assert!(probe.capabilities.animated_images);
+            assert!(probe.capabilities.video);
+            assert!(probe.capabilities.shared_media_clock);
+            assert!(matches!(
+                select_live_wallpaper_backend().map(|backend| backend.id()),
+                Ok("plasma6-live")
+            ));
+        } else {
+            assert!(probe.backend_id.is_none());
+            assert!(!probe.capabilities.animated_images);
+            assert!(matches!(
                 select_live_wallpaper_backend(),
                 Err(BackendError::LiveWallpaperUnsupported)
-            ),
-            "live select must stay gated"
-        );
+            ));
+        }
     }
 }

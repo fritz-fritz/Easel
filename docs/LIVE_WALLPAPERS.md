@@ -26,10 +26,10 @@ live-host problem (Stage 6).
 
 | Platform/session | Dynamic stills | Animated/video host | Initial position |
 | --- | --- | --- | --- |
-| KDE Plasma 6 | Appearance → built-in day/night (`org.kde.image` + KNightTime). Dense solar → Rust evaluation + still frames via Easel `Plasma/Wallpaper` plugin IPC (ADR 0007 + 0008); no zzag required. | Easel QML wallpaper plugin (`apps/easel-plasma-wallpaper`). App-side Qt Multimedia preview + library video probe/posters + poster-fallback Apply landed; plugin live playback follows. | First supported live target. |
+| KDE Plasma 6 | Appearance → built-in day/night (`org.kde.image` + KNightTime). Dense solar → Rust evaluation + still frames via Easel `Plasma/Wallpaper` plugin IPC (ADR 0007 + 0008); no zzag required. | Easel QML wallpaper plugin (`apps/easel-plasma-wallpaper`) with shared-clock IPC + UV crops. App-side Qt Multimedia preview + library video probe/posters; Apply starts `PlasmaLiveBackend` when the plugin is installed, else poster fallback. | First supported live target. |
 | Other Linux desktops | Static settings backend applies each frame. | Desktop/compositor-specific; no universal Wayland attachment. | Probe individually; poster-fallback Apply via still backend when one exists. |
-| Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | Public wallpaper API does not expose video playback. | Feasibility spike; experimental if safe. |
-| macOS | Native Dynamic Desktop HEIC host (`native_dynamic_bundle`); System Events still apply as fallback. | Public `setDesktopImageURL` contract is still-image oriented. | Feasibility spike; experimental if safe. |
+| Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | Public wallpaper API does not expose video playback (ADR 0010). | Unsupported; poster fallback. |
+| macOS | Native Dynamic Desktop HEIC host (`native_dynamic_bundle`); System Events still apply as fallback. | Public `setDesktopImageURL` contract is still-image oriented (ADR 0010). | Unsupported; poster fallback. |
 
 The application must never advertise a live capability based only on the operating-system name.
 It probes the current session and decoder, reports evidence in diagnostics, and falls back to the
@@ -55,8 +55,10 @@ source, decoder, poster, surfaces, and policy without removing the current wallp
 starts only after every requested surface is ready. A partial multi-monitor start is a failure.
 
 Stage 6.7 models the shared timeline in Rust (`PlaybackClock`) and derives per-display crops
-with the same planner as still posters (`plan_live_crops`). Plasma plugin live playback will
-consume that clock + crop plan; until then Apply continues to use poster-fallback stills.
+with the same planner as still posters (`plan_live_crops`). Stage 6.8 publishes that plan
+plus `media_time_ms` into Plasma `active.json`; the plugin’s muted `AnimatedImage` /
+`MediaPlayer` instances seek to the shared clock. Policy sensors (Stage 6.9) pause the
+Rust clock; the plugin follows `paused` in IPC.
 
 ## Media and policy defaults
 

@@ -2,24 +2,31 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Shared still-frame state file for the Easel Plasma wallpaper plugin (ADR 0008).
+//! Shared still-frame and live-session state for the Easel Plasma wallpaper plugin
+//! (ADR 0008).
 //!
-//! Desktop automation writes this file after rendering per-display stills. The
-//! Plasma plugin watches it and updates its `Image` source without requiring a
-//! `PlasmaShell.evaluateScript` call on every dense-solar tick.
+//! Desktop automation writes this file after rendering per-display stills or
+//! starting a live session. The Plasma plugin watches it and updates still
+//! `Image` sources or live `MediaPlayer` / `AnimatedImage` crops without
+//! requiring `PlasmaShell.evaluateScript` on every tick.
 
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use easel_core::LogicalRect;
+use easel_core::{LogicalRect, LoopMode, PlaybackPolicy};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
-use crate::{BackendError, DisplayWallpaper};
+use crate::{BackendError, DisplayWallpaper, LiveDisplaySurface};
 
 /// Schema version for [`PlasmaWallpaperState`].
-pub const PLASMA_WALLPAPER_STATE_VERSION: u32 = 1;
+///
+/// Version 1 was still-only. Version 2 adds optional [`PlasmaLiveState`].
+pub const PLASMA_WALLPAPER_STATE_VERSION: u32 = 2;
+
+/// Oldest schema version this crate still reads.
+pub const PLASMA_WALLPAPER_STATE_MIN_VERSION: u32 = 1;
 
 /// Relative directory under the Easel data dir that holds the state file.
 pub const PLASMA_WALLPAPER_STATE_DIR: &str = "plasma-wallpaper";
@@ -27,7 +34,18 @@ pub const PLASMA_WALLPAPER_STATE_DIR: &str = "plasma-wallpaper";
 /// File name written by desktop automation and watched by the plugin.
 pub const PLASMA_WALLPAPER_STATE_FILE: &str = "active.json";
 
-/// One display's active still frame.
+/// Presentation mode published to the Plasma plugin.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PlasmaWallpaperMode {
+    /// Per-display still images only.
+    #[default]
+    Still,
+    /// Live media with per-display UV crops; still images remain as posters.
+    Live,
+}
+
+/// One display's active still frame (poster or static wallpaper).
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct PlasmaWallpaperDisplayState {
     /// Logical compositor rectangle used to match a Plasma containment.
@@ -68,19 +86,94 @@ impl PlasmaWallpaperGeometry {
     }
 }
 
+/// Normalized source UV window (`0..=1`) for live crops.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlasmaSourceUv {
+    /// Left edge of the source sample window.
+    pub x: f64,
+    /// Top edge of the source sample window.
+    pub y: f64,
+    /// Width of the source sample window.
+    pub width: f64,
+    /// Height of the source sample window.
+    pub height: f64,
+}
+
+/// Per-display live crop published beside still posters.
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlasmaLiveDisplayCrop {
+    /// Logical compositor rectangle used to match a Plasma containment.
+    pub geometry: PlasmaWallpaperGeometry,
+    /// UV window into the shared media source.
+    pub source_uv: PlasmaSourceUv,
+    /// Poster still for this display (startup / failure fallback).
+    pub poster: String,
+}
+
+/// Live session directive consumed by the Plasma plugin (shared clock via IPC).
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlasmaLiveState {
+    /// Absolute `file://` URL or path to the animated image / video.
+    pub source: String,
+    /// `animated_image` or `video`.
+    pub media_kind: String,
+    /// Source pixel width used to plan crops.
+    pub source_width: u32,
+    /// Source pixel height used to plan crops.
+    pub source_height: u32,
+    /// `loop` or `once`.
+    pub loop_mode: String,
+    /// Playback speed multiplier.
+    pub rate: f64,
+    /// Optional presentation frame-rate ceiling.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub maximum_frames_per_second: Option<u16>,
+    /// Whether the shared clock is frozen.
+    pub paused: bool,
+    /// Machine-readable pause reason (`battery`, `session_lock`, …) when paused.
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub pause_reason: String,
+    /// Shared media timeline position in milliseconds.
+    pub media_time_ms: u64,
+    /// Known media duration when reported.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub duration_ms: Option<u64>,
+    /// Per-display UV crops (same order / geometries as still posters).
+    pub displays: Vec<PlasmaLiveDisplayCrop>,
+}
+
 /// Root document written to [`PLASMA_WALLPAPER_STATE_FILE`].
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlasmaWallpaperState {
     /// Schema version.
     pub version: u32,
     /// Unix timestamp when the document was written.
     pub updated_at: u64,
-    /// Per-display still frames.
+    /// Still versus live presentation.
+    #[serde(default)]
+    pub mode: PlasmaWallpaperMode,
+    /// Per-display still frames (always present; posters during live).
     pub displays: Vec<PlasmaWallpaperDisplayState>,
+    /// Live session payload when [`Self::mode`] is [`PlasmaWallpaperMode::Live`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub live: Option<PlasmaLiveState>,
+}
+
+/// Playback snapshot published beside live crops.
+#[derive(Clone, Debug, PartialEq)]
+pub struct PlasmaLiveClockSnapshot {
+    /// Whether the shared clock is frozen.
+    pub paused: bool,
+    /// Machine-readable pause reason when paused.
+    pub pause_reason: String,
+    /// Shared media timeline position in milliseconds.
+    pub media_time_ms: u64,
+    /// Known media duration when reported.
+    pub duration_ms: Option<u64>,
 }
 
 impl PlasmaWallpaperState {
-    /// Builds state from renderer output destined for Plasma.
+    /// Builds still-only state from renderer output destined for Plasma.
     #[must_use]
     pub fn from_wallpapers(wallpapers: &[DisplayWallpaper]) -> Self {
         let displays = wallpapers
@@ -93,7 +186,69 @@ impl PlasmaWallpaperState {
         Self {
             version: PLASMA_WALLPAPER_STATE_VERSION,
             updated_at: now_unix(),
+            mode: PlasmaWallpaperMode::Still,
             displays,
+            live: None,
+        }
+    }
+
+    /// Builds live state from planned surfaces plus a playback snapshot.
+    #[must_use]
+    pub fn from_live_surfaces(
+        surfaces: &[LiveDisplaySurface],
+        source_width: u32,
+        source_height: u32,
+        media_kind: &str,
+        policy: &PlaybackPolicy,
+        clock: &PlasmaLiveClockSnapshot,
+    ) -> Self {
+        let displays = surfaces
+            .iter()
+            .map(|surface| PlasmaWallpaperDisplayState {
+                geometry: PlasmaWallpaperGeometry::from(surface.logical_rect),
+                image: path_to_image_ref(&surface.media.poster_frame),
+            })
+            .collect();
+        let live_displays = surfaces
+            .iter()
+            .map(|surface| PlasmaLiveDisplayCrop {
+                geometry: PlasmaWallpaperGeometry::from(surface.logical_rect),
+                source_uv: PlasmaSourceUv {
+                    x: surface.source_uv.x,
+                    y: surface.source_uv.y,
+                    width: surface.source_uv.width,
+                    height: surface.source_uv.height,
+                },
+                poster: path_to_image_ref(&surface.media.poster_frame),
+            })
+            .collect();
+        let source = surfaces
+            .first()
+            .map(|surface| path_to_image_ref(&surface.media.source))
+            .unwrap_or_default();
+        let loop_mode = match policy.loop_mode {
+            LoopMode::Loop => "loop",
+            LoopMode::Once => "once",
+        };
+        Self {
+            version: PLASMA_WALLPAPER_STATE_VERSION,
+            updated_at: now_unix(),
+            mode: PlasmaWallpaperMode::Live,
+            displays,
+            live: Some(PlasmaLiveState {
+                source,
+                media_kind: media_kind.to_owned(),
+                source_width,
+                source_height,
+                loop_mode: loop_mode.to_owned(),
+                rate: policy.rate,
+                maximum_frames_per_second: policy.maximum_frames_per_second,
+                paused: clock.paused,
+                pause_reason: clock.pause_reason.clone(),
+                media_time_ms: clock.media_time_ms,
+                duration_ms: clock.duration_ms,
+                displays: live_displays,
+            }),
         }
     }
 
@@ -104,6 +259,22 @@ impl PlasmaWallpaperState {
             .iter()
             .find(|display| display.geometry.matches(x, y, width, height))
             .map(|display| display.image.as_str())
+    }
+
+    /// Finds the live crop for a Plasma screen geometry, if present.
+    #[must_use]
+    pub fn live_crop_for_geometry(
+        &self,
+        x: i32,
+        y: i32,
+        width: u32,
+        height: u32,
+    ) -> Option<&PlasmaLiveDisplayCrop> {
+        self.live
+            .as_ref()?
+            .displays
+            .iter()
+            .find(|display| display.geometry.matches(x, y, width, height))
     }
 }
 
@@ -150,7 +321,9 @@ pub fn write_plasma_wallpaper_state(
 pub fn read_plasma_wallpaper_state(path: &Path) -> Result<PlasmaWallpaperState, PlasmaStateError> {
     let bytes = fs::read(path)?;
     let state: PlasmaWallpaperState = serde_json::from_slice(&bytes)?;
-    if state.version != PLASMA_WALLPAPER_STATE_VERSION {
+    if state.version < PLASMA_WALLPAPER_STATE_MIN_VERSION
+        || state.version > PLASMA_WALLPAPER_STATE_VERSION
+    {
         return Err(PlasmaStateError::UnsupportedVersion(state.version));
     }
     Ok(state)
@@ -171,6 +344,18 @@ pub fn publish_plasma_wallpaper_state(
     Ok(path)
 }
 
+/// Writes live-session state (with poster stills) to the default IPC path.
+pub fn publish_plasma_live_state(state: &PlasmaWallpaperState) -> Result<PathBuf, BackendError> {
+    let path = default_plasma_wallpaper_state_path();
+    write_plasma_wallpaper_state(&path, state).map_err(|error| {
+        BackendError::Platform(format!(
+            "failed to write Plasma live wallpaper state {}: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(path)
+}
+
 /// Stable fingerprint of display geometries (used to skip redundant plugin binds).
 #[must_use]
 pub fn wallpaper_geometry_fingerprint(wallpapers: &[DisplayWallpaper]) -> String {
@@ -183,6 +368,20 @@ pub fn wallpaper_geometry_fingerprint(wallpapers: &[DisplayWallpaper]) -> String
         .collect();
     parts.sort_unstable();
     parts.join("|")
+}
+
+/// Geometry fingerprint for live surfaces (same format as still wallpapers).
+#[must_use]
+pub fn live_geometry_fingerprint(surfaces: &[LiveDisplaySurface]) -> String {
+    let wallpapers: Vec<DisplayWallpaper> = surfaces
+        .iter()
+        .map(|surface| DisplayWallpaper {
+            display_id: surface.display_id,
+            path: surface.media.poster_frame.clone(),
+            logical_rect: surface.logical_rect,
+        })
+        .collect();
+    wallpaper_geometry_fingerprint(&wallpapers)
 }
 
 fn path_to_image_ref(path: &Path) -> String {
@@ -213,7 +412,8 @@ pub enum PlasmaStateError {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easel_core::{DisplayId, LogicalRect};
+    use crate::{LiveMediaOutput, SourceUvRect};
+    use easel_core::{DisplayId, LogicalRect, LoopMode, PlaybackPolicy};
 
     fn sample(path: &str, rect: LogicalRect) -> DisplayWallpaper {
         DisplayWallpaper {
@@ -223,8 +423,27 @@ mod tests {
         }
     }
 
+    fn sample_surface(path: &str, poster: &str, rect: LogicalRect) -> LiveDisplaySurface {
+        LiveDisplaySurface {
+            display_id: DisplayId::from_u128(1),
+            logical_rect: rect,
+            media: LiveMediaOutput {
+                source: PathBuf::from(path),
+                poster_frame: PathBuf::from(poster),
+            },
+            source_uv: SourceUvRect {
+                x: 0.0,
+                y: 0.0,
+                width: 0.5,
+                height: 1.0,
+            },
+            source_width: 3840,
+            source_height: 1080,
+        }
+    }
+
     #[test]
-    fn round_trips_state_file() {
+    fn round_trips_still_state_file() {
         let root = std::env::temp_dir().join(format!(
             "easel-plasma-state-{}-{}",
             std::process::id(),
@@ -233,8 +452,6 @@ mod tests {
                 .map_or(0, |duration| duration.as_nanos())
         ));
         let path = root.join("active.json");
-        // Use a host-absolute path so `Url::from_file_path` succeeds on Windows too
-        // (Unix-style `/tmp/...` is not absolute on Windows and falls back to display).
         let image_path = root.join("easel-wall.png");
         let expected_image = path_to_image_ref(&image_path);
         let wallpapers = [sample(
@@ -250,6 +467,8 @@ mod tests {
         write_plasma_wallpaper_state(&path, &state).unwrap();
         let loaded = read_plasma_wallpaper_state(&path).unwrap();
         assert_eq!(loaded.version, PLASMA_WALLPAPER_STATE_VERSION);
+        assert_eq!(loaded.mode, PlasmaWallpaperMode::Still);
+        assert!(loaded.live.is_none());
         assert_eq!(loaded.displays.len(), 1);
         assert!(
             expected_image.starts_with("file://"),
@@ -260,6 +479,84 @@ mod tests {
             Some(expected_image.as_str())
         );
         assert!(loaded.image_for_geometry(0, 0, 800, 600).is_none());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn round_trips_live_state_file() {
+        let root = std::env::temp_dir().join(format!(
+            "easel-plasma-live-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        let path = root.join("active.json");
+        let source = root.join("clip.mp4");
+        let poster = root.join("poster.png");
+        let surface = sample_surface(
+            source.to_str().unwrap(),
+            poster.to_str().unwrap(),
+            LogicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080,
+            },
+        );
+        let policy = PlaybackPolicy {
+            loop_mode: LoopMode::Loop,
+            rate: 1.0,
+            maximum_frames_per_second: Some(30),
+            pause_on_battery: true,
+            pause_for_full_screen_app: true,
+        };
+        let state = PlasmaWallpaperState::from_live_surfaces(
+            &[surface],
+            3840,
+            1080,
+            "video",
+            &policy,
+            &PlasmaLiveClockSnapshot {
+                paused: true,
+                pause_reason: "battery".into(),
+                media_time_ms: 1_250,
+                duration_ms: Some(10_000),
+            },
+        );
+        write_plasma_wallpaper_state(&path, &state).unwrap();
+        let loaded = read_plasma_wallpaper_state(&path).unwrap();
+        assert_eq!(loaded.mode, PlasmaWallpaperMode::Live);
+        let live = loaded.live.as_ref().expect("live payload");
+        assert_eq!(live.media_kind, "video");
+        assert!(live.paused);
+        assert_eq!(live.pause_reason, "battery");
+        assert_eq!(live.media_time_ms, 1_250);
+        assert!((live.displays[0].source_uv.width - 0.5).abs() < f64::EPSILON);
+        assert!(loaded.live_crop_for_geometry(0, 0, 1920, 1080).is_some());
+        let _ = fs::remove_dir_all(root);
+    }
+
+    #[test]
+    fn reads_legacy_v1_still_documents() {
+        let root = std::env::temp_dir().join(format!(
+            "easel-plasma-v1-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |duration| duration.as_nanos())
+        ));
+        let path = root.join("active.json");
+        fs::create_dir_all(&root).unwrap();
+        fs::write(
+            &path,
+            r#"{"version":1,"updated_at":1,"displays":[{"geometry":{"x":0,"y":0,"width":100,"height":100},"image":"file:///tmp/a.png"}]}"#,
+        )
+        .unwrap();
+        let loaded = read_plasma_wallpaper_state(&path).unwrap();
+        assert_eq!(loaded.version, 1);
+        assert_eq!(loaded.mode, PlasmaWallpaperMode::Still);
+        assert_eq!(loaded.displays.len(), 1);
         let _ = fs::remove_dir_all(root);
     }
 
@@ -288,9 +585,9 @@ mod tests {
         ));
         let path = root.join("active.json");
         fs::create_dir_all(&root).unwrap();
-        fs::write(&path, r#"{"version":2,"updated_at":1,"displays":[]}"#).unwrap();
+        fs::write(&path, r#"{"version":99,"updated_at":1,"displays":[]}"#).unwrap();
         let error = read_plasma_wallpaper_state(&path).unwrap_err();
-        assert!(matches!(error, PlasmaStateError::UnsupportedVersion(2)));
+        assert!(matches!(error, PlasmaStateError::UnsupportedVersion(99)));
         let _ = fs::remove_dir_all(root);
     }
 

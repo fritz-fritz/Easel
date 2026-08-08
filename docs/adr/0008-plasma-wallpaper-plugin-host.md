@@ -48,6 +48,9 @@ tighter OS integration while Easel’s Compose/Library GUI remains the managemen
 - Still-frame IPC: desktop writes `{data}/plasma-wallpaper/active.json`; the Easel
   plugin polls it and updates `Image` without `evaluateScript` on every tick
   (Stage 6.3). Topology/plugin bind still uses a one-shot D-Bus script.
+- Live IPC (Stage 6.8): same file carries `mode: "live"`, shared `media_time_ms`,
+  and per-display UV crops; plugin plays muted GIF/video while posters remain as
+  fallback. Desktop `PlaybackClock` + policy sensors own pause/resume.
 - Dense solar/h24 schedule evaluation stays in Rust (`due_dynamic_stills` /
   `active_frame_with_context`); `prefers_still_frame_host` skips zzag native apply
   (Stage 6.4).
