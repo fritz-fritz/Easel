@@ -330,6 +330,27 @@ fn show_status(store: &AutomationStore, utc_offset_minutes: i32) -> Result<(), S
     let summary = store
         .summary(utc_offset_minutes)
         .map_err(|error| error.to_string())?;
+    let support = easel_platform::probe_presentation_support();
+    println!(
+        "still backend:\t{}",
+        support.still_backend_id.unwrap_or("none")
+    );
+    println!("static:\t{}", support.static_stills);
+    println!(
+        "dynamic stills:\t{} ({})",
+        support.dynamic_stills,
+        support.dynamic_host.label()
+    );
+    println!(
+        "animated:\t{}{}",
+        support.animated_images,
+        support
+            .live_backend_id
+            .map_or_else(String::new, |id| format!(" ({id})"))
+    );
+    println!("video:\t{}", support.video);
+    println!("still reason:\t{}", support.still_reason);
+    println!("live reason:\t{}", support.live_reason);
     println!("profiles:\t{}", summary.profile_count);
     println!("enabled schedules:\t{}", summary.enabled_schedules);
     println!("still sets:\t{}", summary.still_set_count);
