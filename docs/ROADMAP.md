@@ -148,7 +148,8 @@ Stage 7.4 (cross-platform motion via still-backend slideshow) landed:
 - Probe chain `plasma6` → `xfce-xfconf` → `gnome-gsettings` → `x11-feh` (ADR 0011 + 0012).
 - Published matrix in `docs/PLATFORM_SUPPORT.md`.
 - Motion: `plasma6-live` when the plugin is installed; otherwise `still-slideshow`
-  (sample GIF/video → timed native still Apply, ADR 0014).
+  (sample GIF/video → native still Apply on a configured wallpaper poll interval,
+  default 2 s — not video FPS; ADR 0014).
 - Remaining: macOS packaging, perspective calibration UI, workspace/activity/lock-screen
   where APIs allow.
 
