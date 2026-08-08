@@ -1,7 +1,7 @@
 # Platform support matrix
 
 Capability-honest matrix for still apply, dynamic stills, and live hosts. Probes never
-infer support from the OS name alone; see ADR 0003, ADR 0010, ADR 0011, and ADR 0014.
+infer support from the OS name alone; see ADR 0003, ADR 0010, ADR 0011, ADR 0013, and ADR 0014.
 
 ## Still wallpaper backends
 
@@ -15,16 +15,27 @@ infer support from the OS name alone; see ADR 0003, ADR 0010, ADR 0011, and ADR 
 | macOS | `macos` | always on macOS builds | yes | yes | System Events / AppKit still path. |
 
 Automated coverage: `easel-platform` unit tests for XRandR parsing, XFCE/feh planning,
-GNOME spanned compositing / session hints, and `select_wallpaper_backend` probe shape.
+GNOME spanned compositing / session hints, `probe_wallpaper_backend` /
+`probe_presentation_support`, and `select_wallpaper_backend` probe shape.
 Manual validation: Cloud XFCE Apply via `xfce-xfconf` on the default single-monitor VNC
 desktop; opt into `tools/dev/three-displays.sh` when exercising multi-monitor Apply.
 GNOME Apply requires a real GNOME session (not available on the Cloud XFCE VM).
 
 ## Dynamic stills
 
-Any selected still backend can receive polled frames. Native dynamic packages
-(`BackendCapabilities::native_dynamic_bundle`) remain Plasma day/night and macOS HEIC
-hosts; dense solar on Plasma uses still-frame IPC (ADR 0006–0008).
+Any selected still backend can receive polled dynamic-still frames. Native packages
+(`BackendCapabilities::native_dynamic_bundle`) are preferred when available; dense solar on
+Plasma uses still-frame IPC instead (ADR 0006–0008). Session diagnostics come from
+`probe_presentation_support()` (CLI `easel status`, Compose media-mode hints).
+
+| Session / OS | Backend id | Dynamic stills | Native package host | Apply path |
+| --- | --- | --- | --- | --- |
+| KDE Plasma 6 | `plasma6` | yes | yes (Appearance day/night) | Native for Appearance; still poller / plugin IPC for dense solar/h24 |
+| XFCE | `xfce-xfconf` | yes | no | Still-frame poller |
+| GNOME family | `gnome-gsettings` | yes | no | Still-frame poller (spanned composite for multi-monitor) |
+| Generic X11 | `x11-feh` | yes | no | Still-frame poller |
+| Windows | `windows-idesktopwallpaper` | yes | no | Still-frame poller (ADR 0006) |
+| macOS | `macos` | yes | yes (Dynamic Desktop HEIC) | Native HEIC host; System Events still poller as fallback |
 
 ## Motion (GIF / video)
 
@@ -46,3 +57,6 @@ per-display motion crops.
 - Perspective / viewer correction + calibration UI.
 - Workspace / activity / lock-screen only where stable public APIs exist.
 - Optional: Windows equal-interval folder `SetSlideshow` for still rotations (not motion crops).
+
+Dynamic stills are feature-complete on every still backend (Stage 7.3 / ADR 0013).
+Motion outside Plasma uses still-backend slideshow Apply (Stage 7.4 / ADR 0014).

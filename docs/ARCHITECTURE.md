@@ -149,7 +149,9 @@ timed `WallpaperBackend::apply`. Public Windows/macOS wallpaper APIs remain stil
 (ADR 0010); WorkerW / private AppKit hosts are not used.
 
 The core does not branch on environment strings. Backend probing and selection belong to the
-platform layer and produce diagnostic evidence.
+platform layer and produce diagnostic evidence via `probe_wallpaper_backend`,
+`probe_live_wallpaper_backend`, and `probe_presentation_support` (static / dynamic-still /
+animated / video).
 
 ## Desktop application
 

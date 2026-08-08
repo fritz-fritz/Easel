@@ -57,8 +57,9 @@ pub use plasma_state::{
     read_plasma_wallpaper_state, wallpaper_geometry_fingerprint, write_plasma_wallpaper_state,
 };
 pub use probe::{
-    LiveBackendProbe, probe_live_wallpaper_backend, select_live_wallpaper_backend,
-    select_wallpaper_backend,
+    DynamicStillsHost, LiveBackendProbe, PresentationSupport, WallpaperBackendProbe,
+    probe_live_wallpaper_backend, probe_presentation_support, probe_wallpaper_backend,
+    select_live_wallpaper_backend, select_wallpaper_backend,
 };
 #[cfg(windows)]
 pub use windows_desktop::WindowsDesktopBackend;

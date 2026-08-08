@@ -715,8 +715,11 @@ ApplicationWindow {
                                 currentIndex: compose.media_mode_index
                                 onActivated: {
                                     compose.media_mode_index = currentIndex
+                                    compose.refreshMediaCapabilityHint()
                                     if (currentIndex === 1)
                                         compose.previewTimelineHour(timelineSlider.value)
+                                    else if (currentIndex === 2)
+                                        compose.refreshPreview()
                                 }
                             }
                             Label { text: qsTr("Motion") }

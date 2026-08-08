@@ -5,17 +5,19 @@ desktops. It combines physically correct spanning with a modern Qt 6 interface a
 policy-aware catalog of high-quality, reusable images. Its architecture also distinguishes
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
-This repository contains the Stage 1–5 still-image vertical slice, Stage 6–7 platform breadth:
-decode/fit/raster with physical multi-display composition, Compose previews, Qt display
-enumeration with arrangement persistence, Plasma 6 / XFCE / GNOME / feh / Windows still apply
-backends, local library indexing, Openverse discovery with retained provenance, reusable
+This repository contains the Stage 1–5 still-image vertical slice, Stage 6 live media on
+Plasma (Easel wallpaper plugin host), and Stage 7.1–7.4 platform breadth: decode/fit/raster with
+physical multi-display composition, Compose previews, Qt display enumeration with arrangement
+persistence, Plasma 6 / XFCE / GNOME / feh / Windows still apply backends, dynamic stills on
+every still backend (native packages on Plasma Appearance + macOS HEIC; still-frame poller
+elsewhere), local library indexing, Openverse discovery with retained provenance, reusable
 profiles with schedule-driven rotation, time-of-day / solar-position dynamic still sets
-(Apple HEIC interchange), hotplug policy, Plasma continuous live via the wallpaper plugin, and
-cross-platform GIF/video as still-backend slideshows (ADR 0014; poster fallback if extraction
-fails). Use Compose → Open image → Apply (or Save profile for automation), or Discover/Library
-to select an image first. CI captures apply-payload rasters plus selective Qt GUI smoke
-screenshots for review. Perspective correction and macOS packaging remain later Stage 7 slices
-(`docs/PLATFORM_SUPPORT.md`).
+(Apple HEIC interchange) with catch-up and pre-render, hotplug policy, Plasma continuous live
+via shared-clock plugin IPC, and cross-platform GIF/video as still-backend slideshows
+(ADR 0014; poster fallback if extraction fails). Use Compose → Open image → Apply (or Save
+profile for automation), or Discover/Library to select an image first. CI captures
+apply-payload rasters plus selective Qt GUI smoke screenshots for review. Perspective
+correction and macOS packaging remain later Stage 7 slices (`docs/PLATFORM_SUPPORT.md`).
 
 ## Product direction
 

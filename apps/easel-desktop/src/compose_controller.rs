@@ -20,7 +20,8 @@ use easel_core::{
 };
 use easel_library::{animated_image_extension, video_extension};
 use easel_platform::{
-    DisplayWallpaper, WallpaperOutput, probe_live_wallpaper_backend, select_wallpaper_backend,
+    DisplayWallpaper, WallpaperOutput, probe_live_wallpaper_backend, probe_wallpaper_backend,
+    select_wallpaper_backend,
 };
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
@@ -83,6 +84,10 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "import_dynamic_heic_from_url"]
         fn importDynamicHeicFromUrl(self: Pin<&mut Self>, url: QString);
+
+        #[qinvokable]
+        #[rust_name = "refresh_media_capability_hint"]
+        fn refreshMediaCapabilityHint(self: Pin<&mut Self>);
     }
 
     impl cxx_qt::Threading for ComposeController {}
@@ -164,7 +169,7 @@ impl qobject::ComposeController {
             self.as_mut().set_preview_ready(false);
             let live = probe_live_wallpaper_backend();
             let apply_hint = if live.supported {
-                format!("Apply starts live host ({})", live.reason)
+                format!("Apply starts motion path ({})", live.reason)
             } else {
                 format!("Apply uses poster fallback ({})", live.reason)
             };
@@ -180,23 +185,23 @@ impl qobject::ComposeController {
     }
 
     fn refresh_preview(mut self: Pin<&mut Self>) {
+        // Capability probes (qdbus/xfconf/gsettings/…) stay in
+        // `refresh_media_capability_hint()` so routine preview refreshes do not
+        // shell out on the UI thread.
         if *self.media_mode_index() == 2 {
             self.as_mut().set_preview_ready(false);
-            let live = probe_live_wallpaper_backend();
-            let apply_hint = if live.supported {
-                format!("Apply starts live host ({})", live.reason)
-            } else {
-                format!("Apply uses poster fallback ({})", live.reason)
-            };
-            self.as_mut().set_preview_status(QString::from(
-                format!("Motion preview active — {apply_hint}").as_str(),
-            ));
+            self.as_mut()
+                .set_preview_status(QString::from("Motion preview active"));
             return;
         }
         let source = self.source_path().to_string();
         if source.trim().is_empty() {
-            self.as_mut()
-                .set_preview_status(QString::from("Open a local image to render previews"));
+            let status = if *self.media_mode_index() == 1 {
+                "Open a frame or import a dynamic HEIC"
+            } else {
+                "Open a local image to render previews"
+            };
+            self.as_mut().set_preview_status(QString::from(status));
             self.as_mut().set_preview_ready(false);
             return;
         }
@@ -222,6 +227,34 @@ impl qobject::ComposeController {
             output_dir,
             qt_thread,
         }));
+    }
+
+    fn refresh_media_capability_hint(mut self: Pin<&mut Self>) {
+        let hint = match *self.media_mode_index() {
+            1 => dynamic_stills_capability_hint(),
+            2 => {
+                let live = probe_live_wallpaper_backend();
+                if live.supported {
+                    format!("Apply starts motion path ({})", live.reason)
+                } else {
+                    format!("Apply uses poster fallback ({})", live.reason)
+                }
+            }
+            _ => {
+                let still = probe_wallpaper_backend();
+                if still.available {
+                    format!(
+                        "Still apply via {} — {}",
+                        still.backend_id.unwrap_or("unknown"),
+                        still.reason
+                    )
+                } else {
+                    still.reason
+                }
+            }
+        };
+        self.as_mut()
+            .set_preview_status(QString::from(hint.as_str()));
     }
 
     fn apply_wallpaper(mut self: Pin<&mut Self>) {
@@ -747,6 +780,18 @@ fn layout_mode_from_index(index: i32) -> LayoutMode {
     match index {
         1 => LayoutMode::Digital,
         _ => LayoutMode::PhysicalSpan,
+    }
+}
+
+fn dynamic_stills_capability_hint() -> String {
+    let probe = probe_wallpaper_backend();
+    match probe.backend_id {
+        Some(id) => format!(
+            "Dynamic stills via {id} — {} ({})",
+            probe.dynamic_stills.label(),
+            probe.reason
+        ),
+        None => format!("Dynamic stills unavailable — {}", probe.reason),
     }
 }
 
