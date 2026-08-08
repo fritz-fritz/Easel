@@ -9,6 +9,8 @@
 mod appearance;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 mod feh;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+mod gnome;
 mod live_policy;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -32,6 +34,8 @@ use thiserror::Error;
 pub use appearance::system_appearance;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use feh::{FehBackend, feh_available};
+#[cfg(all(not(windows), not(target_os = "macos")))]
+pub use gnome::{GnomeBackend, gnome_available};
 pub use live_policy::{
     LivePauseReason, LivePolicySensors, pause_reason_for, probe_live_policy_sensors,
 };
