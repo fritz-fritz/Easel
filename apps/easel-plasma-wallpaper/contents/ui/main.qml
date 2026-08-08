@@ -18,6 +18,8 @@ WallpaperItem {
     property var liveDoc: null
     property var liveCrop: null
     property real lastSeekMediaMs: -1
+    // Cleared when ShaderEffect / video layer fails; keep projective poster (not AA).
+    property bool perspectiveShaderOk: true
 
     readonly property bool liveActive: {
         return root.liveDoc
@@ -36,8 +38,19 @@ WallpaperItem {
         return src.endsWith(".gif")
     }
 
-    readonly property bool livePerspective: {
+    readonly property bool livePerspectiveRequested: {
         return root.liveActive && root.liveCrop && root.liveCrop.perspective
+    }
+
+    // Projective path only when the shader/texture path is healthy.
+    readonly property bool livePerspective: {
+        return root.livePerspectiveRequested && root.perspectiveShaderOk
+    }
+
+    // Projective live failed → keep the still poster (projective raster) instead of
+    // AA live UV, so live and poster crops do not diverge (ADR 0016).
+    readonly property bool perspectiveLiveFailed: {
+        return root.livePerspectiveRequested && !root.perspectiveShaderOk
     }
 
     readonly property var perspectiveMap: {
@@ -209,6 +222,8 @@ WallpaperItem {
                 const doc = JSON.parse(payload)
                 root.liveDoc = doc
                 root.liveCrop = root.pickLiveCrop(doc)
+                // Retry projective path whenever IPC changes (shader may recover).
+                root.perspectiveShaderOk = true
                 root.stateImageUrl = root.pickImageFromState(payload)
                 root.applyLivePlayback()
             } catch (e) {
@@ -241,10 +256,12 @@ WallpaperItem {
         anchors.fill: parent
         color: "#1a1a1a"
 
-        // Still / poster layer (also shown while live decode is not ready).
+        // Still / poster layer (also shown while live decode is not ready, or when
+        // projective live fails so AA UV cannot diverge from projective posters).
         // Raise above live layers until GIF Status.Ready / video Playing so a
         // loading AnimatedImage cannot blank the desktop.
         readonly property bool showPosterFallback: !root.liveActive
+                || root.perspectiveLiveFailed
                 || (root.liveIsGif
                     ? ((root.livePerspective ? gifFull.status : gifPlayer.status) !== Image.Ready)
                     : player.playbackState !== MediaPlayer.PlayingState)
@@ -261,11 +278,13 @@ WallpaperItem {
         }
 
         // GIF live crop using UV window from plan_live_crops (AA path).
+        // Only when perspective was not requested — never as a silent downgrade
+        // from a failed projective session.
         Item {
             id: gifCrop
             anchors.fill: parent
             clip: true
-            visible: root.liveActive && root.liveIsGif && !root.livePerspective
+            visible: root.liveActive && root.liveIsGif && !root.livePerspectiveRequested
             z: 1
 
             readonly property var uv: root.liveCrop ? root.liveCrop.source_uv : null
@@ -283,9 +302,9 @@ WallpaperItem {
                 fillMode: Image.Stretch
                 asynchronous: true
                 cache: false
-                source: (root.liveActive && root.liveIsGif && !root.livePerspective)
+                source: (root.liveActive && root.liveIsGif && !root.livePerspectiveRequested)
                         ? root.fileUrlForPath(root.liveDoc.live.source) : ""
-                playing: root.liveActive && root.liveIsGif && !root.livePerspective
+                playing: root.liveActive && root.liveIsGif && !root.livePerspectiveRequested
                         && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
             }
         }
@@ -318,9 +337,24 @@ WallpaperItem {
             id: liveVideo
             anchors.fill: parent
             fillMode: VideoOutput.Stretch
-            visible: root.liveActive && !root.liveIsGif && !root.livePerspective
+            visible: root.liveActive && !root.liveIsGif && !root.livePerspectiveRequested
             sourceRect: root.sourceRectFromUv(root.liveCrop ? root.liveCrop.source_uv : null)
             z: 1
+        }
+
+        // VideoOutput.layer can be null until the first frame; if it never appears,
+        // drop projective live and keep the still poster (aligned with Apply).
+        Timer {
+            interval: 2000
+            repeat: false
+            running: root.livePerspectiveRequested && !root.liveIsGif && root.perspectiveShaderOk
+            onTriggered: {
+                if (root.livePerspectiveRequested && !root.liveIsGif
+                        && root.perspectiveShaderOk && !liveVideoFull.layer) {
+                    console.warn("Easel perspective video layer unavailable; keeping projective poster")
+                    root.perspectiveShaderOk = false
+                }
+            }
         }
 
         // Full-frame video texture for projective sampling (no sourceRect crop).
@@ -374,7 +408,13 @@ WallpaperItem {
             property real letterR: root.letterRgb[0]
             property real letterG: root.letterRgb[1]
             property real letterB: root.letterRgb[2]
-            fragmentShader: "shaders/perspective.frag.qsb"
+            fragmentShader: Qt.resolvedUrl("shaders/perspective.frag.qsb")
+            onStatusChanged: {
+                if (status === ShaderEffect.Error) {
+                    console.warn("Easel perspective shader failed; keeping projective poster")
+                    root.perspectiveShaderOk = false
+                }
+            }
         }
 
         Label {

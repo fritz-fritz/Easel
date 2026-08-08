@@ -810,6 +810,7 @@ ApplicationWindow {
                                 value: Math.round(controller.selected_origin_y_mm)
                                 editable: true
                                 Layout.fillWidth: true
+                                enabled: controller.selected_display_id.length > 0
                                 onValueModified: {
                                     controller.moveSelectedDisplay(controller.selected_origin_x_mm, value)
                                     compose.refreshPreview()
@@ -823,6 +824,7 @@ ApplicationWindow {
                                 value: Math.round(controller.selected_bezel_mm)
                                 editable: true
                                 Layout.fillWidth: true
+                                enabled: controller.selected_display_id.length > 0
                                 onValueModified: {
                                     controller.applySelectedBezel(value)
                                     compose.refreshPreview()
@@ -837,6 +839,7 @@ ApplicationWindow {
                                 value: Math.round(controller.selected_width_mm)
                                 editable: true
                                 Layout.fillWidth: true
+                                enabled: controller.selected_display_id.length > 0
                                 onValueModified: {
                                     controller.applySelectedSize(value, controller.selected_height_mm)
                                     compose.refreshPreview()
@@ -850,6 +853,7 @@ ApplicationWindow {
                                 value: Math.round(controller.selected_height_mm)
                                 editable: true
                                 Layout.fillWidth: true
+                                enabled: controller.selected_display_id.length > 0
                                 onValueModified: {
                                     controller.applySelectedSize(controller.selected_width_mm, value)
                                     compose.refreshPreview()

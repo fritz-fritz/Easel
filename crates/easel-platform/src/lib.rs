@@ -43,8 +43,8 @@ pub use live_policy::{
 pub use macos::MacosBackend;
 pub use plasma::{
     EASEL_PLASMA_WALLPAPER_PLUGIN_ID, PlasmaBackend, build_plasma_native_dynamic_script,
-    build_plasma_wallpaper_script, easel_plasma_plugin_id, escape_js_string,
-    plasma_dynamic_plugin_id, preferred_still_wallpaper_plugin_id,
+    build_plasma_wallpaper_script, easel_plasma_plugin_id, easel_plasma_supports_perspective_live,
+    escape_js_string, plasma_dynamic_plugin_id, preferred_still_wallpaper_plugin_id,
 };
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use plasma_live::PlasmaLiveBackend;

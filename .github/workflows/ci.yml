@@ -44,6 +44,7 @@ jobs:
               - '.github/scripts/test_sync_rust_pins.py'
               - '.github/scripts/check-cxx-gen-align.py'
               - '.github/scripts/test_check_cxx_gen_align.py'
+              - '.github/scripts/check-plasma-perspective-qsb.py'
               - '.github/libheif-windows.lock.json'
               - 'tools/easel-deps/**'
             desktop:
@@ -121,6 +122,9 @@ jobs:
         run: |
           python3 .github/scripts/test_check_cxx_gen_align.py
           python3 .github/scripts/check-cxx-gen-align.py
+      - name: Check Plasma perspective shader pack
+        if: matrix.os == 'ubuntu-latest'
+        run: python3 .github/scripts/check-plasma-perspective-qsb.py
       - name: Check formatting
         if: matrix.os == 'ubuntu-latest'
         run: cargo fmt --all --check

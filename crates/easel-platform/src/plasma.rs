@@ -102,6 +102,27 @@ pub fn easel_plasma_plugin_id() -> Option<&'static str> {
     })
 }
 
+/// True when the installed Easel wallpaper plugin ships projective live sampling.
+///
+/// Detects `contents/ui/shaders/perspective.frag.qsb` under the installed package
+/// (ADR 0016). Older installs without the shader keep AA UV only; callers must not
+/// publish perspective live maps against them or live/poster crops diverge.
+///
+/// Not cached: re-probes on each call so a mid-session `install.sh` is visible
+/// without restarting easel-desktop.
+#[must_use]
+pub fn easel_plasma_supports_perspective_live() -> bool {
+    plasma_wallpaper_roots()
+        .iter()
+        .any(|root| perspective_live_qsb_path(root).is_file())
+}
+
+fn perspective_live_qsb_path(wallpaper_root: &Path) -> PathBuf {
+    wallpaper_root
+        .join(EASEL_PLASMA_WALLPAPER_PLUGIN_ID)
+        .join("contents/ui/shaders/perspective.frag.qsb")
+}
+
 /// Plugin id used for still-frame apply: Easel package when present, else `org.kde.image`.
 #[must_use]
 pub fn preferred_still_wallpaper_plugin_id() -> &'static str {
@@ -537,6 +558,23 @@ mod tests {
         assert!(script.contains("writeConfig(\"Image\""));
         assert!(script.contains("bindForGeometry(100, 200, 1280, 720"));
         assert!(script.contains(&escape_js_string(state.to_str().unwrap())));
+    }
+
+    #[test]
+    fn perspective_live_support_requires_qsb_asset() {
+        let root = std::env::temp_dir().join(format!(
+            "easel-plasma-qsb-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .map_or(0, |d| d.as_nanos())
+        ));
+        let shader = perspective_live_qsb_path(&root);
+        std::fs::create_dir_all(shader.parent().unwrap()).unwrap();
+        assert!(!shader.is_file());
+        std::fs::write(&shader, b"qsb").unwrap();
+        assert!(shader.is_file());
+        let _ = std::fs::remove_dir_all(root);
     }
 
     #[test]
