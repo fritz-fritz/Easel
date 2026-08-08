@@ -160,7 +160,12 @@ landed:
 - Perspective: global `ViewerPose` + per-display tilt/yaw (arrangement schema v3);
   Compose Physical controls and calibration wizard; projective stills and Plasma live
   ShaderEffect sampling when enabled (ADR 0015 / 0016).
-- Remaining: macOS packaging, workspace/activity/lock-screen where APIs allow.
+- Stage 7.7 hardening: plugin version+`.qsb` handshake, soft Plasma geometry match,
+  tilt/yaw goldens, qsb freshness CI, wizard display picker, slideshow pose cache
+  fingerprint, best-effort X11 fullscreen pause probe.
+- Remaining: macOS packaging, workspace/activity/lock-screen where APIs allow;
+  Plasma projective-live E2E on a real plasmashell host; Windows/macOS continuous
+  live hosts (ADR 0010).
 
 ## Stage 8 — Production hardening
 

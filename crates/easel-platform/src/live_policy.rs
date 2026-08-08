@@ -129,10 +129,78 @@ fn probe_session_locked() -> bool {
 }
 
 fn probe_full_screen_app() -> bool {
-    // No portable, trustworthy full-screen probe yet (X11/_NET_WM_STATE is
-    // session-specific; Wayland lacks a universal API). Leave false until a
-    // backend-specific sensor lands; policy wiring is still exercised via tests.
-    false
+    #[cfg(target_os = "linux")]
+    {
+        linux_x11_full_screen_app()
+    }
+    #[cfg(not(target_os = "linux"))]
+    {
+        // Wayland / Windows / macOS lack a stable public fullscreen sensor here.
+        false
+    }
+}
+
+/// Best-effort X11 fullscreen probe via `xprop` (no Wayland claim).
+///
+/// Reads `_NET_ACTIVE_WINDOW` then that window's `_NET_WM_STATE` for
+/// `_NET_WM_STATE_FULLSCREEN`. Missing `xprop`, unset `DISPLAY`, or parse
+/// failure → false.
+#[cfg(target_os = "linux")]
+fn linux_x11_full_screen_app() -> bool {
+    if std::env::var_os("DISPLAY").is_none() {
+        return false;
+    }
+    let Ok(active) = Command::new("xprop")
+        .args(["-root", "-notype", "_NET_ACTIVE_WINDOW"])
+        .output()
+    else {
+        return false;
+    };
+    if !active.status.success() {
+        return false;
+    }
+    let Some(window_id) = parse_xprop_active_window(&String::from_utf8_lossy(&active.stdout))
+    else {
+        return false;
+    };
+    let Ok(state) = Command::new("xprop")
+        .args(["-id", &window_id, "-notype", "_NET_WM_STATE"])
+        .output()
+    else {
+        return false;
+    };
+    if !state.status.success() {
+        return false;
+    }
+    xprop_state_lists_fullscreen(&String::from_utf8_lossy(&state.stdout))
+}
+
+/// Parses `xprop -root _NET_ACTIVE_WINDOW` output for a hex window id.
+#[cfg(any(target_os = "linux", test))]
+fn parse_xprop_active_window(stdout: &str) -> Option<String> {
+    // Typical: `_NET_ACTIVE_WINDOW: window id # 0x3200003` or `window id # 0x0`
+    let trimmed = stdout.trim();
+    let marker = "window id # ";
+    let start = trimmed.find(marker)? + marker.len();
+    let token = trimmed[start..]
+        .split_whitespace()
+        .next()?
+        .trim_end_matches(',');
+    if token == "0x0" || token == "0" {
+        return None;
+    }
+    if token.starts_with("0x") || token.chars().all(|c| c.is_ascii_hexdigit()) {
+        return Some(token.to_owned());
+    }
+    None
+}
+
+/// True when `_NET_WM_STATE` property text lists fullscreen.
+#[cfg(any(target_os = "linux", test))]
+fn xprop_state_lists_fullscreen(stdout: &str) -> bool {
+    stdout
+        .to_ascii_uppercase()
+        .contains("_NET_WM_STATE_FULLSCREEN")
 }
 
 #[cfg(target_os = "linux")]
@@ -297,6 +365,29 @@ mod tests {
             Some(LivePauseReason::FullScreen)
         );
         assert_eq!(pause_reason_for(&policy(false, false), &sensors), None);
+    }
+
+    #[test]
+    fn parses_xprop_active_window_id() {
+        assert_eq!(
+            parse_xprop_active_window("_NET_ACTIVE_WINDOW: window id # 0x3200003\n"),
+            Some("0x3200003".into())
+        );
+        assert_eq!(
+            parse_xprop_active_window("_NET_ACTIVE_WINDOW: window id # 0x0\n"),
+            None
+        );
+        assert_eq!(parse_xprop_active_window("not a property"), None);
+    }
+
+    #[test]
+    fn detects_fullscreen_atom_in_xprop_state() {
+        assert!(xprop_state_lists_fullscreen(
+            "_NET_WM_STATE(ATOM) = _NET_WM_STATE_FOCUSED, _NET_WM_STATE_FULLSCREEN\n"
+        ));
+        assert!(!xprop_state_lists_fullscreen(
+            "_NET_WM_STATE(ATOM) = _NET_WM_STATE_FOCUSED\n"
+        ));
     }
 
     #[test]

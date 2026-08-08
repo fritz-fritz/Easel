@@ -487,7 +487,77 @@ ApplicationWindow {
                 columns: 2
                 visible: perspectiveWizard.step === 2
                 Layout.fillWidth: true
-                enabled: controller.selected_display_id.length > 0
+
+                readonly property var wizardDisplays: {
+                    var rows = []
+                    for (var i = 0; i < controller.layout_model.length; ++i) {
+                        var parts = String(controller.layout_model[i]).split("|")
+                        if (parts.length < 10)
+                            continue
+                        rows.push({
+                            id: parts[0],
+                            label: parts.length > 10 ? parts.slice(10).join("|") : parts[0]
+                        })
+                    }
+                    return rows
+                }
+
+                Label { text: qsTr("Display") }
+                ComboBox {
+                    id: wizardDisplayCombo
+                    Layout.fillWidth: true
+                    model: {
+                        var labels = []
+                        for (var i = 0; i < parent.wizardDisplays.length; ++i)
+                            labels.push(parent.wizardDisplays[i].label)
+                        return labels
+                    }
+                    enabled: parent.wizardDisplays.length > 0
+                    onActivated: (index) => {
+                        if (index < 0 || index >= parent.wizardDisplays.length)
+                            return
+                        controller.selectDisplay(parent.wizardDisplays[index].id)
+                        compose.refreshPreview()
+                    }
+                    // Keep the combo aligned with the currently selected display.
+                    Component.onCompleted: syncIndex()
+                    function syncIndex() {
+                        var selected = controller.selected_display_id
+                        for (var i = 0; i < parent.wizardDisplays.length; ++i) {
+                            if (parent.wizardDisplays[i].id === selected) {
+                                currentIndex = i
+                                return
+                            }
+                        }
+                        if (parent.wizardDisplays.length > 0 && selected.length === 0) {
+                            currentIndex = 0
+                            controller.selectDisplay(parent.wizardDisplays[0].id)
+                        }
+                    }
+                    Connections {
+                        target: controller
+                        function onSelected_display_idChanged() {
+                            wizardDisplayCombo.syncIndex()
+                        }
+                        function onLayout_modelChanged() {
+                            wizardDisplayCombo.syncIndex()
+                        }
+                    }
+                }
+
+                Label {
+                    Layout.columnSpan: 2
+                    text: controller.selected_display_id.length > 0
+                          ? qsTr("Editing %1").arg(
+                                wizardDisplayCombo.currentText.length > 0
+                                ? wizardDisplayCombo.currentText
+                                : controller.selected_display_id)
+                          : qsTr("Select a display to edit tilt/yaw")
+                    opacity: 0.7
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+
                 Label { text: qsTr("Tilt °") }
                 SpinBox {
                     id: wizardTiltSpin
@@ -496,6 +566,7 @@ ApplicationWindow {
                     value: Math.round(controller.selected_tilt_deg)
                     editable: true
                     Layout.fillWidth: true
+                    enabled: controller.selected_display_id.length > 0
                     onValueModified: {
                         controller.applySelectedPanelAngles(value, wizardYawSpin.value)
                         compose.refreshPreview()
@@ -509,19 +580,11 @@ ApplicationWindow {
                     value: Math.round(controller.selected_yaw_deg)
                     editable: true
                     Layout.fillWidth: true
+                    enabled: controller.selected_display_id.length > 0
                     onValueModified: {
                         controller.applySelectedPanelAngles(wizardTiltSpin.value, value)
                         compose.refreshPreview()
                     }
-                }
-                Label {
-                    Layout.columnSpan: 2
-                    text: controller.selected_display_id.length > 0
-                          ? qsTr("Selected display angles")
-                          : qsTr("Select a display in the preview first")
-                    opacity: 0.7
-                    wrapMode: Text.WordWrap
-                    Layout.fillWidth: true
                 }
             }
 

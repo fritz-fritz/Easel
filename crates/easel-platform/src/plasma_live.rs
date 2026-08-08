@@ -71,9 +71,9 @@ impl LiveWallpaperBackend for PlasmaLiveBackend {
         let needs_perspective = surfaces.iter().any(|surface| surface.perspective.is_some());
         if needs_perspective && !easel_plasma_supports_perspective_live() {
             return Err(BackendError::Platform(
-                "installed Easel Plasma wallpaper plugin lacks perspective.frag.qsb; \
-                 reinstall via apps/easel-plasma-wallpaper/install.sh for projective live \
-                 (poster/slideshow fallback)"
+                "installed Easel Plasma wallpaper plugin lacks projective live support \
+                 (need plugin ≥0.3.0 with perspective.frag.qsb); reinstall via \
+                 apps/easel-plasma-wallpaper/install.sh (poster/slideshow fallback)"
                     .into(),
             ));
         }

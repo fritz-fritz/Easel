@@ -42,8 +42,9 @@ Capabilities reported today:
 
 - Cloud XFCE VMs can Apply stills and dynamic-still frames without installing Plasma.
 - Support matrix (`docs/PLATFORM_SUPPORT.md`) must list each backend’s probe evidence.
-- Live wallpapers on XFCE/GNOME/generic X remain unsupported (poster fallback via these
-  still backends). A future Wayland/X live host is a separate decision.
+- Continuous live hosts remain Plasma-plugin-only. On XFCE/GNOME/generic X, motion is
+  delivered as a still-backend slideshow (ADR 0014) rather than poster-only fallback.
+  A future Wayland/X continuous live host is a separate decision.
 
 ## References
 

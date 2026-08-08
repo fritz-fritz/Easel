@@ -5,6 +5,7 @@
 //! KDE Plasma 6 still-wallpaper backend via `org.kde.plasmashell`.
 
 use std::fmt::Write as _;
+use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 use std::sync::OnceLock;
@@ -102,10 +103,14 @@ pub fn easel_plasma_plugin_id() -> Option<&'static str> {
     })
 }
 
+/// Minimum installed plugin `KPlugin.Version` that ships projective live UV (ADR 0016).
+pub const MIN_PERSPECTIVE_LIVE_PLUGIN_VERSION: (u32, u32, u32) = (0, 3, 0);
+
 /// True when the installed Easel wallpaper plugin ships projective live sampling.
 ///
-/// Detects `contents/ui/shaders/perspective.frag.qsb` under the installed package
-/// (ADR 0016). Older installs without the shader keep AA UV only; callers must not
+/// Requires both `contents/ui/shaders/perspective.frag.qsb` and
+/// `metadata.json` `KPlugin.Version >= 0.3.0` under an installed package root
+/// (ADR 0016 / Stage 7.7). Older installs keep AA UV only; callers must not
 /// publish perspective live maps against them or live/poster crops diverge.
 ///
 /// Not cached: re-probes on each call so a mid-session `install.sh` is visible
@@ -114,13 +119,48 @@ pub fn easel_plasma_plugin_id() -> Option<&'static str> {
 pub fn easel_plasma_supports_perspective_live() -> bool {
     plasma_wallpaper_roots()
         .iter()
-        .any(|root| perspective_live_qsb_path(root).is_file())
+        .any(|root| plugin_root_supports_perspective_live(root))
+}
+
+fn plugin_root_supports_perspective_live(wallpaper_root: &Path) -> bool {
+    if !perspective_live_qsb_path(wallpaper_root).is_file() {
+        return false;
+    }
+    parse_kplugin_version(&plugin_metadata_path(wallpaper_root))
+        .is_some_and(|version| version_at_least(version, MIN_PERSPECTIVE_LIVE_PLUGIN_VERSION))
 }
 
 fn perspective_live_qsb_path(wallpaper_root: &Path) -> PathBuf {
     wallpaper_root
         .join(EASEL_PLASMA_WALLPAPER_PLUGIN_ID)
         .join("contents/ui/shaders/perspective.frag.qsb")
+}
+
+fn plugin_metadata_path(wallpaper_root: &Path) -> PathBuf {
+    wallpaper_root
+        .join(EASEL_PLASMA_WALLPAPER_PLUGIN_ID)
+        .join("metadata.json")
+}
+
+fn parse_kplugin_version(metadata_path: &Path) -> Option<(u32, u32, u32)> {
+    let text = fs::read_to_string(metadata_path).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let version = value.get("KPlugin")?.get("Version")?.as_str()?;
+    parse_semver_triple(version)
+}
+
+fn parse_semver_triple(version: &str) -> Option<(u32, u32, u32)> {
+    let mut parts = version.trim().split('.');
+    let major = parts.next()?.parse().ok()?;
+    let minor = parts.next()?.parse().ok()?;
+    let patch = parts.next().unwrap_or("0").parse().ok()?;
+    Some((major, minor, patch))
+}
+
+const fn version_at_least(have: (u32, u32, u32), need: (u32, u32, u32)) -> bool {
+    have.0 > need.0
+        || (have.0 == need.0 && have.1 > need.1)
+        || (have.0 == need.0 && have.1 == need.1 && have.2 >= need.2)
 }
 
 /// Plugin id used for still-frame apply: Easel package when present, else `org.kde.image`.
@@ -561,7 +601,7 @@ mod tests {
     }
 
     #[test]
-    fn perspective_live_support_requires_qsb_asset() {
+    fn perspective_live_support_requires_qsb_and_plugin_version() {
         let root = std::env::temp_dir().join(format!(
             "easel-plasma-qsb-{}-{}",
             std::process::id(),
@@ -569,11 +609,37 @@ mod tests {
                 .duration_since(std::time::UNIX_EPOCH)
                 .map_or(0, |d| d.as_nanos())
         ));
+        let plugin = root.join(EASEL_PLASMA_WALLPAPER_PLUGIN_ID);
         let shader = perspective_live_qsb_path(&root);
         std::fs::create_dir_all(shader.parent().unwrap()).unwrap();
-        assert!(!shader.is_file());
+        assert!(!plugin_root_supports_perspective_live(&root));
+
         std::fs::write(&shader, b"qsb").unwrap();
-        assert!(shader.is_file());
+        assert!(!plugin_root_supports_perspective_live(&root));
+
+        std::fs::write(
+            plugin.join("metadata.json"),
+            r#"{"KPlugin":{"Version":"0.2.0"}}"#,
+        )
+        .unwrap();
+        assert!(!plugin_root_supports_perspective_live(&root));
+
+        std::fs::write(
+            plugin.join("metadata.json"),
+            r#"{"KPlugin":{"Version":"0.3.0"}}"#,
+        )
+        .unwrap();
+        assert!(plugin_root_supports_perspective_live(&root));
+
+        assert!(version_at_least(
+            (0, 3, 1),
+            MIN_PERSPECTIVE_LIVE_PLUGIN_VERSION
+        ));
+        assert!(!version_at_least(
+            (0, 2, 9),
+            MIN_PERSPECTIVE_LIVE_PLUGIN_VERSION
+        ));
+        assert_eq!(parse_semver_triple("0.3.0"), Some((0, 3, 0)));
         let _ = std::fs::remove_dir_all(root);
     }
 

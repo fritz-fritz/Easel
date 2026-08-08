@@ -104,7 +104,8 @@ jobs:
             pkg-config libheif-dev \
             libheif-plugin-libde265 \
             libheif-plugin-aomenc \
-            libheif-plugin-x265
+            libheif-plugin-x265 \
+            qt6-shader-baker
       - name: Install libheif (macOS)
         if: runner.os == 'macOS'
         run: brew install libheif pkg-config

@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import Qt.labs.folderlistmodel
 import Qt.labs.platform as Platform
 import QtMultimedia
 import org.kde.plasma.plasmoid
@@ -102,54 +103,80 @@ WallpaperItem {
         return "file://" + path
     }
 
+    // Soft L1 budget matches crates/easel-platform GEOMETRY_MATCH_EPSILON_PX * 4.
+    readonly property int geometryMatchEpsilonBudget: 8
+
+    function geometryDistance(g, geom) {
+        if (!g)
+            return 1e9
+        return Math.abs((g.x || 0) - geom.x)
+                + Math.abs((g.y || 0) - geom.y)
+                + Math.abs((g.width || 0) - geom.width)
+                + Math.abs((g.height || 0) - geom.height)
+    }
+
+    function pickByGeometry(entries, geom, imageOnly) {
+        if (!entries || !entries.length)
+            return imageOnly ? "" : null
+        let exact = null
+        for (let i = 0; i < entries.length; ++i) {
+            const entry = entries[i]
+            const g = entry.geometry
+            if (!g)
+                continue
+            if (g.x === geom.x && g.y === geom.y
+                    && g.width === geom.width && g.height === geom.height) {
+                exact = entry
+                break
+            }
+        }
+        if (exact)
+            return imageOnly ? (exact.image || "") : exact
+        if (entries.length === 1)
+            return imageOnly ? (entries[0].image || "") : entries[0]
+        let best = null
+        let bestDist = 1e9
+        for (let j = 0; j < entries.length; ++j) {
+            const candidate = entries[j]
+            const dist = root.geometryDistance(candidate.geometry, geom)
+            if (dist <= root.geometryMatchEpsilonBudget && dist < bestDist) {
+                best = candidate
+                bestDist = dist
+            }
+        }
+        if (!best)
+            return imageOnly ? "" : null
+        return imageOnly ? (best.image || "") : best
+    }
+
     function pickImageFromState(payload) {
         try {
             const doc = JSON.parse(payload)
             if (!doc || !doc.displays || !doc.displays.length) {
                 return ""
             }
-            const geom = root.screenGeometry()
-            for (let i = 0; i < doc.displays.length; ++i) {
-                const entry = doc.displays[i]
-                const g = entry.geometry
-                if (!g) {
-                    continue
-                }
-                if (g.x === geom.x && g.y === geom.y
-                        && g.width === geom.width && g.height === geom.height) {
-                    return entry.image || ""
-                }
-            }
-            // Single-display setups: accept the only frame even if geometry drifts.
-            if (doc.displays.length === 1) {
-                return doc.displays[0].image || ""
-            }
+            return root.pickByGeometry(doc.displays, root.screenGeometry(), true)
         } catch (e) {
             return ""
         }
-        return ""
     }
 
     function pickLiveCrop(doc) {
         if (!doc || !doc.live || !doc.live.displays || !doc.live.displays.length) {
             return null
         }
-        const geom = root.screenGeometry()
-        for (let i = 0; i < doc.live.displays.length; ++i) {
-            const entry = doc.live.displays[i]
-            const g = entry.geometry
-            if (!g) {
-                continue
-            }
-            if (g.x === geom.x && g.y === geom.y
-                    && g.width === geom.width && g.height === geom.height) {
-                return entry
-            }
-        }
-        if (doc.live.displays.length === 1) {
-            return doc.live.displays[0]
-        }
-        return null
+        return root.pickByGeometry(doc.live.displays, root.screenGeometry(), false)
+    }
+
+    function stateDirUrl() {
+        const path = root.stateFilePath
+        if (!path || path.length === 0)
+            return ""
+        const normalized = path.indexOf("file:") === 0 ? path.substring(7) : path
+        const slash = normalized.lastIndexOf("/")
+        if (slash <= 0)
+            return ""
+        return "file://" + normalized.substring(0, slash)
     }
 
     function sourceRectFromUv(uv) {
@@ -234,6 +261,18 @@ WallpaperItem {
         }
         request.open("GET", root.fileUrlForPath(path))
         request.send()
+    }
+
+    // Best-effort directory watch for active.json create/replace; poll remains
+    // the reliability path (FolderListModel does not always see in-place writes).
+    FolderListModel {
+        id: stateDirModel
+        folder: root.stateDirUrl()
+        nameFilters: ["active.json"]
+        showDirs: false
+        showDotAndDotDot: false
+        onCountChanged: root.reloadStateFile()
+        onDataChanged: root.reloadStateFile()
     }
 
     Timer {

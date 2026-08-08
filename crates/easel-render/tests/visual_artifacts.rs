@@ -195,6 +195,53 @@ fn perspective_pose_changes_apply_payload_digests() {
 }
 
 #[test]
+fn panel_angles_change_apply_payload_digests() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");
+    let out_dir = std::env::temp_dir().join(format!("easel-visual-angles-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir).expect("outdir");
+
+    let mut displays = fixture_displays();
+    displays[0].yaw_deg = 12.0;
+    displays[1].tilt_deg = -8.0;
+    let mut profile = Profile::new("visual-angles");
+    profile.fit_mode = FitMode::Cover;
+    profile.layout_mode = LayoutMode::PhysicalSpan;
+    profile.displays = displays.iter().map(|display| display.id).collect();
+    let composition = CompositionSettings::from_profile(&profile).with_viewer(ViewerPose {
+        enabled: true,
+        view_distance_mm: 600.0,
+        eye_offset_x_mm: 0.0,
+        eye_offset_y_mm: 0.0,
+    });
+
+    let outputs = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition,
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir.clone(),
+    }
+    .execute()
+    .expect("raster");
+
+    let digests: Vec<u32> = outputs
+        .iter()
+        .map(|output| {
+            let bytes = std::fs::read(&output.path).expect("read png");
+            crc32fast::hash(&bytes)
+        })
+        .collect();
+
+    // Distinct from coplanar perspective_pose_changes_apply_payload_digests.
+    assert_ne!(digests, [0xd3c4_0934, 0x5352_c610, 0x2c15_a094]);
+    assert_eq!(digests, [0xc876_b8e1, 0xd0ed_1acc, 0x2c15_a094]);
+    let _ = std::fs::remove_dir_all(out_dir);
+}
+
+#[test]
 fn live_poster_purpose_matches_static_wallpaper_pixels() {
     // LivePosterFrame is a semantic consumer tag; crop/resample math matches static apply.
     let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");

@@ -33,13 +33,18 @@ tilt/yaw and a dedicated calibration experience were deferred.
 - Live and poster crops stay aligned when perspective is on.
 - Plasma plugin requires the shipped `perspective.frag.qsb` asset
   (`tools/dev/compile-plasma-shaders.sh` rebuilds it; `install.sh` and CI verify
-  the pack is present).
+  the pack is present and, when `qsb` is available, matches a fresh rebuild’s
+  canonical dump — targets + reflection; raw `.qsb` bytes are not stable).
 - `PlasmaLiveBackend` refuses projective live IPC when the installed plugin lacks
-  the `.qsb`, so Apply falls back to slideshow/poster rasters instead of AA live
-  against projective posters.
+  `.qsb` **or** `KPlugin.Version < 0.3.0`, so Apply falls back to slideshow/poster
+  rasters instead of AA live against projective posters (Stage 7.7 handshake).
 - Inside the plugin, ShaderEffect / `VideoOutput.layer` failure keeps the
   projective still poster rather than silently downgrading to AA live UV.
+- Geometry matching uses exact → single-display → soft L1 epsilon so fractional
+  scale / virtual-desktop drift does not blank the wallpaper.
 - Rematch preserves panel angles with other user calibration.
+- GPU ShaderEffect parity with Rust `perspective.rs` remains Plasma-host-only;
+  CPU tests pin `to_uniform_array` field order and sample tables.
 
 ## References
 

@@ -14,7 +14,7 @@ use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
-use easel_core::{LoopMode, PlaybackPolicy, Profile};
+use easel_core::{DisplayId, FitMode, LogicalRect, LoopMode, PlaybackPolicy, Profile, ViewerPose};
 use easel_platform::{
     BackendError, LiveWallpaperSession, pause_reason_for, probe_live_policy_sensors,
 };
@@ -32,8 +32,21 @@ const TICK: Duration = Duration::from_millis(100);
 const SENSOR_REFRESH: Duration = Duration::from_secs(1);
 const MAX_VIDEO_FRAMES: usize = 24;
 
-type CachedWallpapers = Vec<(easel_core::DisplayId, PathBuf, easel_core::LogicalRect)>;
-type DisplayLayout = Vec<(easel_core::DisplayId, easel_core::LogicalRect)>;
+type CachedWallpapers = Vec<(DisplayId, PathBuf, LogicalRect)>;
+
+/// Cache key for composed slideshow frames.
+///
+/// Includes viewer pose + per-display panel angles so mid-session perspective
+/// calibration invalidates projective rasters (Stage 7.7). First-loop projective
+/// cost on still backends is expected (ADR 0014).
+#[derive(Clone, Debug, PartialEq)]
+struct SlideshowCacheFingerprint {
+    layout: Vec<(DisplayId, LogicalRect)>,
+    fit_mode: FitMode,
+    viewer: ViewerPose,
+    /// `(display_id, tilt_millideg, yaw_millideg)` for stable float compares.
+    panel_angles: Vec<(DisplayId, i32, i32)>,
+}
 
 /// Builds a slideshow session for GIF/video through still-backend Apply.
 pub fn start_slideshow_session(
@@ -143,9 +156,9 @@ struct SlideshowInner {
     index: usize,
     remaining_ms: u64,
     manual_pause: bool,
-    /// Layout fingerprint used when filling `raster_cache` (id + logical rect).
-    cached_layout: Option<DisplayLayout>,
-    /// Cached composed wallpapers per frame index (invalidated on layout change).
+    /// Fingerprint used when filling `raster_cache` (layout + pose + angles).
+    cached_fingerprint: Option<SlideshowCacheFingerprint>,
+    /// Cached composed wallpapers per frame index (invalidated on fingerprint change).
     raster_cache: Vec<Option<CachedWallpapers>>,
 }
 
@@ -171,7 +184,7 @@ impl SlideshowSession {
             index: 0,
             remaining_ms: interval_ms,
             manual_pause: false,
-            cached_layout: None,
+            cached_fingerprint: None,
             raster_cache,
         }));
 
@@ -298,12 +311,12 @@ fn advance_frame(inner: &mut SlideshowInner) -> bool {
 }
 
 fn apply_frame_locked(inner: &mut SlideshowInner) -> Result<(), String> {
-    let layout = active_display_layout(&inner.profile)?;
-    if inner.cached_layout.as_ref() != Some(&layout) {
+    let fingerprint = active_cache_fingerprint(&inner.profile)?;
+    if inner.cached_fingerprint.as_ref() != Some(&fingerprint) {
         for slot in &mut inner.raster_cache {
             *slot = None;
         }
-        inner.cached_layout = Some(layout.clone());
+        inner.cached_fingerprint = Some(fingerprint.clone());
     }
 
     let index = inner.index;
@@ -311,7 +324,7 @@ fn apply_frame_locked(inner: &mut SlideshowInner) -> Result<(), String> {
         return push_wallpapers(cached);
     }
     let source = inner.frames[index].path.clone();
-    let wallpapers = compose_frame(&source, &inner.profile, &layout)?;
+    let wallpapers = compose_frame(&source, &inner.profile, &fingerprint)?;
     push_wallpapers(&wallpapers)?;
     if let Some(slot) = inner.raster_cache.get_mut(index) {
         *slot = Some(wallpapers);
@@ -319,7 +332,7 @@ fn apply_frame_locked(inner: &mut SlideshowInner) -> Result<(), String> {
     Ok(())
 }
 
-fn active_display_layout(profile: &Profile) -> Result<DisplayLayout, String> {
+fn active_cache_fingerprint(profile: &Profile) -> Result<SlideshowCacheFingerprint, String> {
     use easel_core::resolve_displays;
 
     let live = display_session::current_displays();
@@ -331,24 +344,47 @@ fn active_display_layout(profile: &Profile) -> Result<DisplayLayout, String> {
     if !resolution.should_apply {
         return Err(resolution.reason);
     }
-    Ok(resolution
+    let layout: Vec<_> = resolution
         .active_displays
-        .into_iter()
+        .iter()
         .map(|display| (display.id, display.logical_rect))
-        .collect())
+        .collect();
+    let panel_angles = resolution
+        .active_displays
+        .iter()
+        .map(|display| {
+            (
+                display.id,
+                angle_to_millideg(display.tilt_deg),
+                angle_to_millideg(display.yaw_deg),
+            )
+        })
+        .collect();
+    Ok(SlideshowCacheFingerprint {
+        layout,
+        fit_mode: profile.fit_mode,
+        viewer: display_session::viewer_pose(),
+        panel_angles,
+    })
+}
+
+#[allow(clippy::cast_possible_truncation)]
+fn angle_to_millideg(degrees: f64) -> i32 {
+    (degrees * 1000.0).round() as i32
 }
 
 fn compose_frame(
     source: &Path,
     profile: &Profile,
-    layout: &DisplayLayout,
+    fingerprint: &SlideshowCacheFingerprint,
 ) -> Result<CachedWallpapers, String> {
     let live = display_session::current_displays();
-    let displays: Vec<_> = layout
+    let displays: Vec<_> = fingerprint
+        .layout
         .iter()
         .filter_map(|(id, _)| live.iter().find(|display| display.id == *id).cloned())
         .collect();
-    if displays.len() != layout.len() {
+    if displays.len() != fingerprint.layout.len() {
         return Err("display set changed during slideshow compose".into());
     }
     let mut request_profile = profile.clone();
@@ -358,7 +394,7 @@ fn compose_frame(
             source_path: source.to_path_buf(),
             displays: displays.clone(),
             composition: CompositionSettings::from_profile(&request_profile)
-                .with_viewer(display_session::viewer_pose()),
+                .with_viewer(fingerprint.viewer),
             purpose: RenderPurpose::LivePosterFrame,
         },
         output_dir: apply_cache_dir().join(format!("slideshow-{}", std::process::id())),

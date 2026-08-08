@@ -426,4 +426,70 @@ mod tests {
         let b = yawed.source_xy(10, 20, 100, 50).expect("yawed sample");
         assert_ne!(a, b);
     }
+
+    /// Field order of [`AngularPerspective::to_uniform_array`] must match the
+    /// GLSL `ubuf` layout in `apps/easel-plasma-wallpaper/.../perspective.frag`
+    /// (`eyeX`…`srcH`). GPU ShaderEffect pixel parity remains Plasma-host-only.
+    #[test]
+    fn uniform_array_matches_glsl_field_order_and_pinned_samples() {
+        let map = AngularPerspective::new(
+            active_pose(),
+            300.0,
+            150.0,
+            10.0,
+            -5.0,
+            600.0,
+            300.0,
+            8.0,
+            12.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+        )
+        .expect("map");
+        let uniforms = map.to_uniform_array();
+        let expected = [
+            map.eye_x_mm,
+            map.eye_y_mm,
+            map.distance_mm,
+            map.content_x_mm,
+            map.content_y_mm,
+            map.content_w_mm,
+            map.content_h_mm,
+            map.tilt_deg,
+            map.yaw_deg,
+            map.map_x_mm,
+            map.map_y_mm,
+            map.map_w_mm,
+            map.map_h_mm,
+            map.src_x,
+            map.src_y,
+            map.src_w,
+            map.src_h,
+        ];
+        for (index, (got, want)) in uniforms.iter().zip(expected).enumerate() {
+            assert!(
+                (got - want).abs() < f64::EPSILON,
+                "uniform[{index}] got {got} want {want}"
+            );
+        }
+        // Pinned CPU samples (nx, ny) → (sx, sy); bump only with intentional math changes.
+        let samples = [
+            ((50_u32, 25_u32), (52.340_836_519_899, 24.654_746_022_674)),
+            ((10, 10), (13.506_438_546_651, 10.505_066_333_772)),
+            ((90, 40), (95.188_309_475_704, 40.686_369_969_728)),
+        ];
+        for ((nx, ny), (expect_x, expect_y)) in samples {
+            let (sx, sy) = map.source_xy(nx, ny, 100, 50).expect("inside");
+            assert!(
+                (sx - expect_x).abs() < 1e-9 && (sy - expect_y).abs() < 1e-9,
+                "sample ({nx},{ny}): got ({sx},{sy}) expect ({expect_x},{expect_y})"
+            );
+        }
+    }
 }
