@@ -86,11 +86,12 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   After enabling (or disabling) the split, click **Refresh displays** in Easel.
   `tools/dev/three-displays.sh reset` restores 1920×1200. The split is not persisted
   across VNC restarts.
-- Still wallpaper apply on Linux is capability-probed (ADR 0011): Plasma → XFCE
-  (`xfce-xfconf` / `xfconf-query`) → generic X (`x11-feh`). On the XFCE Cloud desktop
-  `select_wallpaper_backend()` should return `xfce-xfconf`, so Compose **Apply** can push
-  stills without Plasma. Live hosts remain Plasma-only; non-Plasma Apply uses poster
-  frames through the still backend.
+- Still wallpaper apply on Linux is capability-probed (ADR 0011 + 0012): Plasma → XFCE
+  (`xfce-xfconf`) → GNOME (`gnome-gsettings`, spanned composite) → generic X (`x11-feh`).
+  On the XFCE Cloud desktop `select_wallpaper_backend()` should return `xfce-xfconf`
+  (GNOME is not selected merely because `gsettings` exists), so Compose **Apply** can
+  push stills without Plasma. Live hosts remain Plasma-only; non-Plasma Apply uses
+  poster frames through the still backend.
 - **Decision: do NOT install KDE Plasma on this Cloud VM.** Prefer the XFCE/generic-X
   still path already probed here; do not add a KDE/Plasma session just to make live apply
   work. CI still validates composition via per-display **apply-payload rasters** (CI does

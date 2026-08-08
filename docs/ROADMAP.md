@@ -142,12 +142,13 @@ Animated/live media on non-Plasma Linux desktops remains Stage 7.
 
 Exit: published support matrix is backed by automated tests and manual validation evidence.
 
-**Status:** In progress. Stage 7.1 (Linux still breadth) landed:
+**Status:** In progress. Stage 7.1 (Linux still breadth) and Stage 7.2 (GNOME stills)
+landed:
 
-- Probe chain `plasma6` → `xfce-xfconf` → `x11-feh` (ADR 0011).
+- Probe chain `plasma6` → `xfce-xfconf` → `gnome-gsettings` → `x11-feh` (ADR 0011 + 0012).
 - Published matrix in `docs/PLATFORM_SUPPORT.md`.
-- Remaining: GNOME still (7.2), macOS packaging, perspective calibration UI,
-  workspace/activity/lock-screen where APIs allow, non-Plasma live hosts.
+- Remaining: macOS packaging, perspective calibration UI, workspace/activity/lock-screen
+  where APIs allow, non-Plasma live hosts.
 
 ## Stage 8 — Production hardening
 

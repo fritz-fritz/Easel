@@ -12,6 +12,8 @@ use crate::macos::MacosBackend;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 use crate::feh::{FehBackend, feh_available};
 #[cfg(all(not(windows), not(target_os = "macos")))]
+use crate::gnome::{GnomeBackend, gnome_available};
+#[cfg(all(not(windows), not(target_os = "macos")))]
 use crate::plasma::{PlasmaBackend, easel_plasma_plugin_id, plasma_available};
 #[cfg(all(not(windows), not(target_os = "macos")))]
 use crate::plasma_live::PlasmaLiveBackend;
@@ -53,11 +55,12 @@ pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendEr
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
         // Preference: desktop-native channels that persist settings, then generic X.
-        // GNOME gsettings remains Stage 7.2 (no stable public per-monitor still API).
         if plasma_available() {
             Ok(Box::new(PlasmaBackend))
         } else if xfce_available() {
             Ok(Box::new(XfceBackend))
+        } else if gnome_available() {
+            Ok(Box::new(GnomeBackend))
         } else if feh_available() {
             Ok(Box::new(FehBackend))
         } else {
@@ -172,7 +175,10 @@ mod tests {
                 #[cfg(all(not(windows), not(target_os = "macos")))]
                 {
                     assert!(
-                        matches!(backend.id(), "plasma6" | "xfce-xfconf" | "x11-feh"),
+                        matches!(
+                            backend.id(),
+                            "plasma6" | "xfce-xfconf" | "gnome-gsettings" | "x11-feh"
+                        ),
                         "unexpected linux still backend {}",
                         backend.id()
                     );
