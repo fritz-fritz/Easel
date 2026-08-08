@@ -28,7 +28,12 @@ use crate::automation_session::automation_store;
 use crate::display_session;
 
 const TICK: Duration = Duration::from_millis(100);
+/// How often to re-probe power/lock/full-screen sensors (not every worker tick).
+const SENSOR_REFRESH: Duration = Duration::from_secs(1);
 const MAX_VIDEO_FRAMES: usize = 24;
+
+type CachedWallpapers = Vec<(easel_core::DisplayId, PathBuf, easel_core::LogicalRect)>;
+type DisplayLayout = Vec<(easel_core::DisplayId, easel_core::LogicalRect)>;
 
 /// Builds a slideshow session for GIF/video through still-backend Apply.
 pub fn start_slideshow_session(
@@ -138,8 +143,10 @@ struct SlideshowInner {
     index: usize,
     remaining_ms: u64,
     manual_pause: bool,
-    /// Cached composed wallpapers per frame index (invalidated on stop only).
-    raster_cache: Vec<Option<Vec<(easel_core::DisplayId, PathBuf, easel_core::LogicalRect)>>>,
+    /// Layout fingerprint used when filling `raster_cache` (id + logical rect).
+    cached_layout: Option<DisplayLayout>,
+    /// Cached composed wallpapers per frame index (invalidated on layout change).
+    raster_cache: Vec<Option<CachedWallpapers>>,
 }
 
 pub struct SlideshowSession {
@@ -164,6 +171,7 @@ impl SlideshowSession {
             index: 0,
             remaining_ms: interval_ms,
             manual_pause: false,
+            cached_layout: None,
             raster_cache,
         }));
 
@@ -229,6 +237,8 @@ impl Drop for SlideshowSession {
 
 fn slideshow_worker(inner: &Arc<Mutex<SlideshowInner>>, stop: &Arc<AtomicBool>) {
     let mut last = Instant::now();
+    let mut sensors = probe_live_policy_sensors();
+    let mut sensors_at = Instant::now();
     while !stop.load(Ordering::SeqCst) {
         thread::sleep(TICK);
         if stop.load(Ordering::SeqCst) {
@@ -238,10 +248,14 @@ fn slideshow_worker(inner: &Arc<Mutex<SlideshowInner>>, stop: &Arc<AtomicBool>) 
         let delta = u64::try_from(now.saturating_duration_since(last).as_millis()).unwrap_or(0);
         last = now;
 
+        if sensors_at.elapsed() >= SENSOR_REFRESH {
+            sensors = probe_live_policy_sensors();
+            sensors_at = Instant::now();
+        }
+
         let Ok(mut guard) = inner.lock() else {
             break;
         };
-        let sensors = probe_live_policy_sensors();
         let paused = guard.manual_pause || pause_reason_for(&guard.policy, &sensors).is_some();
         if paused {
             continue;
@@ -284,12 +298,20 @@ fn advance_frame(inner: &mut SlideshowInner) -> bool {
 }
 
 fn apply_frame_locked(inner: &mut SlideshowInner) -> Result<(), String> {
+    let layout = active_display_layout(&inner.profile)?;
+    if inner.cached_layout.as_ref() != Some(&layout) {
+        for slot in &mut inner.raster_cache {
+            *slot = None;
+        }
+        inner.cached_layout = Some(layout.clone());
+    }
+
     let index = inner.index;
     if let Some(cached) = inner.raster_cache.get(index).and_then(|slot| slot.as_ref()) {
         return push_wallpapers(cached);
     }
     let source = inner.frames[index].path.clone();
-    let wallpapers = compose_frame(&source, &inner.profile)?;
+    let wallpapers = compose_frame(&source, &inner.profile, &layout)?;
     push_wallpapers(&wallpapers)?;
     if let Some(slot) = inner.raster_cache.get_mut(index) {
         *slot = Some(wallpapers);
@@ -297,10 +319,7 @@ fn apply_frame_locked(inner: &mut SlideshowInner) -> Result<(), String> {
     Ok(())
 }
 
-fn compose_frame(
-    source: &Path,
-    profile: &Profile,
-) -> Result<Vec<(easel_core::DisplayId, PathBuf, easel_core::LogicalRect)>, String> {
+fn active_display_layout(profile: &Profile) -> Result<DisplayLayout, String> {
     use easel_core::resolve_displays;
 
     let live = display_session::current_displays();
@@ -312,7 +331,26 @@ fn compose_frame(
     if !resolution.should_apply {
         return Err(resolution.reason);
     }
-    let displays = resolution.active_displays;
+    Ok(resolution
+        .active_displays
+        .into_iter()
+        .map(|display| (display.id, display.logical_rect))
+        .collect())
+}
+
+fn compose_frame(
+    source: &Path,
+    profile: &Profile,
+    layout: &DisplayLayout,
+) -> Result<CachedWallpapers, String> {
+    let live = display_session::current_displays();
+    let displays: Vec<_> = layout
+        .iter()
+        .filter_map(|(id, _)| live.iter().find(|display| display.id == *id).cloned())
+        .collect();
+    if displays.len() != layout.len() {
+        return Err("display set changed during slideshow compose".into());
+    }
     let mut request_profile = profile.clone();
     request_profile.displays = displays.iter().map(|display| display.id).collect();
     let outputs = RasterJob {
@@ -339,9 +377,7 @@ fn compose_frame(
     Ok(wallpapers)
 }
 
-fn push_wallpapers(
-    wallpapers: &[(easel_core::DisplayId, PathBuf, easel_core::LogicalRect)],
-) -> Result<(), String> {
+fn push_wallpapers(wallpapers: &CachedWallpapers) -> Result<(), String> {
     use easel_platform::{DisplayWallpaper, WallpaperOutput, select_wallpaper_backend};
 
     let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;

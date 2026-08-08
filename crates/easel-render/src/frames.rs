@@ -17,10 +17,10 @@ use crate::raster::{RasterError, atomic_write_png};
 /// Soft cap on extracted GIF frames (hostile/long animations).
 pub const MAX_MOTION_FRAMES: usize = 64;
 
-/// Minimum per-frame hold used when the container reports a zero delay.
-///
-/// Still-backend Apply cadence is **not** driven by this value — see
-/// [`easel_core::PlaybackPolicy::still_slideshow_interval_ms`].
+/// Floor applied to extracted GIF frame delays (including very small non-zero
+/// delays such as 10 ms → 100 ms). Used only as container timing metadata;
+/// still-backend Apply cadence is driven by
+/// [`easel_core::PlaybackPolicy::still_slideshow_interval_ms`] instead.
 pub const DEFAULT_FRAME_DELAY_MS: u64 = 100;
 
 /// Historical floor retained for callers that still clamp extracted delays.
@@ -60,8 +60,8 @@ pub fn extract_gif_frames(
         let delay = frame.delay();
         let (numer, denom) = delay.numer_denom_ms();
         let raw_ms = u64::from(numer) / u64::from(denom.max(1));
-        // Preserve container timing for diagnostics / future native slideshow sets.
-        // Desktop still-slideshow remaps delays to PlaybackPolicy::still_slideshow_interval_ms.
+        // Floor tiny/zero GIF delays for metadata; desktop still-slideshow remaps
+        // Apply cadence to PlaybackPolicy::still_slideshow_interval_ms.
         let delay_ms = raw_ms.max(DEFAULT_FRAME_DELAY_MS);
         let buffer = frame.into_buffer();
         let path = output_dir.join(format!("frame-{index:04}.png"));
