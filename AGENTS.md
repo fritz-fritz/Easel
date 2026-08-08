@@ -72,17 +72,20 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   displays it reports equals the number of RandR monitors on `DISPLAY=:1`. The VNC
   framebuffer is a single output (`VNC-0`), i.e. **one** display by default.
 - Cloud `start` runs `tools/dev/three-displays.sh reset` so the interactive XFCE/VNC
-  desktop stays a single full-framebuffer monitor (usable for GUI work and recordings).
+  desktop stays a single full 1920×1200 monitor (usable for GUI work and recordings).
   Do **not** leave the three-monitor split enabled by default.
 - To exercise multi-display handling like CI's `DP-1`/`DP-2`/`DP-3` fixture, **opt in**
-  with `tools/dev/three-displays.sh`. It defines three full-bleed vertical strips on the
-  live VNC output (`VNC-0`) — connector names and physical mm match the CI fixture;
-  pixel heights fill 1920×1200 so every VNC pixel belongs to a monitor (needed for XFCE
-  wallpaper painting and demos). Monitors must not use RandR output `none` or XFCE will
-  not paint those regions. `tools/dev/three-displays.sh reset` restores the single
-  monitor. If you launch the app *before* splitting (or change the split while it is
-  open), click **Refresh displays** to re-probe. The split is a live X-server change and
-  is not persisted across VNC restarts.
+  with `tools/dev/three-displays.sh`. It:
+  1. Switches the VNC-0 mode to **9200×2360** — the bounding box of the three monitors —
+     so the VNC view *is* the virtual desktop containing them (zoom/pan in noVNC as needed).
+  2. Defines three **staggered, full-resolution** logical monitors on that output:
+     `DP-1` left 4K **3840×2160**, `DP-2` center UWQHD **3440×1440**, `DP-3` right 1080p
+     **1920×1080** (with realistic physical mm).
+  3. Binds every monitor to `VNC-0` (never RandR `none`), otherwise XFCE will not paint
+     those wallpaper regions.
+  After enabling (or disabling) the split, click **Refresh displays** in Easel.
+  `tools/dev/three-displays.sh reset` restores 1920×1200. The split is not persisted
+  across VNC restarts.
 - Still wallpaper apply on Linux is capability-probed (ADR 0011): Plasma → XFCE
   (`xfce-xfconf` / `xfconf-query`) → generic X (`x11-feh`). On the XFCE Cloud desktop
   `select_wallpaper_backend()` should return `xfce-xfconf`, so Compose **Apply** can push
