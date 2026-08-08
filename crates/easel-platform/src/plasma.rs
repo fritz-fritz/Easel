@@ -40,9 +40,9 @@ impl WallpaperBackend for PlasmaBackend {
             activities: false,
             workspaces: false,
             lock_screen: false,
-            // Built-in Plasma day/night packages (KNightTime) always qualify; dense solar HEIC
-            // additionally needs the community dynamic plugin (see ADR 0006). Easel's own
-            // Plasma wallpaper plugin hosts still frames (and later live media) when installed.
+            // Built-in Plasma day/night packages (KNightTime) qualify for native hosting.
+            // Dense solar/h24 uses Rust evaluation + still-frame apply (Easel plugin IPC when
+            // installed); zzag is not part of the supported apply path (ADR 0007 / 0008).
             native_dynamic_bundle: true,
             cross_fade: false,
         }

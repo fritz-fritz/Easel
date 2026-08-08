@@ -4,7 +4,10 @@
 
 //! Wallpaper backend probing and selection.
 
-use crate::{BackendError, LiveBackendCapabilities, LiveWallpaperBackend, WallpaperBackend};
+use crate::{
+    BackendCapabilities, BackendError, LiveBackendCapabilities, LiveWallpaperBackend,
+    WallpaperBackend,
+};
 
 #[cfg(target_os = "macos")]
 use crate::macos::MacosBackend;
@@ -38,6 +41,129 @@ pub struct LiveBackendProbe {
     pub capabilities: LiveBackendCapabilities,
     /// Human-readable evidence for UI diagnostics and status lines.
     pub reason: String,
+}
+
+/// How dynamic stills are applied once a still [`WallpaperBackend`] is available.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DynamicStillsHost {
+    /// No still backend is available in this session.
+    Unavailable,
+    /// Scheduler evaluates frames and applies PNG/JPEG crops through the still backend.
+    StillPoller,
+    /// Prefer OS-hosted native packages when the still set allows; still poller remains
+    /// the fallback (dense Plasma solar, encode failures, etc.).
+    NativeBundleWithPollerFallback,
+}
+
+/// Diagnostic result of probing the still wallpaper backend (and dynamic-still path).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct WallpaperBackendProbe {
+    /// Whether a still backend was selected.
+    pub available: bool,
+    /// Stable backend key when selected.
+    pub backend_id: Option<&'static str>,
+    /// Still-backend capability flags (defaults when unavailable).
+    pub capabilities: BackendCapabilities,
+    /// Dynamic-still apply strategy for this session.
+    pub dynamic_stills: DynamicStillsHost,
+    /// Human-readable evidence for UI diagnostics and status lines.
+    pub reason: String,
+}
+
+/// PRODUCT four-mode support report for the active desktop session.
+///
+/// Static and dynamic stills require a still backend. Animated-image and video require a
+/// validated live host (never inferred from OS name alone).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct PresentationSupport {
+    /// Still apply through the selected wallpaper backend.
+    pub static_stills: bool,
+    /// Dynamic still sets via poller and/or native package host.
+    pub dynamic_stills: bool,
+    /// Continuous animated-image playback on a live host.
+    pub animated_images: bool,
+    /// Continuous silent video playback on a live host.
+    pub video: bool,
+    /// Selected still backend id when available.
+    pub still_backend_id: Option<&'static str>,
+    /// Selected live backend id when available.
+    pub live_backend_id: Option<&'static str>,
+    /// Dynamic-still host strategy.
+    pub dynamic_host: DynamicStillsHost,
+    /// Still / dynamic probe evidence.
+    pub still_reason: String,
+    /// Live probe evidence.
+    pub live_reason: String,
+}
+
+impl DynamicStillsHost {
+    /// Short label for CLI / Compose status lines.
+    #[must_use]
+    pub const fn label(self) -> &'static str {
+        match self {
+            Self::Unavailable => "unavailable",
+            Self::StillPoller => "still poller",
+            Self::NativeBundleWithPollerFallback => "native package + still-poller fallback",
+        }
+    }
+}
+
+/// Probes the current session and returns still-backend diagnostics (including dynamic stills).
+#[must_use]
+pub fn probe_wallpaper_backend() -> WallpaperBackendProbe {
+    match select_wallpaper_backend() {
+        Ok(backend) => {
+            let capabilities = backend.capabilities();
+            let dynamic_stills = if capabilities.native_dynamic_bundle {
+                DynamicStillsHost::NativeBundleWithPollerFallback
+            } else {
+                DynamicStillsHost::StillPoller
+            };
+            let reason = match dynamic_stills {
+                DynamicStillsHost::NativeBundleWithPollerFallback => format!(
+                    "still backend {}; dynamic stills prefer native packages with still-poller fallback",
+                    backend.id()
+                ),
+                DynamicStillsHost::StillPoller => format!(
+                    "still backend {}; dynamic stills use still-frame poller (no public native dynamic host)",
+                    backend.id()
+                ),
+                DynamicStillsHost::Unavailable => unreachable!("selected backend is available"),
+            };
+            WallpaperBackendProbe {
+                available: true,
+                backend_id: Some(backend.id()),
+                capabilities,
+                dynamic_stills,
+                reason,
+            }
+        }
+        Err(_) => WallpaperBackendProbe {
+            available: false,
+            backend_id: None,
+            capabilities: BackendCapabilities::default(),
+            dynamic_stills: DynamicStillsHost::Unavailable,
+            reason: "no supported wallpaper backend is available".into(),
+        },
+    }
+}
+
+/// Reports static / dynamic-still / animated / video support for the active session.
+#[must_use]
+pub fn probe_presentation_support() -> PresentationSupport {
+    let still = probe_wallpaper_backend();
+    let live = probe_live_wallpaper_backend();
+    PresentationSupport {
+        static_stills: still.available && still.capabilities.per_display_images,
+        dynamic_stills: still.dynamic_stills != DynamicStillsHost::Unavailable,
+        animated_images: live.supported && live.capabilities.animated_images,
+        video: live.supported && live.capabilities.video,
+        still_backend_id: still.backend_id,
+        live_backend_id: live.backend_id,
+        dynamic_host: still.dynamic_stills,
+        still_reason: still.reason,
+        live_reason: live.reason,
+    }
 }
 
 /// Probes the current session and returns the preferred still-wallpaper backend.
@@ -187,6 +313,35 @@ mod tests {
             Err(BackendError::NoBackend) => {}
             Err(other) => panic!("unexpected probe error: {other}"),
         }
+    }
+
+    #[test]
+    fn wallpaper_probe_reports_dynamic_stills_for_every_still_backend() {
+        let probe = probe_wallpaper_backend();
+        if !probe.available {
+            assert_eq!(probe.dynamic_stills, DynamicStillsHost::Unavailable);
+            return;
+        }
+        assert!(probe.backend_id.is_some());
+        assert!(probe.capabilities.per_display_images);
+        assert_ne!(probe.dynamic_stills, DynamicStillsHost::Unavailable);
+        if probe.capabilities.native_dynamic_bundle {
+            assert_eq!(
+                probe.dynamic_stills,
+                DynamicStillsHost::NativeBundleWithPollerFallback
+            );
+        } else {
+            assert_eq!(probe.dynamic_stills, DynamicStillsHost::StillPoller);
+        }
+        let support = probe_presentation_support();
+        assert!(support.static_stills);
+        assert!(support.dynamic_stills);
+        assert_eq!(support.still_backend_id, probe.backend_id);
+        assert_eq!(support.dynamic_host, probe.dynamic_stills);
+        assert_eq!(
+            support.animated_images,
+            probe_live_wallpaper_backend().supported
+        );
     }
 
     #[test]

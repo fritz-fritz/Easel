@@ -150,7 +150,9 @@ experimental until their lifecycle, desktop-icon ordering, multi-desktop behavio
 stability are validated. No undocumented host technique is represented as a supported API.
 
 The core does not branch on environment strings. Backend probing and selection belong to the
-platform layer and produce diagnostic evidence.
+platform layer and produce diagnostic evidence via `probe_wallpaper_backend`,
+`probe_live_wallpaper_backend`, and `probe_presentation_support` (static / dynamic-still /
+animated / video).
 
 ## Desktop application
 
