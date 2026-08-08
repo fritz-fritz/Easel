@@ -60,8 +60,9 @@ impl WallpaperBackend for GnomeBackend {
     }
 }
 
-/// Returns whether this looks like a GNOME-family session with a writable background schema.
+/// Returns whether this looks like a GNOME-family session with a readable background schema.
 ///
+/// Probe evidence is `gsettings get … picture-uri` succeeding (schema present and readable).
 /// `gsettings` alone is not enough — XFCE images also ship it for appearance probes.
 #[must_use]
 pub fn gnome_available() -> bool {
@@ -115,9 +116,14 @@ fn set_background_image(path: &Path, options: &str) -> Result<(), BackendError> 
             absolute.display()
         ))
     })?;
-    // gsettings values are serialized GVariants; strings need quotes.
+    // gsettings CLI values are serialized GVariants (quoted strings / enum nicks).
+    let options_variant = gvariant_string(options);
     let uri_variant = gvariant_string(uri.as_str());
-    gsettings_set(&["org.gnome.desktop.background", "picture-options", options])?;
+    gsettings_set(&[
+        "org.gnome.desktop.background",
+        "picture-options",
+        options_variant.as_str(),
+    ])?;
     gsettings_set(&[
         "org.gnome.desktop.background",
         "picture-uri",
@@ -201,7 +207,15 @@ fn composite_spanned(displays: &[DisplayWallpaper]) -> Result<PathBuf, BackendEr
         overlay(&mut canvas, &tile, dest_x, dest_y);
     }
 
-    let out = std::env::temp_dir().join(format!("easel-gnome-spanned-{}.png", std::process::id()));
+    // Unique path per apply so picture-uri changes and GNOME reloads the image
+    // (PID alone is stable across Apply calls in one process).
+    let nonce = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos());
+    let out = std::env::temp_dir().join(format!(
+        "easel-gnome-spanned-{}-{nonce}.png",
+        std::process::id()
+    ));
     canvas
         .save(&out)
         .map_err(|error| BackendError::Platform(format!("write spanned wallpaper: {error}")))?;
