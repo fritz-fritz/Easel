@@ -56,8 +56,10 @@ pub fn apply_live_poster_fallback(
     )
 }
 
-/// Starts a live wallpaper session when the session has a validated host; otherwise
+/// Starts a live wallpaper session when the session has a live host; otherwise
 /// falls back to per-display poster rasters through the still backend.
+///
+/// If live `start` fails (decoder/host), falls back to posters with the error noted.
 pub fn apply_live(
     source: &Path,
     poster_source: &Path,
@@ -68,6 +70,21 @@ pub fn apply_live(
         return apply_live_poster_fallback(poster_source, profile);
     }
 
+    match start_live_session(source, poster_source, profile, &live.reason) {
+        Ok(message) => Ok(message),
+        Err(error) => {
+            let poster = apply_live_poster_fallback(poster_source, profile)?;
+            Ok(format!("{poster}; live start failed: {error}"))
+        }
+    }
+}
+
+fn start_live_session(
+    source: &Path,
+    poster_source: &Path,
+    profile: &Profile,
+    live_reason: &str,
+) -> Result<String, String> {
     let backend = select_live_wallpaper_backend().map_err(|error| error.to_string())?;
     let displays = resolve_profile_displays(profile)?;
     let source_size = resolve_live_source_size(source)?;
@@ -105,7 +122,7 @@ pub fn apply_live(
     // overwrite active.json while we prepare the new session.
     stop_live_session()?;
 
-    // Seed posters through the still path so the plugin has a fallback frame, then
+    // Seed posters through the still path so the host has a fallback frame, then
     // start the live session (which republishes live IPC + keeps posters).
     apply_per_display_rasters(poster_source, profile, RenderPurpose::LivePosterFrame, None)?;
 
@@ -114,7 +131,7 @@ pub fn apply_live(
         .map_err(|error| error.to_string())?;
     replace_live_session(session)?;
 
-    Ok(format!("live via {} ({})", backend.id(), live.reason))
+    Ok(format!("live via {} ({})", backend.id(), live_reason))
 }
 
 /// Resolves oriented source pixel size for live crop planning.

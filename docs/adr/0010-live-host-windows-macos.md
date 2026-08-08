@@ -40,9 +40,12 @@ live Apply uses poster fallback. Probe text cites this ADR.
 ## Consequences
 
 - Stage 6 exit criteria are met on **Plasma + Easel plugin** as the first supported live
-  backend; Windows/macOS stay poster-fallback with documented reasons.
-- Revisit only if Microsoft or Apple publish a stable public live-surface API that can
-  share one media clock across displays.
+  backend. Public Win/macOS wallpaper APIs remain still-image only.
+- Stage 7.4 (ADR 0014) adds an **experimental** app-owned desktop-surface live host so
+  GIF/video can play while Easel is running; it does not claim a public OS wallpaper API
+  and does not reverse this ADR’s findings about WorkerW / private AppKit hosts.
+- Revisit a *supported* OS-integrated host only if Microsoft or Apple publish a stable
+  public live-surface API that can share one media clock across displays.
 
 ## References
 

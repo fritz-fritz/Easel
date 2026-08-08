@@ -28,16 +28,18 @@ hosts; dense solar on Plasma uses still-frame IPC (ADR 0006–0008).
 
 ## Live wallpaper hosts
 
-| Session / OS | Backend id | Supported | Notes |
+| Session / OS | Backend id | Tier | Notes |
 | --- | --- | --- | --- |
-| KDE Plasma 6 + Easel plugin | `plasma6-live` | yes | Shared-clock IPC (Stage 6). |
-| Other Linux desktops | — | no | Poster fallback via still backend when one exists. |
-| Windows | — | no | ADR 0010. |
-| macOS | — | no | ADR 0010. |
+| KDE Plasma 6 + Easel plugin | `plasma6-live` | supported | Shared-clock IPC (Stage 6). Preferred when available. |
+| Any session with Easel desktop running | `desktop-surface-live` | experimental | App-owned always-on-bottom windows (ADR 0014); stops when Easel exits; icon stacking DE-dependent. |
+| — (no Easel / live start failure) | — | poster fallback | Still backend Apply of poster frames. |
+
+Public Windows/macOS wallpaper APIs remain still-image only (ADR 0010). The experimental
+host does not use WorkerW or private AppKit desktop APIs.
 
 ## Stage 7 remaining slices
 
 - macOS packaging / distribution polish.
 - Perspective / viewer correction + calibration UI.
 - Workspace / activity / lock-screen only where stable public APIs exist.
-- Non-Plasma live hosts (separate feasibility ADR when candidates exist).
+- Promote `desktop-surface-live` from experimental → supported after delivery gates.

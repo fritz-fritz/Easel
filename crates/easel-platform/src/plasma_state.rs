@@ -31,6 +31,9 @@ pub const PLASMA_WALLPAPER_STATE_MIN_VERSION: u32 = 1;
 /// Relative directory under the Easel data dir that holds the state file.
 pub const PLASMA_WALLPAPER_STATE_DIR: &str = "plasma-wallpaper";
 
+/// Relative directory for app-owned desktop-surface live IPC (ADR 0014).
+pub const DESKTOP_LIVE_STATE_DIR: &str = "desktop-live";
+
 /// File name written by desktop automation and watched by the plugin.
 pub const PLASMA_WALLPAPER_STATE_FILE: &str = "active.json";
 
@@ -350,6 +353,38 @@ pub fn publish_plasma_live_state(state: &PlasmaWallpaperState) -> Result<PathBuf
     write_plasma_wallpaper_state(&path, state).map_err(|error| {
         BackendError::Platform(format!(
             "failed to write Plasma live wallpaper state {}: {error}",
+            path.display()
+        ))
+    })?;
+    Ok(path)
+}
+
+/// Returns the default directory for app-owned desktop-surface live IPC.
+#[must_use]
+pub fn desktop_live_state_dir() -> PathBuf {
+    directories::ProjectDirs::from("net", "fritztech", "Easel").map_or_else(
+        || {
+            std::env::temp_dir()
+                .join("easel")
+                .join("data")
+                .join(DESKTOP_LIVE_STATE_DIR)
+        },
+        |dirs| dirs.data_dir().join(DESKTOP_LIVE_STATE_DIR),
+    )
+}
+
+/// Returns the default absolute path for desktop-surface live IPC.
+#[must_use]
+pub fn default_desktop_live_state_path() -> PathBuf {
+    desktop_live_state_dir().join(PLASMA_WALLPAPER_STATE_FILE)
+}
+
+/// Writes live-session state for the app-owned desktop-surface host (ADR 0014).
+pub fn publish_desktop_live_state(state: &PlasmaWallpaperState) -> Result<PathBuf, BackendError> {
+    let path = default_desktop_live_state_path();
+    write_plasma_wallpaper_state(&path, state).map_err(|error| {
+        BackendError::Platform(format!(
+            "failed to write desktop-surface live state {}: {error}",
             path.display()
         ))
     })?;

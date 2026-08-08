@@ -141,13 +141,12 @@ composite), then generic X11 via `feh`. Windows uses the current
 `IDesktopWallpaper` API for stills. macOS uses per-screen AppKit integration for stills.
 See `docs/PLATFORM_SUPPORT.md`.
 
-`LiveWallpaperBackend` owns persistent desktop surfaces. KDE Plasma has the cleanest initial path:
-a dedicated QML wallpaper plugin can draw the desktop background. Qt Multimedia provides decoding
-and `VideoOutput`, but it does not replace the native host integration. The public Windows
-`IDesktopWallpaper` and macOS `NSWorkspace.setDesktopImageURL` contracts set image files, not
-video. Windows and macOS live hosts therefore remain feasibility-gated and must be labeled
-experimental until their lifecycle, desktop-icon ordering, multi-desktop behavior, and OS-update
-stability are validated. No undocumented host technique is represented as a supported API.
+`LiveWallpaperBackend` owns persistent desktop surfaces. KDE Plasma + the Easel wallpaper plugin
+is the **supported** path (shared-clock IPC). When that plugin is unavailable, Stage 7.4 offers
+an **experimental** app-owned desktop-surface host (`desktop-surface-live`, ADR 0014): the
+desktop process draws always-on-bottom Qt windows from `desktop-live/active.json`. Public
+Windows/macOS wallpaper APIs remain still-image only (ADR 0010); WorkerW / private AppKit hosts
+are not represented as supported APIs.
 
 The core does not branch on environment strings. Backend probing and selection belong to the
 platform layer and produce diagnostic evidence.

@@ -26,10 +26,10 @@ live-host problem (Stage 6).
 
 | Platform/session | Dynamic stills | Animated/video host | Initial position |
 | --- | --- | --- | --- |
-| KDE Plasma 6 | Appearance → built-in day/night (`org.kde.image` + KNightTime). Dense solar → Rust evaluation + still frames via Easel `Plasma/Wallpaper` plugin IPC (ADR 0007 + 0008); no zzag required. | Easel QML wallpaper plugin (`apps/easel-plasma-wallpaper`) with shared-clock IPC + UV crops. App-side Qt Multimedia preview + library video probe/posters; Apply starts `PlasmaLiveBackend` when the plugin is installed, else poster fallback. | First supported live target. |
-| Other Linux desktops | XFCE (`xfce-xfconf`), GNOME (`gnome-gsettings` spanned composite, ADR 0012), or generic X (`x11-feh`) when probed. | Desktop/compositor-specific; no universal Wayland attachment. | Poster-fallback Apply via still backend when one exists; live host not yet validated. |
-| Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | Public wallpaper API does not expose video playback (ADR 0010). | Unsupported; poster fallback. |
-| macOS | Native Dynamic Desktop HEIC host (`native_dynamic_bundle`); System Events still apply as fallback. | Public `setDesktopImageURL` contract is still-image oriented (ADR 0010). | Unsupported; poster fallback. |
+| KDE Plasma 6 | Appearance → built-in day/night (`org.kde.image` + KNightTime). Dense solar → Rust evaluation + still frames via Easel `Plasma/Wallpaper` plugin IPC (ADR 0007 + 0008); no zzag required. | **Supported:** Easel QML wallpaper plugin (`plasma6-live`) when installed. Else experimental `desktop-surface-live` (ADR 0014). | First supported live target. |
+| Other Linux desktops | XFCE (`xfce-xfconf`), GNOME (`gnome-gsettings` spanned composite, ADR 0012), or generic X (`x11-feh`) when probed. | **Experimental:** app-owned desktop surfaces (`desktop-surface-live`, ADR 0014) while Easel runs. | Cloud XFCE is the primary validation surface. |
+| Windows | `IDesktopWallpaper` still-frame apply only (no public dynamic-HEIC API). | **Experimental:** `desktop-surface-live` (ADR 0014). Public wallpaper API stays still-only (ADR 0010). | Requires Easel to keep running. |
+| macOS | Native Dynamic Desktop HEIC host (`native_dynamic_bundle`); System Events still apply as fallback. | **Experimental:** `desktop-surface-live` (ADR 0014). Public `setDesktopImageURL` stays still-only (ADR 0010). | Requires Easel to keep running. |
 
 The application must never advertise a live capability based only on the operating-system name.
 It probes the current session and decoder, reports evidence in diagnostics, and falls back to the

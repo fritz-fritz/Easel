@@ -7,6 +7,7 @@
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
 mod appearance;
+mod desktop_live;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 mod feh;
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -32,6 +33,7 @@ use easel_core::{DisplayId, LogicalRect, PlaybackPolicy};
 use thiserror::Error;
 
 pub use appearance::system_appearance;
+pub use desktop_live::DesktopSurfaceLiveBackend;
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use feh::{FehBackend, feh_available};
 #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -49,12 +51,14 @@ pub use plasma::{
 #[cfg(all(not(windows), not(target_os = "macos")))]
 pub use plasma_live::PlasmaLiveBackend;
 pub use plasma_state::{
-    PLASMA_WALLPAPER_STATE_DIR, PLASMA_WALLPAPER_STATE_FILE, PLASMA_WALLPAPER_STATE_VERSION,
-    PlasmaLiveClockSnapshot, PlasmaLiveDisplayCrop, PlasmaLiveState, PlasmaSourceUv,
-    PlasmaStateError, PlasmaWallpaperDisplayState, PlasmaWallpaperGeometry, PlasmaWallpaperMode,
-    PlasmaWallpaperState, default_plasma_wallpaper_state_path, live_geometry_fingerprint,
-    plasma_wallpaper_state_dir, publish_plasma_live_state, publish_plasma_wallpaper_state,
-    read_plasma_wallpaper_state, wallpaper_geometry_fingerprint, write_plasma_wallpaper_state,
+    DESKTOP_LIVE_STATE_DIR, PLASMA_WALLPAPER_STATE_DIR, PLASMA_WALLPAPER_STATE_FILE,
+    PLASMA_WALLPAPER_STATE_VERSION, PlasmaLiveClockSnapshot, PlasmaLiveDisplayCrop,
+    PlasmaLiveState, PlasmaSourceUv, PlasmaStateError, PlasmaWallpaperDisplayState,
+    PlasmaWallpaperGeometry, PlasmaWallpaperMode, PlasmaWallpaperState,
+    default_desktop_live_state_path, default_plasma_wallpaper_state_path, desktop_live_state_dir,
+    live_geometry_fingerprint, plasma_wallpaper_state_dir, publish_desktop_live_state,
+    publish_plasma_live_state, publish_plasma_wallpaper_state, read_plasma_wallpaper_state,
+    wallpaper_geometry_fingerprint, write_plasma_wallpaper_state,
 };
 pub use probe::{
     LiveBackendProbe, probe_live_wallpaper_backend, select_live_wallpaper_backend,
