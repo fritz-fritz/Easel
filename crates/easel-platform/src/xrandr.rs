@@ -94,13 +94,15 @@ pub fn rects_match(left: LogicalRect, right: LogicalRect) -> bool {
     const TOLERANCE: i32 = 1;
     i32::abs(left.x - right.x) <= TOLERANCE
         && i32::abs(left.y - right.y) <= TOLERANCE
-        && i32::abs(i32::try_from(left.width).unwrap_or(i32::MAX) - i32::try_from(right.width).unwrap_or(i32::MAX))
-            <= TOLERANCE
         && i32::abs(
-            i32::try_from(left.height).unwrap_or(i32::MAX) - i32::try_from(right.height).unwrap_or(i32::MAX),
+            i32::try_from(left.width).unwrap_or(i32::MAX)
+                - i32::try_from(right.width).unwrap_or(i32::MAX),
+        ) <= TOLERANCE
+        && i32::abs(
+            i32::try_from(left.height).unwrap_or(i32::MAX)
+                - i32::try_from(right.height).unwrap_or(i32::MAX),
         ) <= TOLERANCE
 }
-
 
 /// Plans `(monitor_name, path)` assignments by matching wallpaper geometry to XRandR.
 pub fn plan_monitor_assignments(
