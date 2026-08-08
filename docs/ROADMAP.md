@@ -117,25 +117,20 @@ community zzag plugin required. Windows remains still-poller-only.
 Exit: silent local motion media spans multiple displays without visible drift on at least one
 supported live backend, within documented CPU/GPU and power budgets.
 
-**Status:** In progress. Scaffold + still-frame host path landed: package
-`net.fritztech.easel.wallpaper`, `install.sh`, `easel_plasma_plugin_id()` /
-`preferred_still_wallpaper_plugin_id()`, and still apply prefers the Easel plugin when
-installed (falls back to `org.kde.image`). Local media probe + bounded posters landed:
-GIF metadata and first-frame posters via pure Rust (`image` / `easel-render`), indexer
-writes `{data}/posters/{asset_id}.png`, Library grid prefers poster previews for
-live-surface assets. Plasma plugin still-frame IPC landed: `active.json` under
-`{data}/plasma-wallpaper/`, plugin polls + geometry match, D-Bus bind only when topology
-changes. Dense solar/h24 on Plasma uses Rust schedule evaluation + still IPC (no zzag);
-Appearance sets still use built-in day/night packages. Qt Multimedia preview + video
-probe/posters landed: Compose muted GIF/video preview with diagnostics; library watches
-video extensions and indexes `MediaMetadata::Video` after a Qt Multimedia probe writes a
-poster (no `ffmpeg`). Live desktop apply poster fallback landed: session live-host probe
-stays unsupported until plugin playback exists; Compose Apply / LiveMedia profiles use
-per-display `LivePosterFrame` rasters through the still wallpaper backend (GIF first
-frame; video requires a library poster). Shared playback clock + multi-display live crop
-plan landed (`PlaybackClock` / `plan_live_crops`); hosts must consume one timeline for
-all surfaces. Remaining: Plasma plugin live playback consuming that plan, power/lock
-policies wired to `clock.pause()`, and live-host spikes on Windows/macOS.
+**Status:** Complete for the first supported live backend (Plasma + Easel plugin).
+Scaffold through shared clock landed earlier (6.1–6.7). Stage 6.8–6.10 finish the exit
+criteria:
+
+- Plasma plugin live playback consumes `PlaybackClock` + `plan_live_crops` via
+  `active.json` IPC (`media_time_ms`, per-display UV); Compose Apply starts
+  `PlasmaLiveBackend` when the plugin is installed, else poster fallback.
+- Power / session-lock / battery / full-screen pause policy evaluates sensors and calls
+  `clock.pause()` / `resume()` inside the live session worker (full-screen sensor is
+  best-effort stub until a stable DE API exists).
+- Windows / macOS live-host spikes documented in ADR 0010; probes stay unsupported with
+  poster fallback.
+
+Animated/live media on non-Plasma Linux desktops remains Stage 7.
 
 ## Stage 7 — Platform breadth and correction
 

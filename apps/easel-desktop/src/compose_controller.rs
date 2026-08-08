@@ -21,7 +21,7 @@ use easel_platform::{
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
 
-use crate::apply_service::{apply_live_poster_fallback, resolve_live_poster_source};
+use crate::apply_service::{apply_live, resolve_live_poster_source};
 use crate::display_session::{current_displays, current_preview_displays};
 
 #[cxx_qt::bridge]
@@ -155,12 +155,13 @@ impl qobject::ComposeController {
             }
             self.as_mut().set_preview_ready(false);
             let live = probe_live_wallpaper_backend();
+            let apply_hint = if live.supported {
+                format!("Apply starts live host ({})", live.reason)
+            } else {
+                format!("Apply uses poster fallback ({})", live.reason)
+            };
             self.as_mut().set_preview_status(QString::from(
-                format!(
-                    "Motion preview active — Apply uses poster fallback ({})",
-                    live.reason
-                )
-                .as_str(),
+                format!("Motion preview active — {apply_hint}").as_str(),
             ));
             return;
         }
@@ -174,12 +175,13 @@ impl qobject::ComposeController {
         if *self.media_mode_index() == 2 {
             self.as_mut().set_preview_ready(false);
             let live = probe_live_wallpaper_backend();
+            let apply_hint = if live.supported {
+                format!("Apply starts live host ({})", live.reason)
+            } else {
+                format!("Apply uses poster fallback ({})", live.reason)
+            };
             self.as_mut().set_preview_status(QString::from(
-                format!(
-                    "Motion preview active — Apply uses poster fallback ({})",
-                    live.reason
-                )
-                .as_str(),
+                format!("Motion preview active — {apply_hint}").as_str(),
             ));
             return;
         }
@@ -244,11 +246,17 @@ impl qobject::ComposeController {
             };
             let profile = compose_profile_snapshot(self.as_ref());
             self.as_mut().set_apply_busy(true);
-            self.as_mut()
-                .set_preview_status(QString::from("Rendering poster-fallback wallpaper…"));
+            let live = probe_live_wallpaper_backend();
+            let status = if live.supported {
+                "Starting live wallpaper…"
+            } else {
+                "Rendering poster-fallback wallpaper…"
+            };
+            self.as_mut().set_preview_status(QString::from(status));
             if job_tx
                 .send(WorkerJob::ApplyLivePoster(ApplyLivePosterJob {
                     generation,
+                    source: PathBuf::from(&source),
                     poster_source: poster,
                     profile,
                     qt_thread,
@@ -523,6 +531,7 @@ struct ApplyJob {
 
 struct ApplyLivePosterJob {
     generation: u64,
+    source: PathBuf,
     poster_source: PathBuf,
     profile: Profile,
     qt_thread: CxxQtThread<qobject::ComposeController>,
@@ -663,7 +672,7 @@ fn run_apply(job: ApplyJob) {
 
 fn run_apply_live_poster(job: ApplyLivePosterJob) {
     let generation = job.generation;
-    let apply_result = apply_live_poster_fallback(&job.poster_source, &job.profile);
+    let apply_result = apply_live(&job.source, &job.poster_source, &job.profile);
     finish_apply(job.qt_thread, generation, apply_result);
 }
 

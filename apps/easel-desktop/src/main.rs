@@ -20,6 +20,7 @@ mod display_session;
 mod fixtures;
 mod library_controller;
 mod library_session;
+mod live_session;
 mod profile_controller;
 
 use std::env;

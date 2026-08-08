@@ -110,12 +110,23 @@ pub fn preferred_still_wallpaper_plugin_id() -> &'static str {
 
 fn apply_per_display_via_easel_plugin(displays: &[DisplayWallpaper]) -> Result<(), BackendError> {
     let state_path = publish_plasma_wallpaper_state(displays)?;
+    ensure_easel_plugin_bound(displays, &state_path)
+}
+
+/// Binds Plasma containments to the Easel plugin when geometry changed.
+///
+/// Callers publish `active.json` first (still or live). Binding is skipped when
+/// the geometry fingerprint matches the last successful bind.
+pub(crate) fn ensure_easel_plugin_bound(
+    displays: &[DisplayWallpaper],
+    state_path: &Path,
+) -> Result<(), BackendError> {
     let fingerprint = wallpaper_geometry_fingerprint(displays);
     let stamp_path = plasma_wallpaper_state_dir().join("bound.fingerprint");
     let needs_bind =
         std::fs::read_to_string(&stamp_path).ok().as_deref() != Some(fingerprint.as_str());
     if needs_bind {
-        let script = build_easel_plugin_bind_script(displays, &state_path)?;
+        let script = build_easel_plugin_bind_script(displays, state_path)?;
         evaluate_plasma_script(&script)?;
         if let Err(error) = std::fs::write(&stamp_path, &fingerprint) {
             return Err(BackendError::Platform(format!(
