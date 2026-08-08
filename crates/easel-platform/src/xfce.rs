@@ -259,7 +259,7 @@ mod tests {
         let Ok(monitors) = crate::xrandr::list_monitors() else {
             return;
         };
-        if monitors.len() < 2 {
+        if monitors.is_empty() {
             return;
         }
 

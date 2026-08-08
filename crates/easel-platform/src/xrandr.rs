@@ -31,15 +31,24 @@ pub fn parse_list_monitors(stdout: &str) -> Vec<XrandrMonitor> {
         if trimmed.is_empty() || trimmed.starts_with("Monitors:") {
             continue;
         }
+        // "0: +VNC-0 1920/508x1200/317+0+0  VNC-0" (leading +/* mark primary)
         // "0: DP-1 640/600x360/340+0+180  VNC-0" or "1: DP-2 768x432+640+0"
         let Some((_index, rest)) = trimmed.split_once(':') else {
             continue;
         };
         let rest = rest.trim();
         let mut parts = rest.split_whitespace();
-        let Some(name) = parts.next() else {
+        let Some(raw_name) = parts.next() else {
             continue;
         };
+        // xrandr marks the primary monitor with a leading '+' (and occasionally '*').
+        let name = raw_name
+            .strip_prefix('+')
+            .or_else(|| raw_name.strip_prefix('*'))
+            .unwrap_or(raw_name);
+        if name.is_empty() {
+            continue;
+        }
         let Some(geom) = parts.next() else {
             continue;
         };
@@ -212,6 +221,24 @@ Monitors: 3
                 y: 0,
                 width: 1920,
                 height: 1080
+            }
+        );
+    }
+
+    #[test]
+    fn strips_primary_marker_from_monitor_name() {
+        // xrandr --listmonitors marks the primary with a leading '+'.
+        let stdout = "Monitors: 1\n 0: +VNC-0 1920/508x1200/317+0+0  VNC-0\n";
+        let monitors = parse_list_monitors(stdout);
+        assert_eq!(monitors.len(), 1);
+        assert_eq!(monitors[0].name, "VNC-0");
+        assert_eq!(
+            monitors[0].rect,
+            LogicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1200
             }
         );
     }
