@@ -32,6 +32,7 @@ pub fn parse_list_monitors(stdout: &str) -> Vec<XrandrMonitor> {
             continue;
         }
         // "0: +VNC-0 1920/508x1200/317+0+0  VNC-0" (leading +/* mark primary)
+        // "0: +*eDP-1 1920x1080+0+0" (both markers)
         // "0: DP-1 640/600x360/340+0+180  VNC-0" or "1: DP-2 768x432+640+0"
         let Some((_index, rest)) = trimmed.split_once(':') else {
             continue;
@@ -41,11 +42,8 @@ pub fn parse_list_monitors(stdout: &str) -> Vec<XrandrMonitor> {
         let Some(raw_name) = parts.next() else {
             continue;
         };
-        // xrandr marks the primary monitor with a leading '+' (and occasionally '*').
-        let name = raw_name
-            .strip_prefix('+')
-            .or_else(|| raw_name.strip_prefix('*'))
-            .unwrap_or(raw_name);
+        // xrandr may prefix the primary with '+' and/or '*'; strip every leading marker.
+        let name = raw_name.trim_start_matches(['+', '*']);
         if name.is_empty() {
             continue;
         }
@@ -152,20 +150,40 @@ pub fn paths_in_monitor_order(
 }
 
 fn parse_monitor_geometry(geom: &str) -> Option<LogicalRect> {
-    // width[/wmm]xheight[/hmm]+x+y
-    let (size, position) = geom.split_once('+')?;
+    // width[/wmm]xheight[/hmm]±x±y  (offsets may be negative, e.g. 1920x1080-1920+0)
+    let (size, x, y) = split_size_and_position(geom)?;
     let (width_part, height_part) = size.split_once('x')?;
     let width = parse_dim(width_part)?;
     let height = parse_dim(height_part)?;
-    let mut coords = position.split('+');
-    let x: i32 = coords.next()?.parse().ok()?;
-    let y: i32 = coords.next()?.parse().ok()?;
     Some(LogicalRect {
         x,
         y,
         width,
         height,
     })
+}
+
+/// Splits `WIDTHxHEIGHT±X±Y` into the size substring and signed offsets.
+fn split_size_and_position(geom: &str) -> Option<(&str, i32, i32)> {
+    let bytes = geom.as_bytes();
+    let mut signs = Vec::new();
+    for (index, &byte) in bytes.iter().enumerate() {
+        if (byte == b'+' || byte == b'-')
+            && index > 0
+            && bytes.get(index + 1).is_some_and(u8::is_ascii_digit)
+        {
+            signs.push(index);
+        }
+    }
+    // Geometry always ends with two signed offsets; ignore any earlier matches.
+    let (x_at, y_at) = match signs.as_slice() {
+        [.., x_at, y_at] => (*x_at, *y_at),
+        _ => return None,
+    };
+    let size = &geom[..x_at];
+    let x: i32 = geom[x_at..y_at].parse().ok()?;
+    let y: i32 = geom[y_at..].parse().ok()?;
+    Some((size, x, y))
 }
 
 fn parse_dim(part: &str) -> Option<u32> {
@@ -238,11 +256,13 @@ Monitors: 3
 
     #[test]
     fn strips_primary_marker_from_monitor_name() {
-        // xrandr --listmonitors marks the primary with a leading '+'.
-        let stdout = "Monitors: 1\n 0: +VNC-0 1920/508x1200/317+0+0  VNC-0\n";
+        // xrandr --listmonitors marks the primary with leading '+' and/or '*'.
+        let stdout =
+            "Monitors: 2\n 0: +VNC-0 1920/508x1200/317+0+0  VNC-0\n 1: +*eDP-1 1920x1080+1920+0\n";
         let monitors = parse_list_monitors(stdout);
-        assert_eq!(monitors.len(), 1);
+        assert_eq!(monitors.len(), 2);
         assert_eq!(monitors[0].name, "VNC-0");
+        assert_eq!(monitors[1].name, "eDP-1");
         assert_eq!(
             monitors[0].rect,
             LogicalRect {
@@ -250,6 +270,46 @@ Monitors: 3
                 y: 0,
                 width: 1920,
                 height: 1200
+            }
+        );
+    }
+
+    #[test]
+    fn parses_negative_monitor_offsets() {
+        let stdout = "Monitors: 2\n 0: DP-1 1920x1080-1920+0\n 1: DP-2 1920x1080+0+0\n";
+        let monitors = parse_list_monitors(stdout);
+        assert_eq!(monitors.len(), 2);
+        assert_eq!(
+            monitors[0].rect,
+            LogicalRect {
+                x: -1920,
+                y: 0,
+                width: 1920,
+                height: 1080
+            }
+        );
+        assert_eq!(
+            monitors[1].rect,
+            LogicalRect {
+                x: 0,
+                y: 0,
+                width: 1920,
+                height: 1080
+            }
+        );
+    }
+
+    #[test]
+    fn parses_negative_y_offset() {
+        let monitors = parse_list_monitors("Monitors: 1\n 0: DP-1 800x600+100-50\n");
+        assert_eq!(monitors.len(), 1);
+        assert_eq!(
+            monitors[0].rect,
+            LogicalRect {
+                x: 100,
+                y: -50,
+                width: 800,
+                height: 600
             }
         );
     }

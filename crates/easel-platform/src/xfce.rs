@@ -248,11 +248,16 @@ mod tests {
         assert_eq!(workspaces, vec![0, 2]);
     }
 
+    /// Opt-in live XFCE apply check. Skipped unless `EASEL_XFCE_LIVE_APPLY=1` so
+    /// default `cargo test` never mutates the desktop session.
     #[test]
     fn live_xfce_apply_matches_three_display_fixture() {
         use easel_core::DisplayId;
         use std::fs;
 
+        if std::env::var("EASEL_XFCE_LIVE_APPLY").ok().as_deref() != Some("1") {
+            return;
+        }
         if std::env::var_os("DISPLAY").is_none() || !xfce_available() {
             return;
         }
