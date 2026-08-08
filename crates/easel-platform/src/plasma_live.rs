@@ -78,6 +78,7 @@ impl LiveWallpaperBackend for PlasmaLiveBackend {
                 "live wallpaper source dimensions must be non-zero".into(),
             ));
         }
+        validate_uniform_live_surfaces(surfaces, source_width, source_height)?;
 
         let clock = PlaybackClock::from_policy(&policy, None)
             .map_err(|error| BackendError::Platform(format!("invalid playback policy: {error}")))?;
@@ -100,6 +101,33 @@ fn validate_media_paths(source: &Path, poster: &Path) -> Result<(), BackendError
     }
     if !poster.is_file() {
         return Err(BackendError::MissingOutput(poster.to_path_buf()));
+    }
+    Ok(())
+}
+
+/// Ensures every surface shares one media source and oriented dimensions.
+///
+/// Plasma IPC publishes a single `live.source` / size; mixed inputs would desync crops.
+fn validate_uniform_live_surfaces(
+    surfaces: &[LiveDisplaySurface],
+    source_width: u32,
+    source_height: u32,
+) -> Result<(), BackendError> {
+    let Some(first) = surfaces.first() else {
+        return Ok(());
+    };
+    let first_source = first.media.source.as_path();
+    for surface in surfaces.iter().skip(1) {
+        if surface.media.source != first_source {
+            return Err(BackendError::Platform(
+                "live wallpaper surfaces must share one media source".into(),
+            ));
+        }
+        if surface.source_width != source_width || surface.source_height != source_height {
+            return Err(BackendError::Platform(
+                "live wallpaper surfaces must share oriented source dimensions".into(),
+            ));
+        }
     }
     Ok(())
 }
@@ -376,6 +404,56 @@ mod tests {
             "animated_image"
         );
         assert_eq!(media_kind_for_path(Path::new("/tmp/x.mp4")), "video");
+    }
+
+    #[test]
+    fn rejects_mixed_live_sources() {
+        let left = surface();
+        let mut right = surface();
+        right.source_width = left.source_width;
+        right.source_height = left.source_height;
+        // Distinct path → must fail even with matching dimensions.
+        right.media.source = left.media.source.with_file_name("other.gif");
+        std::fs::write(&right.media.source, b"gif").unwrap();
+        let err = validate_uniform_live_surfaces(
+            &[left.clone(), right],
+            left.source_width,
+            left.source_height,
+        )
+        .expect_err("mixed sources");
+        assert!(
+            matches!(err, BackendError::Platform(ref message) if message.contains("one media source")),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn rejects_mismatched_live_dimensions() {
+        let left = surface();
+        let mut right = left.clone();
+        right.source_width = left.source_width + 1;
+        let err = validate_uniform_live_surfaces(
+            &[left.clone(), right],
+            left.source_width,
+            left.source_height,
+        )
+        .expect_err("mixed dims");
+        assert!(
+            matches!(err, BackendError::Platform(ref message) if message.contains("dimensions")),
+            "unexpected error: {err}"
+        );
+    }
+
+    #[test]
+    fn accepts_uniform_live_surfaces() {
+        let left = surface();
+        let right = left.clone();
+        validate_uniform_live_surfaces(
+            &[left.clone(), right],
+            left.source_width,
+            left.source_height,
+        )
+        .expect("uniform");
     }
 
     #[test]

@@ -101,6 +101,10 @@ pub fn apply_live(
         });
     }
 
+    // Stop any prior live tick publisher before seeding posters so it cannot
+    // overwrite active.json while we prepare the new session.
+    stop_live_session()?;
+
     // Seed posters through the still path so the plugin has a fallback frame, then
     // start the live session (which republishes live IPC + keeps posters).
     apply_per_display_rasters(poster_source, profile, RenderPurpose::LivePosterFrame, None)?;

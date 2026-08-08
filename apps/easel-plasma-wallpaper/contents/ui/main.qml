@@ -227,6 +227,12 @@ WallpaperItem {
         color: "#1a1a1a"
 
         // Still / poster layer (also shown while live decode is not ready).
+        // Raise above live layers until GIF Status.Ready / video Playing so a
+        // loading AnimatedImage cannot blank the desktop.
+        readonly property bool showPosterFallback: !root.liveActive
+                || (root.liveIsGif ? gifPlayer.status !== Image.Ready
+                                   : player.playbackState !== MediaPlayer.PlayingState)
+
         Image {
             id: still
             anchors.fill: parent
@@ -234,10 +240,8 @@ WallpaperItem {
             asynchronous: true
             cache: false
             source: root.imageUrl
-            visible: !root.liveActive
-                    || (root.liveIsGif ? !gifPlayer.playing && gifPlayer.status !== Image.Ready
-                                       : player.playbackState !== MediaPlayer.PlayingState)
-            z: 0
+            visible: parent.showPosterFallback
+            z: parent.showPosterFallback ? 2 : 0
         }
 
         // GIF live crop using UV window from plan_live_crops.
@@ -263,8 +267,11 @@ WallpaperItem {
                 fillMode: Image.Stretch
                 asynchronous: true
                 cache: false
-                source: visible ? root.fileUrlForPath(root.liveDoc.live.source) : ""
-                playing: visible && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
+                // Keep source set while live so decode can finish under the poster.
+                source: (root.liveActive && root.liveIsGif)
+                        ? root.fileUrlForPath(root.liveDoc.live.source) : ""
+                playing: root.liveActive && root.liveIsGif
+                        && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
             }
         }
 
