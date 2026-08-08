@@ -730,6 +730,40 @@ ApplicationWindow {
                             }
 
                             Label {
+                                text: qsTr("Wallpaper poll")
+                                visible: mediaMode.currentIndex === 2 && motionMode.currentIndex !== 2
+                            }
+                            ComboBox {
+                                id: slideshowInterval
+                                visible: mediaMode.currentIndex === 2 && motionMode.currentIndex !== 2
+                                enabled: mediaMode.currentIndex === 2 && motionMode.currentIndex !== 2
+                                // Still backends are settings writes, not video pipelines.
+                                // Presets are Apply poll intervals (ADR 0014).
+                                readonly property var intervalMsValues: [500, 1000, 2000, 5000, 10000, 30000]
+                                model: [
+                                    qsTr("0.5 s (fastest)"),
+                                    qsTr("1 s"),
+                                    qsTr("2 s (default)"),
+                                    qsTr("5 s"),
+                                    qsTr("10 s"),
+                                    qsTr("30 s")
+                                ]
+                                Layout.fillWidth: true
+                                Component.onCompleted: {
+                                    var ms = compose.still_slideshow_interval_ms
+                                    var idx = 2
+                                    for (var i = 0; i < intervalMsValues.length; ++i) {
+                                        if (intervalMsValues[i] === ms) {
+                                            idx = i
+                                            break
+                                        }
+                                    }
+                                    currentIndex = idx
+                                }
+                                onActivated: compose.still_slideshow_interval_ms = intervalMsValues[currentIndex]
+                            }
+
+                            Label {
                                 text: qsTr("Timeline")
                                 visible: mediaMode.currentIndex === 1
                             }

@@ -39,9 +39,10 @@ poster frame when motion presentation fails.
 ## Live session design
 
 One logical clock owns timing for a display group. Continuous hosts share decoded frames with
-per-display UV crops; slideshow hosts compose each sampled still once and Apply through the
-still backend on that shared clock. Both paths avoid independent per-monitor players so bezels
-do not drift.
+per-display UV crops and honor `maximum_frames_per_second`. Slideshow hosts compose each
+sampled still once and Apply through the still backend on a configured **wallpaper poll**
+interval (`still_slideshow_interval_ms`, default 2 s) — not container/video framerate. Both
+paths avoid independent per-monitor players so bezels do not drift.
 
 ```mermaid
 flowchart TD

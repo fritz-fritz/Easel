@@ -3,6 +3,10 @@
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
 //! Motion-as-slideshow session: timed still Apply through the native wallpaper backend.
+//!
+//! Cadence is a configured **poll interval** (`PlaybackPolicy::still_slideshow_interval_ms`),
+//! not container/video framerate. Still wallpaper APIs are settings-channel writes and
+//! cannot simulate smooth video; continuous under-icon playback remains Plasma-only.
 
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -23,7 +27,7 @@ use crate::apply_service::apply_cache_dir;
 use crate::automation_session::automation_store;
 use crate::display_session;
 
-const TICK: Duration = Duration::from_millis(50);
+const TICK: Duration = Duration::from_millis(100);
 const MAX_VIDEO_FRAMES: usize = 24;
 
 /// Builds a slideshow session for GIF/video through still-backend Apply.
@@ -31,15 +35,20 @@ pub fn start_slideshow_session(
     source: &Path,
     profile: &Profile,
 ) -> Result<Box<dyn LiveWallpaperSession>, String> {
-    let frames = extract_motion_frames(source)?;
+    let interval_ms = profile.playback.effective_still_slideshow_interval_ms();
+    let mut frames = extract_motion_frames(source, interval_ms)?;
     if frames.is_empty() {
         return Err("slideshow produced no frames".into());
     }
-    let session = SlideshowSession::start(frames, profile.clone(), profile.playback)?;
+    // Apply cadence is the configured poll interval (rate-scaled), not GIF/video FPS.
+    for frame in &mut frames {
+        frame.delay_ms = interval_ms;
+    }
+    let session = SlideshowSession::start(frames, profile.clone(), profile.playback, interval_ms)?;
     Ok(Box::new(session))
 }
 
-fn extract_motion_frames(source: &Path) -> Result<Vec<MotionFrame>, String> {
+fn extract_motion_frames(source: &Path, interval_ms: u64) -> Result<Vec<MotionFrame>, String> {
     let extension = source
         .extension()
         .and_then(|value| value.to_str())
@@ -60,21 +69,25 @@ fn extract_motion_frames(source: &Path) -> Result<Vec<MotionFrame>, String> {
         return extract_gif_frames(source, &out, MAX_MOTION_FRAMES)
             .map_err(|error| error.to_string());
     }
-    extract_video_frames_ffmpeg(source, &out, MAX_VIDEO_FRAMES)
+    extract_video_frames_ffmpeg(source, &out, MAX_VIDEO_FRAMES, interval_ms)
 }
 
 fn extract_video_frames_ffmpeg(
     source: &Path,
     output_dir: &Path,
     max_frames: usize,
+    interval_ms: u64,
 ) -> Result<Vec<MotionFrame>, String> {
-    // Optional host toolchain — same policy as docs (no required ffmpeg crate dep).
+    // Sample sparsely to match the Apply poll — not a video framerate.
+    // `interval_ms` is clamped to ≤60_000, so the f64 cast is exact.
+    #[allow(clippy::cast_precision_loss)]
+    let fps = (1000.0 / interval_ms as f64).clamp(0.2, 2.0);
     let status = std::process::Command::new("ffmpeg")
         .args(["-hide_banner", "-loglevel", "error", "-y", "-i"])
         .arg(source)
         .args([
             "-vf",
-            "fps=2,scale='min(1920,iw)':-2",
+            &format!("fps={fps:.3},scale='min(1920,iw)':-2"),
             "-frames:v",
             &max_frames.to_string(),
             "-start_number",
@@ -104,16 +117,15 @@ fn extract_video_frames_ffmpeg(
     if paths.is_empty() {
         return Err("ffmpeg produced no PNG frames".into());
     }
-    let delay_ms = 500u64;
     let mut media_time_ms = 0u64;
     let mut frames = Vec::with_capacity(paths.len());
     for path in paths {
         frames.push(MotionFrame {
             path,
-            delay_ms,
+            delay_ms: interval_ms,
             media_time_ms,
         });
-        media_time_ms = media_time_ms.saturating_add(delay_ms);
+        media_time_ms = media_time_ms.saturating_add(interval_ms);
     }
     Ok(frames)
 }
@@ -122,6 +134,7 @@ struct SlideshowInner {
     frames: Vec<MotionFrame>,
     profile: Profile,
     policy: PlaybackPolicy,
+    interval_ms: u64,
     index: usize,
     remaining_ms: u64,
     manual_pause: bool,
@@ -140,15 +153,16 @@ impl SlideshowSession {
         frames: Vec<MotionFrame>,
         profile: Profile,
         policy: PlaybackPolicy,
+        interval_ms: u64,
     ) -> Result<Self, String> {
-        let first_delay = frames[0].delay_ms;
         let raster_cache = vec![None; frames.len()];
         let inner = Arc::new(Mutex::new(SlideshowInner {
             frames,
             profile,
             policy,
+            interval_ms,
             index: 0,
-            remaining_ms: first_delay,
+            remaining_ms: interval_ms,
             manual_pause: false,
             raster_cache,
         }));
@@ -234,33 +248,38 @@ fn slideshow_worker(inner: &Arc<Mutex<SlideshowInner>>, stop: &Arc<AtomicBool>) 
         }
         if delta >= guard.remaining_ms {
             let overflow = delta - guard.remaining_ms;
-            advance_frame(&mut guard);
-            if overflow < guard.remaining_ms {
-                guard.remaining_ms -= overflow;
+            if advance_frame(&mut guard) {
+                if overflow < guard.remaining_ms {
+                    guard.remaining_ms = guard.remaining_ms.saturating_sub(overflow);
+                }
+                let _ = apply_frame_locked(&mut guard);
             }
-            let _ = apply_frame_locked(&mut guard);
         } else {
             guard.remaining_ms -= delta;
         }
     }
 }
 
-fn advance_frame(inner: &mut SlideshowInner) {
+/// Advances to the next frame. Returns `true` when a new still should be Applied.
+fn advance_frame(inner: &mut SlideshowInner) -> bool {
     let next = inner.index + 1;
     if next >= inner.frames.len() {
         match inner.policy.loop_mode {
             LoopMode::Loop => {
                 inner.index = 0;
-                inner.remaining_ms = inner.frames[0].delay_ms;
+                inner.remaining_ms = inner.interval_ms;
+                true
             }
             LoopMode::Once => {
-                // Hold final frame.
+                // Hold final frame; do not re-Apply every poll.
                 inner.remaining_ms = u64::MAX / 4;
+                false
             }
         }
     } else {
         inner.index = next;
-        inner.remaining_ms = inner.frames[inner.index].delay_ms;
+        inner.remaining_ms = inner.interval_ms;
+        true
     }
 }
 

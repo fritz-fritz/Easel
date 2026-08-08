@@ -31,15 +31,18 @@ hosts; dense solar on Plasma uses still-frame IPC (ADR 0006–0008).
 | Path | Backend id | Tier | Notes |
 | --- | --- | --- | --- |
 | KDE Plasma 6 + Easel plugin | `plasma6-live` | supported | Continuous shared-clock IPC (Stage 6). Preferred when available. |
-| Any session with a still backend | `still-slideshow` | supported (slideshow) | Sample GIF/video into stills; timed `WallpaperBackend::apply` (ADR 0014). Last frame persists after Easel exits. |
+| Any session with a still backend | `still-slideshow` | supported (slideshow) | Sample GIF/video into stills; timed `WallpaperBackend::apply` paced by `PlaybackPolicy::still_slideshow_interval_ms` (default 2 s, floor 500 ms — not video FPS; ADR 0014). Last frame persists after Easel exits. |
 | Extraction / Apply failure | — | poster fallback | Single poster through the still backend. |
 
 Public Windows/macOS wallpaper APIs remain still-image only (ADR 0010). Motion outside Plasma
-uses those still APIs as a slideshow rather than WorkerW / private AppKit hosts.
+uses those still APIs as a **poll-driven slideshow**, not WorkerW / private AppKit hosts.
+Still backends cannot transition fast enough to simulate video; continuous under-icon playback
+stays Plasma-plugin-only. Windows `SetSlideshow` is a folder playlist API and is not used for
+per-display motion crops.
 
 ## Stage 7 remaining slices
 
 - macOS packaging / distribution polish.
 - Perspective / viewer correction + calibration UI.
 - Workspace / activity / lock-screen only where stable public APIs exist.
-- Optional: raise slideshow fidelity (more frames / adaptive delay) within backend budgets.
+- Optional: Windows equal-interval folder `SetSlideshow` for still rotations (not motion crops).

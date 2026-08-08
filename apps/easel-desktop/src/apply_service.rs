@@ -105,7 +105,11 @@ fn start_slideshow_motion(
     let session = crate::slideshow_session::start_slideshow_session(source, profile)?;
     let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;
     replace_live_session(session)?;
-    Ok(format!("motion slideshow via {} (ADR 0014)", backend.id()))
+    let interval = profile.playback.effective_still_slideshow_interval_ms();
+    Ok(format!(
+        "motion slideshow via {} every {interval} ms (ADR 0014)",
+        backend.id()
+    ))
 }
 
 fn start_live_session(

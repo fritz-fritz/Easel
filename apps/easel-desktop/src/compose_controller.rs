@@ -13,7 +13,11 @@ use std::thread;
 
 use cxx_qt::{CxxQtThread, CxxQtType, Threading};
 use cxx_qt_lib::{QString, QStringList};
-use easel_core::{AssetId, AssetLocation, DynamicStillSet, FitMode, LayoutMode, Profile};
+use easel_core::{
+    AssetId, AssetLocation, DEFAULT_STILL_SLIDESHOW_INTERVAL_MS, DynamicStillSet, FitMode,
+    LayoutMode, LoopMode, MAX_STILL_SLIDESHOW_INTERVAL_MS, MIN_STILL_SLIDESHOW_INTERVAL_MS,
+    Profile,
+};
 use easel_library::{animated_image_extension, video_extension};
 use easel_platform::{
     DisplayWallpaper, WallpaperOutput, probe_live_wallpaper_backend, select_wallpaper_backend,
@@ -21,7 +25,7 @@ use easel_platform::{
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 use url::Url;
 
-use crate::apply_service::{apply_live, resolve_live_poster_source};
+use crate::apply_service::{apply_live, apply_live_poster_fallback, resolve_live_poster_source};
 use crate::display_session::{current_displays, current_preview_displays};
 
 #[cxx_qt::bridge]
@@ -50,6 +54,7 @@ mod qobject {
         #[qproperty(QString, profile_name)]
         #[qproperty(i32, media_mode_index)]
         #[qproperty(i32, motion_mode_index)]
+        #[qproperty(i32, still_slideshow_interval_ms)]
         #[qproperty(QString, motion_source_url)]
         #[qproperty(QString, motion_diagnostics)]
         #[qproperty(QString, timeline_preview)]
@@ -99,6 +104,7 @@ pub struct ComposeControllerRust {
     profile_name: QString,
     media_mode_index: i32,
     motion_mode_index: i32,
+    still_slideshow_interval_ms: i32,
     motion_source_url: QString,
     motion_diagnostics: QString,
     timeline_preview: QString,
@@ -126,6 +132,8 @@ impl Default for ComposeControllerRust {
             profile_name: QString::from("Compose"),
             media_mode_index: 0,
             motion_mode_index: 0,
+            still_slideshow_interval_ms: i32::try_from(DEFAULT_STILL_SLIDESHOW_INTERVAL_MS)
+                .unwrap_or(2_000),
             motion_source_url: QString::default(),
             motion_diagnostics: QString::from("Open a local GIF or video to preview motion."),
             timeline_preview: QString::from(
@@ -245,10 +253,13 @@ impl qobject::ComposeController {
                 }
             };
             let profile = compose_profile_snapshot(self.as_ref());
+            let poster_only = *self.motion_mode_index() == 2;
             self.as_mut().set_apply_busy(true);
             let live = probe_live_wallpaper_backend();
-            let status = if live.supported {
-                "Starting live wallpaper…"
+            let status = if poster_only {
+                "Rendering poster wallpaper…"
+            } else if live.supported {
+                "Starting motion wallpaper…"
             } else {
                 "Rendering poster-fallback wallpaper…"
             };
@@ -259,6 +270,7 @@ impl qobject::ComposeController {
                     source: PathBuf::from(&source),
                     poster_source: poster,
                     profile,
+                    poster_only,
                     qt_thread,
                 }))
                 .is_err()
@@ -504,6 +516,15 @@ fn compose_profile_snapshot(controller: Pin<&qobject::ComposeController>) -> Pro
         .collect();
     if *controller.media_mode_index() == 2 {
         profile.presentation = easel_core::PresentationMode::LiveMedia;
+        profile.playback.loop_mode = match *controller.motion_mode_index() {
+            1 => LoopMode::Once,
+            _ => LoopMode::Loop,
+        };
+        let interval = u64::try_from(*controller.still_slideshow_interval_ms()).unwrap_or(0);
+        profile.playback.still_slideshow_interval_ms = interval.clamp(
+            MIN_STILL_SLIDESHOW_INTERVAL_MS,
+            MAX_STILL_SLIDESHOW_INTERVAL_MS,
+        );
     }
     profile
 }
@@ -534,6 +555,8 @@ struct ApplyLivePosterJob {
     source: PathBuf,
     poster_source: PathBuf,
     profile: Profile,
+    /// When true, Apply only the poster still (no continuous host / slideshow).
+    poster_only: bool,
     qt_thread: CxxQtThread<qobject::ComposeController>,
 }
 
@@ -672,7 +695,11 @@ fn run_apply(job: ApplyJob) {
 
 fn run_apply_live_poster(job: ApplyLivePosterJob) {
     let generation = job.generation;
-    let apply_result = apply_live(&job.source, &job.poster_source, &job.profile);
+    let apply_result = if job.poster_only {
+        apply_live_poster_fallback(&job.poster_source, &job.profile)
+    } else {
+        apply_live(&job.source, &job.poster_source, &job.profile)
+    };
     finish_apply(job.qt_thread, generation, apply_result);
 }
 

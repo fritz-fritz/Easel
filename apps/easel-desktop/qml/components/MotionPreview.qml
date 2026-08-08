@@ -8,7 +8,8 @@ import QtMultimedia
 
 // Compose preview for local GIF / video. Still multi-display crop preview remains
 // in MonitorPreview. Apply prefers continuous Plasma live when the plugin is
-// installed; otherwise still-backend slideshow (ADR 0014), with a single poster
+// installed; otherwise still-backend slideshow at a configured Apply poll interval
+// (ADR 0014 — not video framerate), with a single poster
 // if extraction/Apply fails. This surface remains a single-display muted preview
 // + diagnostics.
 Frame {

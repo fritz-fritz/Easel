@@ -256,6 +256,7 @@ mod tests {
             loop_mode,
             rate,
             maximum_frames_per_second: max_fps,
+            still_slideshow_interval_ms: crate::DEFAULT_STILL_SLIDESHOW_INTERVAL_MS,
             pause_on_battery: true,
             pause_for_full_screen_app: true,
         }

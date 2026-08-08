@@ -58,8 +58,9 @@ pub use physical::{
 };
 pub use playback::{PlaybackClock, PlaybackClockError, PresentationSample};
 pub use profile::{
-    FitMode, LayoutMode, LoopMode, PROFILE_SCHEMA_VERSION, PlaybackPolicy, PresentationMode,
-    Profile, ProfileId, ProfileValidationError,
+    DEFAULT_STILL_SLIDESHOW_INTERVAL_MS, FitMode, LayoutMode, LoopMode,
+    MAX_STILL_SLIDESHOW_INTERVAL_MS, MIN_STILL_SLIDESHOW_INTERVAL_MS, PROFILE_SCHEMA_VERSION,
+    PlaybackPolicy, PresentationMode, Profile, ProfileId, ProfileValidationError,
 };
 pub use rotation::{
     ROTATION_QUEUE_SCHEMA_VERSION, RotationError, RotationPolicy, RotationQueue, RotationQueueId,

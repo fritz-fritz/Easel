@@ -18,10 +18,14 @@ use crate::raster::{RasterError, atomic_write_png};
 pub const MAX_MOTION_FRAMES: usize = 64;
 
 /// Minimum per-frame hold used when the container reports a zero delay.
+///
+/// Still-backend Apply cadence is **not** driven by this value — see
+/// [`easel_core::PlaybackPolicy::still_slideshow_interval_ms`].
 pub const DEFAULT_FRAME_DELAY_MS: u64 = 100;
 
-/// Floor applied when scheduling still-backend Apply ticks (avoids xfconf thrash).
-pub const MIN_SLIDESHOW_DELAY_MS: u64 = 200;
+/// Historical floor retained for callers that still clamp extracted delays.
+/// Prefer [`easel_core::MIN_STILL_SLIDESHOW_INTERVAL_MS`] for Apply polling.
+pub const MIN_SLIDESHOW_DELAY_MS: u64 = 500;
 
 /// One extracted still frame ready for composition / Apply.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -56,9 +60,9 @@ pub fn extract_gif_frames(
         let delay = frame.delay();
         let (numer, denom) = delay.numer_denom_ms();
         let raw_ms = u64::from(numer) / u64::from(denom.max(1));
-        let delay_ms = raw_ms
-            .max(DEFAULT_FRAME_DELAY_MS)
-            .max(MIN_SLIDESHOW_DELAY_MS);
+        // Preserve container timing for diagnostics / future native slideshow sets.
+        // Desktop still-slideshow remaps delays to PlaybackPolicy::still_slideshow_interval_ms.
+        let delay_ms = raw_ms.max(DEFAULT_FRAME_DELAY_MS);
         let buffer = frame.into_buffer();
         let path = output_dir.join(format!("frame-{index:04}.png"));
         write_rgba_png(&path, &buffer)?;
@@ -130,7 +134,8 @@ mod tests {
         let out = dir.join("out");
         let frames = extract_gif_frames(&gif, &out, MAX_MOTION_FRAMES).unwrap();
         assert_eq!(frames.len(), 2);
-        assert!(frames[0].delay_ms >= MIN_SLIDESHOW_DELAY_MS);
+        assert!(frames[0].delay_ms >= DEFAULT_FRAME_DELAY_MS);
+        assert_eq!(frames[0].delay_ms, 100); // 10ms container delay → default floor
         assert!(frames[0].path.is_file());
         assert!(frames[1].path.is_file());
         let _ = std::fs::remove_dir_all(&dir);
