@@ -312,7 +312,7 @@ pub enum BundleEncodeError {
 mod tests {
     use super::*;
     use easel_core::{
-        AssetId, DynamicStillSet, FitMode, LayoutMode, ProfileId, all_layout_fixtures,
+        AssetId, DynamicStillSet, FitMode, LayoutMode, ProfileId, ViewerPose, all_layout_fixtures,
     };
     use easel_render::CompositionSettings;
     use image::{Rgba, RgbaImage};
@@ -400,6 +400,7 @@ mod tests {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             NativeDynamicFormat::AppleHeic,
             &out,

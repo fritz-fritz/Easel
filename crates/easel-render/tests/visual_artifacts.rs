@@ -10,6 +10,7 @@ use std::path::PathBuf;
 use easel_core::{
     BezelInsets, Display, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters,
     NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, Profile, ScaleFactor,
+    ViewerPose,
 };
 use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest};
 
@@ -145,6 +146,50 @@ fn apply_payload_fixture_digests_are_stable() {
         .collect();
 
     assert_eq!(digests, [0x93a6_71f4, 0xc5e4_1d19, 0xb393_529c,]);
+}
+
+#[test]
+fn perspective_pose_changes_apply_payload_digests() {
+    let source = PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("tests/fixtures/quadrants_32.png");
+    let out_dir = std::env::temp_dir().join(format!("easel-visual-persp-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&out_dir);
+    std::fs::create_dir_all(&out_dir).expect("outdir");
+
+    let displays = fixture_displays();
+    let mut profile = Profile::new("visual");
+    profile.fit_mode = FitMode::Cover;
+    profile.layout_mode = LayoutMode::PhysicalSpan;
+    profile.displays = displays.iter().map(|display| display.id).collect();
+    let composition = CompositionSettings::from_profile(&profile).with_viewer(ViewerPose {
+        enabled: true,
+        view_distance_mm: 600.0,
+        eye_offset_x_mm: 0.0,
+        eye_offset_y_mm: 0.0,
+    });
+
+    let outputs = RasterJob {
+        request: RenderRequest {
+            source_path: source,
+            displays,
+            composition,
+            purpose: RenderPurpose::StaticWallpaper,
+        },
+        output_dir: out_dir,
+    }
+    .execute()
+    .expect("raster");
+
+    let digests: Vec<u32> = outputs
+        .iter()
+        .map(|output| {
+            let bytes = std::fs::read(&output.path).expect("read png");
+            crc32fast::hash(&bytes)
+        })
+        .collect();
+
+    // Distinct from axis-aligned apply_payload_fixture_digests_are_stable.
+    assert_ne!(digests, [0x93a6_71f4, 0xc5e4_1d19, 0xb393_529c,]);
+    assert_eq!(digests, [0xd3c4_0934, 0x5352_c610, 0x2c15_a094]);
 }
 
 #[test]

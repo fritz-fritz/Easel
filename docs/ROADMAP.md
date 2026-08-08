@@ -40,8 +40,8 @@ Exit: repeatable output for mixed-resolution, mixed-scale, and physically mismat
 
 **Status:** Implemented for still images (physical-span planner with PPI/bezel
 correction, layout fixtures, arrangement editing with snap + size/bezel overrides,
-Compose Correction mode, cache keys including arrangement geometry). Perspective
-correction remains Stage 7.
+Compose Correction mode, cache keys including arrangement geometry). Distance-first
+perspective correction landed in Stage 7.5 (ADR 0015); per-display angles remain.
 
 ## Stage 3 — Library and compliant discovery
 
@@ -136,15 +136,17 @@ Animated/live media on non-Plasma Linux desktops remains Stage 7.
 
 - Additional Linux desktops based on explicit backend capability tests.
 - macOS backend and packaging.
-- Perspective/viewer correction with a dedicated calibration experience.
+- Perspective/viewer correction (distance-first landed in Stage 7.5; angles + dedicated
+  calibration experience remain).
 - Workspace/activity support only where stable public interfaces exist.
 - Lock-screen support only where authorized platform APIs permit it.
 
 Exit: published support matrix is backed by automated tests and manual validation evidence.
 
 **Status:** In progress. Stage 7.1 (Linux still breadth), Stage 7.2 (GNOME stills),
-Stage 7.3 (dynamic stills feature-complete across still backends), and Stage 7.4
-(cross-platform motion via still-backend slideshow) landed:
+Stage 7.3 (dynamic stills feature-complete across still backends), Stage 7.4
+(cross-platform motion via still-backend slideshow), and Stage 7.5 (distance-first
+perspective / viewer correction) landed:
 
 - Probe chain `plasma6` → `xfce-xfconf` → `gnome-gsettings` → `x11-feh` (ADR 0011 + 0012).
 - Published matrix in `docs/PLATFORM_SUPPORT.md` (still + dynamic + motion).
@@ -154,8 +156,11 @@ Stage 7.3 (dynamic stills feature-complete across still backends), and Stage 7.4
 - Motion: `plasma6-live` when the plugin is installed; otherwise `still-slideshow`
   (sample GIF/video → native still Apply on a configured wallpaper poll interval,
   default 2 s — not video FPS; ADR 0014).
-- Remaining: macOS packaging, perspective calibration UI, workspace/activity/lock-screen
-  where APIs allow.
+- Perspective: optional global `ViewerPose` on arrangement schema v2; Compose Physical
+  calibration controls; projective still raster when enabled; Plasma live UV stays
+  axis-aligned (ADR 0015). Per-display tilt/yaw remains later.
+- Remaining: macOS packaging, per-display monitor angles / dedicated calibration wizard,
+  workspace/activity/lock-screen where APIs allow.
 
 ## Stage 8 — Production hardening
 

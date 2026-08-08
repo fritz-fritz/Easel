@@ -121,7 +121,8 @@ fn start_live_session(
     let backend = select_live_wallpaper_backend().map_err(|error| error.to_string())?;
     let displays = resolve_profile_displays(profile)?;
     let source_size = resolve_live_source_size(source)?;
-    let composition = CompositionSettings::from_profile(profile);
+    let composition =
+        CompositionSettings::from_profile(profile).with_viewer(display_session::viewer_pose());
     let crops =
         plan_live_crops(source_size, &displays, &composition).map_err(|error| error.to_string())?;
 
@@ -281,7 +282,8 @@ fn apply_per_display_rasters(
     let request = RenderRequest {
         source_path: source.to_path_buf(),
         displays: displays.clone(),
-        composition: CompositionSettings::from_profile(&request_profile),
+        composition: CompositionSettings::from_profile(&request_profile)
+            .with_viewer(display_session::viewer_pose()),
         purpose,
     };
     let output_dir = apply_cache_dir();
@@ -365,7 +367,8 @@ pub fn apply_native_dynamic(
 
     let mut request_profile = profile.clone();
     request_profile.displays = displays.iter().map(|display| display.id).collect();
-    let composition = CompositionSettings::from_profile(&request_profile);
+    let composition = CompositionSettings::from_profile(&request_profile)
+        .with_viewer(display_session::viewer_pose());
     let output_dir = native_bundle_cache_dir(set);
     let fingerprint = native_host_fingerprint(set, &displays, &composition);
     let stored = last_host_fingerprint

@@ -23,8 +23,9 @@ mod schedule;
 mod suitability;
 
 pub use arrangement::{
-    ARRANGEMENT_SCHEMA_VERSION, ArrangementError, DisplayArrangement, DisplayEvidence,
-    ObservedDisplay, approximate_physical_origin, match_displays,
+    ARRANGEMENT_SCHEMA_VERSION, ArrangementError, DEFAULT_VIEW_DISTANCE_MM, DisplayArrangement,
+    DisplayEvidence, MAX_VIEW_DISTANCE_MM, MIN_VIEW_DISTANCE_MM, ObservedDisplay, ViewerPose,
+    approximate_physical_origin, match_displays,
 };
 pub use asset::{
     AssetId, AssetLicense, AssetLocation, Attribution, ContentSafety, FrameRate, MediaAsset,

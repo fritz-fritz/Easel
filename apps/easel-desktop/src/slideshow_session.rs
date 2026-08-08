@@ -357,7 +357,8 @@ fn compose_frame(
         request: RenderRequest {
             source_path: source.to_path_buf(),
             displays: displays.clone(),
-            composition: CompositionSettings::from_profile(&request_profile),
+            composition: CompositionSettings::from_profile(&request_profile)
+                .with_viewer(display_session::viewer_pose()),
             purpose: RenderPurpose::LivePosterFrame,
         },
         output_dir: apply_cache_dir().join(format!("slideshow-{}", std::process::id())),

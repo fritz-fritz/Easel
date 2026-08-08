@@ -8,14 +8,15 @@ use std::path::PathBuf;
 
 use easel_core::{
     Display, DisplayId, DisplayValidationError, FitMode, LayoutMode, NativePixelSize,
-    PhysicalLayoutError, Profile, ProfileValidationError, content_bounds, content_rect,
+    PhysicalLayoutError, Profile, ProfileValidationError, ViewerPose, content_bounds, content_rect,
 };
 use thiserror::Error;
 
 use crate::fit::plan_fit;
+use crate::perspective::AngularPerspective;
 
 /// Version token included in cache keys when raster semantics change.
-pub const RENDERER_VERSION: &str = "3";
+pub const RENDERER_VERSION: &str = "4";
 
 /// Why a deterministic raster output is being produced.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -25,13 +26,15 @@ pub enum RenderPurpose {
     StaticWallpaper,
     /// The safe fallback shown before or instead of live playback.
     ///
-    /// Crop/placement math must match [`Self::LiveCompositorFrame`] so poster
-    /// fallback and live surfaces stay pixel-aligned for the same composition.
+    /// Without perspective, crop/placement matches [`Self::LiveCompositorFrame`].
+    /// With an active viewer pose (ADR 0015), posters use projective stills while
+    /// continuous live UV stays axis-aligned for this stage.
     LivePosterFrame,
     /// Canonical live crop/placement purpose for a shared-clock compositor.
     ///
     /// [`crate::plan_live_crops`] plans with this purpose. Hosts that cannot
-    /// apply native video transforms rasterize these ops instead.
+    /// apply native video transforms rasterize these ops instead. Stage 7.5 keeps
+    /// this path axis-aligned even when perspective is enabled on stills.
     LiveCompositorFrame,
 }
 
@@ -125,10 +128,25 @@ pub struct CompositionSettings {
     pub focal_x: f64,
     /// Vertical focal point from zero through one.
     pub focal_y: f64,
+    /// Optional global viewer pose for PhysicalSpan perspective (ADR 0015).
+    pub viewer: ViewerPose,
+}
+
+impl Default for CompositionSettings {
+    fn default() -> Self {
+        Self {
+            fit_mode: FitMode::Cover,
+            layout_mode: LayoutMode::PhysicalSpan,
+            zoom: 1.0,
+            focal_x: 0.5,
+            focal_y: 0.5,
+            viewer: ViewerPose::default(),
+        }
+    }
 }
 
 impl CompositionSettings {
-    /// Extracts composition fields from a validated profile.
+    /// Extracts composition fields from a validated profile (viewer pose disabled).
     #[must_use]
     pub fn from_profile(profile: &Profile) -> Self {
         Self {
@@ -137,8 +155,16 @@ impl CompositionSettings {
             zoom: profile.zoom,
             focal_x: profile.focal_x,
             focal_y: profile.focal_y,
+            viewer: ViewerPose::default(),
         }
         .normalized()
+    }
+
+    /// Returns a copy with the arrangement viewer pose applied.
+    #[must_use]
+    pub fn with_viewer(mut self, viewer: ViewerPose) -> Self {
+        self.viewer = viewer;
+        self.normalized()
     }
 
     /// Returns settings with finite zoom ≥ 1 and focal points clamped to `0..=1`.
@@ -154,6 +180,7 @@ impl CompositionSettings {
             },
             focal_x: self.focal_x.clamp(0.0, 1.0),
             focal_y: self.focal_y.clamp(0.0, 1.0),
+            viewer: self.viewer,
         }
     }
 }
@@ -181,7 +208,7 @@ pub struct OutputPlan {
 }
 
 /// Per-display crop and placement once source dimensions are known.
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct OutputOperation {
     /// Target display.
     pub display_id: DisplayId,
@@ -189,12 +216,14 @@ pub struct OutputOperation {
     pub native_size: NativePixelSize,
     /// Canvas size; identical to [`Self::native_size`] for Stage 1.
     pub canvas_size: NativePixelSize,
-    /// Region sampled from the oriented source image.
+    /// Region sampled from the oriented source image (AA path / projective bounds).
     pub source_crop: PixelRect,
     /// Placement of the resampled crop on the output canvas.
     pub destination_rect: PixelRect,
     /// Fill color behind uncovered canvas pixels.
     pub letterbox_color: LetterboxColor,
+    /// When set, raster samples projectively instead of AA crop+resize (ADR 0015).
+    pub perspective: Option<AngularPerspective>,
 }
 
 /// Deterministic plan produced before decoding media bytes.
@@ -285,6 +314,7 @@ impl RenderPlan {
                     source_crop,
                     destination_rect,
                     letterbox_color: LetterboxColor::default(),
+                    perspective: None,
                 }
             })
             .collect()
@@ -306,11 +336,60 @@ impl RenderPlan {
 
         let (src_x, src_y, src_w, src_h, image_x, image_y, image_w, image_h) =
             place_source_on_span(source_size, span_w, span_h, composition);
+        let abs_image_x = image_x + span.x.0;
+        let abs_image_y = image_y + span.y.0;
+        let eye_x = span.x.0 + span_w * 0.5 + composition.viewer.eye_offset_x_mm;
+        let eye_y = span.y.0 + span_h * 0.5 + composition.viewer.eye_offset_y_mm;
+
+        // Cover/Stretch/Native paint the image across the span; Contain uses the placed image rect.
+        let (map_x, map_y, map_w, map_h) = match composition.fit_mode {
+            FitMode::Contain => (abs_image_x, abs_image_y, image_w, image_h),
+            FitMode::Cover | FitMode::Stretch | FitMode::Native => {
+                (span.x.0, span.y.0, span_w, span_h)
+            }
+        };
 
         let mut operations = Vec::with_capacity(self.displays.len());
         for display in &self.displays {
             let content = content_rect(display)?;
             let native = display.native_pixels;
+            // Live compositor UV stays AA; stills/posters get projective sampling.
+            let perspective = if self.purpose == RenderPurpose::LiveCompositorFrame {
+                None
+            } else {
+                AngularPerspective::new(
+                    composition.viewer,
+                    eye_x,
+                    eye_y,
+                    content.x.0,
+                    content.y.0,
+                    content.width.0,
+                    content.height.0,
+                    map_x,
+                    map_y,
+                    map_w,
+                    map_h,
+                    src_x,
+                    src_y,
+                    src_w,
+                    src_h,
+                )
+            };
+
+            if let Some(map) = perspective {
+                let source_crop = map.source_bounds(source_size.width, source_size.height);
+                operations.push(OutputOperation {
+                    display_id: display.id,
+                    native_size: native,
+                    canvas_size: native,
+                    source_crop,
+                    destination_rect: PixelRect::full(native),
+                    letterbox_color: LetterboxColor::default(),
+                    perspective: Some(map),
+                });
+                continue;
+            }
+
             let (source_crop, destination_rect) = map_content_to_operation(
                 source_size,
                 native,
@@ -322,8 +401,8 @@ impl RenderPlan {
                 src_y,
                 src_w,
                 src_h,
-                image_x + span.x.0,
-                image_y + span.y.0,
+                abs_image_x,
+                abs_image_y,
                 image_w,
                 image_h,
                 composition.fit_mode,
@@ -335,6 +414,7 @@ impl RenderPlan {
                 source_crop,
                 destination_rect,
                 letterbox_color: LetterboxColor::default(),
+                perspective: None,
             });
         }
         Ok(operations)
@@ -555,7 +635,7 @@ mod tests {
     use super::*;
     use easel_core::{
         BezelInsets, LogicalRect, Millimeters, PhysicalPoint, PhysicalSize, PhysicalSizeSource,
-        ScaleFactor,
+        ScaleFactor, ViewerPose,
     };
 
     fn sample_display(width: u32, height: u32) -> Display {
@@ -611,6 +691,7 @@ mod tests {
                     zoom: 1.0,
                     focal_x: 0.5,
                     focal_y: 0.5,
+                    viewer: ViewerPose::default(),
                 },
             )
             .expect("ops");
@@ -635,6 +716,7 @@ mod tests {
                     zoom: 0.25,
                     focal_x: 1.5,
                     focal_y: -0.5,
+                    viewer: ViewerPose::default(),
                 },
             )
             .expect("ops");
@@ -676,11 +758,131 @@ mod tests {
                     zoom: 1.0,
                     focal_x: 0.5,
                     focal_y: 0.5,
+                    viewer: ViewerPose::default(),
                 },
             )
             .expect("ops");
         assert_eq!(ops.len(), 2);
         assert!(ops[0].source_crop.x < ops[1].source_crop.x);
         assert_eq!(ops[0].source_crop.width, ops[1].source_crop.width);
+    }
+
+    fn two_physical_row() -> (Display, Display) {
+        let mut left = sample_display(100, 100);
+        left.id = DisplayId::from_u128(1);
+        left.physical_size = PhysicalSize {
+            width: Millimeters(400.0),
+            height: Millimeters(300.0),
+        };
+        let mut right = sample_display(100, 100);
+        right.id = DisplayId::from_u128(2);
+        right.physical_origin = PhysicalPoint {
+            x: Millimeters(400.0),
+            y: Millimeters(0.0),
+        };
+        right.physical_size = PhysicalSize {
+            width: Millimeters(400.0),
+            height: Millimeters(300.0),
+        };
+        (left, right)
+    }
+
+    #[test]
+    fn inactive_viewer_matches_axis_aligned_physical_ops() {
+        let (left, right) = two_physical_row();
+        let plan = RenderPlan::for_displays(&[left, right]).expect("plan");
+        let source = NativePixelSize {
+            width: 200,
+            height: 100,
+        };
+        let base = CompositionSettings {
+            fit_mode: FitMode::Cover,
+            layout_mode: LayoutMode::PhysicalSpan,
+            zoom: 1.0,
+            focal_x: 0.5,
+            focal_y: 0.5,
+            viewer: ViewerPose::default(),
+        };
+        let identity = plan.operations(source, &base).expect("identity");
+        let disabled = plan
+            .operations(
+                source,
+                &base.with_viewer(ViewerPose {
+                    enabled: false,
+                    view_distance_mm: 600.0,
+                    eye_offset_x_mm: 10.0,
+                    eye_offset_y_mm: -5.0,
+                }),
+            )
+            .expect("disabled");
+        assert_eq!(identity, disabled);
+        assert!(identity.iter().all(|op| op.perspective.is_none()));
+    }
+
+    #[test]
+    fn active_viewer_changes_physical_ops_and_sets_perspective() {
+        let (left, right) = two_physical_row();
+        let plan = RenderPlan::for_displays(&[left, right]).expect("plan");
+        let source = NativePixelSize {
+            width: 200,
+            height: 100,
+        };
+        let base = CompositionSettings {
+            fit_mode: FitMode::Cover,
+            layout_mode: LayoutMode::PhysicalSpan,
+            zoom: 1.0,
+            focal_x: 0.5,
+            focal_y: 0.5,
+            viewer: ViewerPose::default(),
+        };
+        let identity = plan.operations(source, &base).expect("identity");
+        let perspective = plan
+            .operations(
+                source,
+                &base.with_viewer(ViewerPose {
+                    enabled: true,
+                    view_distance_mm: 600.0,
+                    eye_offset_x_mm: 0.0,
+                    eye_offset_y_mm: 0.0,
+                }),
+            )
+            .expect("perspective");
+        assert_ne!(identity, perspective);
+        assert!(perspective.iter().all(|op| op.perspective.is_some()));
+        assert!(identity.iter().all(|op| op.perspective.is_none()));
+    }
+
+    #[test]
+    fn live_compositor_purpose_stays_axis_aligned_with_viewer() {
+        let (left, right) = two_physical_row();
+        let displays = [left, right];
+        let source = NativePixelSize {
+            width: 200,
+            height: 100,
+        };
+        let composition = CompositionSettings {
+            fit_mode: FitMode::Cover,
+            layout_mode: LayoutMode::PhysicalSpan,
+            zoom: 1.0,
+            focal_x: 0.5,
+            focal_y: 0.5,
+            viewer: ViewerPose {
+                enabled: true,
+                view_distance_mm: 600.0,
+                eye_offset_x_mm: 0.0,
+                eye_offset_y_mm: 0.0,
+            },
+        };
+        let live = RenderPlan::for_purpose(&displays, RenderPurpose::LiveCompositorFrame)
+            .expect("live")
+            .operations(source, &composition)
+            .expect("live ops");
+        let poster = RenderPlan::for_purpose(&displays, RenderPurpose::LivePosterFrame)
+            .expect("poster")
+            .operations(source, &composition)
+            .expect("poster ops");
+        assert!(live.iter().all(|op| op.perspective.is_none()));
+        assert!(poster.iter().all(|op| op.perspective.is_some()));
+        assert_ne!(live, poster);
     }
 }

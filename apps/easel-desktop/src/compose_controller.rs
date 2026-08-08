@@ -27,7 +27,7 @@ use easel_render::{CompositionSettings, RasterJob, RenderPurpose, RenderRequest}
 use url::Url;
 
 use crate::apply_service::{apply_live, apply_live_poster_fallback, resolve_live_poster_source};
-use crate::display_session::{current_displays, current_preview_displays};
+use crate::display_session::{current_displays, current_preview_displays, viewer_pose};
 
 #[cxx_qt::bridge]
 mod qobject {
@@ -527,7 +527,7 @@ fn build_request(
     RenderRequest {
         source_path: PathBuf::from(source),
         displays,
-        composition: CompositionSettings::from_profile(&profile),
+        composition: CompositionSettings::from_profile(&profile).with_viewer(viewer_pose()),
         purpose: RenderPurpose::StaticWallpaper,
     }
 }

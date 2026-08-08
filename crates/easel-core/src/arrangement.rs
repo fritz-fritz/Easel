@@ -14,7 +14,67 @@ use crate::{
 };
 
 /// Current serialized arrangement schema.
-pub const ARRANGEMENT_SCHEMA_VERSION: u16 = 1;
+pub const ARRANGEMENT_SCHEMA_VERSION: u16 = 2;
+
+/// Default viewer distance when perspective correction is enabled (millimeters).
+pub const DEFAULT_VIEW_DISTANCE_MM: f64 = 600.0;
+
+/// Minimum accepted view distance when perspective is enabled.
+pub const MIN_VIEW_DISTANCE_MM: f64 = 200.0;
+
+/// Maximum accepted view distance when perspective is enabled.
+pub const MAX_VIEW_DISTANCE_MM: f64 = 5_000.0;
+
+/// Global viewer pose for optional perspective correction (ADR 0015).
+///
+/// Offsets are relative to the arrangement [`crate::content_bounds`] center.
+/// When [`Self::enabled`] is false, PhysicalSpan planning stays axis-aligned.
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct ViewerPose {
+    /// When false, ignore distance/offsets and use identity PhysicalSpan crops.
+    pub enabled: bool,
+    /// Eye distance in front of the coplanar panel plane (millimeters).
+    pub view_distance_mm: f64,
+    /// Lateral eye offset from the content-bounds center (millimeters).
+    pub eye_offset_x_mm: f64,
+    /// Vertical eye offset from the content-bounds center (millimeters).
+    pub eye_offset_y_mm: f64,
+}
+
+impl Default for ViewerPose {
+    fn default() -> Self {
+        Self {
+            enabled: false,
+            view_distance_mm: DEFAULT_VIEW_DISTANCE_MM,
+            eye_offset_x_mm: 0.0,
+            eye_offset_y_mm: 0.0,
+        }
+    }
+}
+
+impl ViewerPose {
+    /// True when projective correction should run (enabled + usable distance).
+    #[must_use]
+    pub fn is_active(self) -> bool {
+        self.enabled && self.view_distance_mm.is_finite() && self.view_distance_mm > 0.0
+    }
+
+    /// Validates pose fields. Inactive poses only require finite offsets/distance.
+    pub fn validate(self) -> Result<(), ArrangementError> {
+        if !self.view_distance_mm.is_finite()
+            || !self.eye_offset_x_mm.is_finite()
+            || !self.eye_offset_y_mm.is_finite()
+        {
+            return Err(ArrangementError::InvalidViewerPose);
+        }
+        if self.enabled
+            && !(MIN_VIEW_DISTANCE_MM..=MAX_VIEW_DISTANCE_MM).contains(&self.view_distance_mm)
+        {
+            return Err(ArrangementError::InvalidViewerPose);
+        }
+        Ok(())
+    }
+}
 
 /// Persisted multi-display layout with stable Easel identities.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
@@ -23,6 +83,9 @@ pub struct DisplayArrangement {
     pub schema_version: u16,
     /// Ordered displays in physical/logical layout order.
     pub displays: Vec<Display>,
+    /// Optional global viewer pose for perspective correction (ADR 0015).
+    #[serde(default)]
+    pub viewer: ViewerPose,
 }
 
 impl DisplayArrangement {
@@ -32,6 +95,7 @@ impl DisplayArrangement {
         Self {
             schema_version: ARRANGEMENT_SCHEMA_VERSION,
             displays: Vec::new(),
+            viewer: ViewerPose::default(),
         }
     }
 
@@ -40,19 +104,45 @@ impl DisplayArrangement {
         let arrangement = Self {
             schema_version: ARRANGEMENT_SCHEMA_VERSION,
             displays,
+            viewer: ViewerPose::default(),
         };
         arrangement.validate()?;
         Ok(arrangement)
     }
 
-    /// Validates schema version and every display record.
+    /// Upgrades older on-disk arrangements to the current schema.
+    pub fn migrate(mut self) -> Result<Self, ArrangementError> {
+        match self.schema_version {
+            1 => {
+                self.viewer = ViewerPose::default();
+                self.schema_version = ARRANGEMENT_SCHEMA_VERSION;
+                self.validate()?;
+                Ok(self)
+            }
+            ARRANGEMENT_SCHEMA_VERSION => {
+                self.validate()?;
+                Ok(self)
+            }
+            other => Err(ArrangementError::UnsupportedSchema(other)),
+        }
+    }
+
+    /// Validates schema version, viewer pose, and every display record.
     pub fn validate(&self) -> Result<(), ArrangementError> {
         if self.schema_version != ARRANGEMENT_SCHEMA_VERSION {
             return Err(ArrangementError::UnsupportedSchema(self.schema_version));
         }
+        self.viewer.validate()?;
         for display in &self.displays {
             display.validate()?;
         }
+        Ok(())
+    }
+
+    /// Replaces the global viewer pose after validation.
+    pub fn set_viewer(&mut self, viewer: ViewerPose) -> Result<(), ArrangementError> {
+        viewer.validate()?;
+        self.viewer = viewer;
         Ok(())
     }
 
@@ -240,6 +330,7 @@ pub fn match_displays(
     DisplayArrangement {
         schema_version: ARRANGEMENT_SCHEMA_VERSION,
         displays: matched,
+        viewer: previous.viewer,
     }
 }
 
@@ -308,6 +399,11 @@ pub enum ArrangementError {
     /// The requested display is not part of this arrangement.
     #[error("unknown display in arrangement: {0:?}")]
     UnknownDisplay(DisplayId),
+    /// Viewer pose fields are non-finite or outside the supported distance range.
+    #[error(
+        "viewer pose is invalid (distance must be between {MIN_VIEW_DISTANCE_MM} and {MAX_VIEW_DISTANCE_MM} mm when enabled)"
+    )]
+    InvalidViewerPose,
 }
 
 /// Convenience physical origin at the logical origin scaled by an approximate PPI.
@@ -487,5 +583,52 @@ mod tests {
             .expect("move");
         assert!((arrangement.displays[1].physical_origin.x.0 - 600.0).abs() < 1e-9);
         assert!((arrangement.displays[1].physical_origin.y.0 - 0.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn schema_v1_migrates_with_disabled_viewer() {
+        let mut arrangement =
+            DisplayArrangement::from_displays(vec![sample_display(1, "DP-1", "SN-1", 1920)])
+                .expect("valid");
+        arrangement.schema_version = 1;
+        let migrated = arrangement.migrate().expect("migrate");
+        assert_eq!(migrated.schema_version, ARRANGEMENT_SCHEMA_VERSION);
+        assert!(!migrated.viewer.enabled);
+        assert!(!migrated.viewer.is_active());
+    }
+
+    #[test]
+    fn rematch_preserves_viewer_pose() {
+        let mut previous =
+            DisplayArrangement::from_displays(vec![sample_display(1, "DP-1", "SN-1", 1920)])
+                .expect("valid");
+        previous
+            .set_viewer(ViewerPose {
+                enabled: true,
+                view_distance_mm: 800.0,
+                eye_offset_x_mm: 40.0,
+                eye_offset_y_mm: -10.0,
+            })
+            .expect("viewer");
+        let observed = observation_from(&previous.displays[0]);
+        let matched = match_displays(&previous, vec![observed]);
+        assert!(matched.viewer.enabled);
+        assert!((matched.viewer.view_distance_mm - 800.0).abs() < f64::EPSILON);
+        assert!((matched.viewer.eye_offset_x_mm - 40.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn enabled_viewer_rejects_out_of_range_distance() {
+        let mut arrangement =
+            DisplayArrangement::from_displays(vec![sample_display(1, "DP-1", "SN-1", 1920)])
+                .expect("valid");
+        assert_eq!(
+            arrangement.set_viewer(ViewerPose {
+                enabled: true,
+                view_distance_mm: 50.0,
+                ..ViewerPose::default()
+            }),
+            Err(ArrangementError::InvalidViewerPose)
+        );
     }
 }
