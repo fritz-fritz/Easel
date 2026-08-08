@@ -154,7 +154,7 @@ pub fn probe_presentation_support() -> PresentationSupport {
     let still = probe_wallpaper_backend();
     let live = probe_live_wallpaper_backend();
     PresentationSupport {
-        static_stills: still.available && still_output_supported(&still.capabilities),
+        static_stills: still.available && still_output_supported(still.capabilities),
         dynamic_stills: still.dynamic_stills != DynamicStillsHost::Unavailable,
         animated_images: live.supported && live.capabilities.animated_images,
         video: live.supported && live.capabilities.video,
@@ -168,7 +168,7 @@ pub fn probe_presentation_support() -> PresentationSupport {
 
 /// True when the backend can apply at least one still output shape.
 #[must_use]
-fn still_output_supported(capabilities: &BackendCapabilities) -> bool {
+fn still_output_supported(capabilities: BackendCapabilities) -> bool {
     capabilities.per_display_images || capabilities.virtual_desktop_image
 }
 
@@ -359,9 +359,9 @@ mod tests {
             virtual_desktop_image: true,
             ..BackendCapabilities::default()
         };
-        assert!(still_output_supported(&caps));
+        assert!(still_output_supported(caps));
         let neither = BackendCapabilities::default();
-        assert!(!still_output_supported(&neither));
+        assert!(!still_output_supported(neither));
     }
 
     #[test]
