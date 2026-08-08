@@ -177,31 +177,23 @@ impl qobject::ComposeController {
     }
 
     fn refresh_preview(mut self: Pin<&mut Self>) {
+        // Capability probes (qdbus/xfconf/gsettings/…) stay in
+        // `refresh_media_capability_hint()` so routine preview refreshes do not
+        // shell out on the UI thread.
         if *self.media_mode_index() == 2 {
             self.as_mut().set_preview_ready(false);
-            let live = probe_live_wallpaper_backend();
-            let apply_hint = if live.supported {
-                format!("Apply starts live host ({})", live.reason)
-            } else {
-                format!("Apply uses poster fallback ({})", live.reason)
-            };
-            self.as_mut().set_preview_status(QString::from(
-                format!("Motion preview active — {apply_hint}").as_str(),
-            ));
+            self.as_mut()
+                .set_preview_status(QString::from("Motion preview active"));
             return;
         }
         let source = self.source_path().to_string();
         if source.trim().is_empty() {
             let status = if *self.media_mode_index() == 1 {
-                format!(
-                    "{} — open a frame or import a dynamic HEIC",
-                    dynamic_stills_capability_hint()
-                )
+                "Open a frame or import a dynamic HEIC"
             } else {
-                "Open a local image to render previews".into()
+                "Open a local image to render previews"
             };
-            self.as_mut()
-                .set_preview_status(QString::from(status.as_str()));
+            self.as_mut().set_preview_status(QString::from(status));
             self.as_mut().set_preview_ready(false);
             return;
         }
@@ -218,13 +210,8 @@ impl qobject::ComposeController {
         let qt_thread = self.qt_thread();
         let job_tx = self.as_ref().rust().job_tx.clone();
 
-        let status = if *self.media_mode_index() == 1 {
-            dynamic_stills_capability_hint()
-        } else {
-            "Rendering preview…".into()
-        };
         self.as_mut()
-            .set_preview_status(QString::from(status.as_str()));
+            .set_preview_status(QString::from("Rendering preview…"));
 
         let _ = job_tx.send(WorkerJob::Preview(PreviewJob {
             generation,

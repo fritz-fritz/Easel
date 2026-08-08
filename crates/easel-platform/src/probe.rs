@@ -76,7 +76,7 @@ pub struct WallpaperBackendProbe {
 /// validated live host (never inferred from OS name alone).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSupport {
-    /// Still apply through the selected wallpaper backend.
+    /// Still apply through the selected wallpaper backend (per-display and/or virtual-desktop).
     pub static_stills: bool,
     /// Dynamic still sets via poller and/or native package host.
     pub dynamic_stills: bool,
@@ -154,7 +154,7 @@ pub fn probe_presentation_support() -> PresentationSupport {
     let still = probe_wallpaper_backend();
     let live = probe_live_wallpaper_backend();
     PresentationSupport {
-        static_stills: still.available && still.capabilities.per_display_images,
+        static_stills: still.available && still_output_supported(&still.capabilities),
         dynamic_stills: still.dynamic_stills != DynamicStillsHost::Unavailable,
         animated_images: live.supported && live.capabilities.animated_images,
         video: live.supported && live.capabilities.video,
@@ -164,6 +164,12 @@ pub fn probe_presentation_support() -> PresentationSupport {
         still_reason: still.reason,
         live_reason: live.reason,
     }
+}
+
+/// True when the backend can apply at least one still output shape.
+#[must_use]
+fn still_output_supported(capabilities: &BackendCapabilities) -> bool {
+    capabilities.per_display_images || capabilities.virtual_desktop_image
 }
 
 /// Probes the current session and returns the preferred still-wallpaper backend.
@@ -338,10 +344,24 @@ mod tests {
         assert!(support.dynamic_stills);
         assert_eq!(support.still_backend_id, probe.backend_id);
         assert_eq!(support.dynamic_host, probe.dynamic_stills);
+        let live = probe_live_wallpaper_backend();
         assert_eq!(
             support.animated_images,
-            probe_live_wallpaper_backend().supported
+            live.supported && live.capabilities.animated_images
         );
+        assert_eq!(support.video, live.supported && live.capabilities.video);
+    }
+
+    #[test]
+    fn static_stills_accepts_virtual_desktop_only_backends() {
+        let caps = BackendCapabilities {
+            per_display_images: false,
+            virtual_desktop_image: true,
+            ..BackendCapabilities::default()
+        };
+        assert!(still_output_supported(&caps));
+        let neither = BackendCapabilities::default();
+        assert!(!still_output_supported(&neither));
     }
 
     #[test]
