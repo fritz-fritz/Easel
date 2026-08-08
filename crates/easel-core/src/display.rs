@@ -167,6 +167,18 @@ pub struct Display {
     pub bezel: BezelInsets,
     /// Clockwise rotation in degrees.
     pub rotation_degrees: u16,
+    /// Panel tilt about local X in degrees (ADR 0016; identity `0`).
+    ///
+    /// Positive values tip the top edge toward the viewer. Applied only when the
+    /// arrangement viewer pose is active.
+    #[serde(default)]
+    pub tilt_deg: f64,
+    /// Panel yaw about local Y in degrees (ADR 0016; identity `0`).
+    ///
+    /// Positive values turn the right edge toward the viewer. Applied only when
+    /// the arrangement viewer pose is active.
+    #[serde(default)]
+    pub yaw_deg: f64,
 }
 
 impl Display {
@@ -208,9 +220,19 @@ impl Display {
                 self.rotation_degrees,
             ));
         }
+        if !self.tilt_deg.is_finite()
+            || !self.yaw_deg.is_finite()
+            || self.tilt_deg.abs() > MAX_PANEL_ANGLE_DEG
+            || self.yaw_deg.abs() > MAX_PANEL_ANGLE_DEG
+        {
+            return Err(DisplayValidationError::InvalidPanelAngle);
+        }
         Ok(())
     }
 }
+
+/// Maximum absolute tilt/yaw accepted for a display panel (degrees).
+pub const MAX_PANEL_ANGLE_DEG: f64 = 45.0;
 
 /// Invalid display model.
 #[derive(Clone, Debug, Error, Eq, PartialEq)]
@@ -239,6 +261,9 @@ pub enum DisplayValidationError {
     /// Only quarter-turn rotations are currently modeled.
     #[error("unsupported display rotation: {0} degrees")]
     UnsupportedRotation(u16),
+    /// Tilt/yaw must be finite and within [`MAX_PANEL_ANGLE_DEG`].
+    #[error("panel tilt/yaw must be finite and within ±{MAX_PANEL_ANGLE_DEG} degrees")]
+    InvalidPanelAngle,
 }
 
 #[cfg(test)]

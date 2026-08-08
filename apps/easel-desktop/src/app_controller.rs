@@ -43,6 +43,8 @@ mod qobject {
         #[qproperty(f64, view_distance_mm)]
         #[qproperty(f64, eye_offset_x_mm)]
         #[qproperty(f64, eye_offset_y_mm)]
+        #[qproperty(f64, selected_tilt_deg)]
+        #[qproperty(f64, selected_yaw_deg)]
         type AppController = super::AppControllerRust;
 
         #[qinvokable]
@@ -116,6 +118,10 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "reload_viewer_pose"]
         fn reloadViewerPose(self: Pin<&mut Self>);
+
+        #[qinvokable]
+        #[rust_name = "apply_selected_panel_angles"]
+        fn applySelectedPanelAngles(self: Pin<&mut Self>, tilt_deg: f64, yaw_deg: f64);
     }
 }
 
@@ -139,6 +145,8 @@ pub struct AppControllerRust {
     view_distance_mm: f64,
     eye_offset_x_mm: f64,
     eye_offset_y_mm: f64,
+    selected_tilt_deg: f64,
+    selected_yaw_deg: f64,
     pending_probes: Vec<ScreenProbe>,
 }
 
@@ -174,6 +182,8 @@ impl Default for AppControllerRust {
             view_distance_mm: pose.view_distance_mm,
             eye_offset_x_mm: pose.eye_offset_x_mm,
             eye_offset_y_mm: pose.eye_offset_y_mm,
+            selected_tilt_deg: 0.0,
+            selected_yaw_deg: 0.0,
             pending_probes: Vec::new(),
         }
     }
@@ -278,6 +288,8 @@ impl qobject::AppController {
             self.as_mut()
                 .set_selected_height_mm(display.physical_size.height.0);
             self.as_mut().set_selected_bezel_mm(display.bezel.left.0);
+            self.as_mut().set_selected_tilt_deg(display.tilt_deg);
+            self.as_mut().set_selected_yaw_deg(display.yaw_deg);
             self.as_mut().set_status_text(
                 format!(
                     "Selected {}",
@@ -384,6 +396,25 @@ impl qobject::AppController {
         self.as_mut().set_view_distance_mm(pose.view_distance_mm);
         self.as_mut().set_eye_offset_x_mm(pose.eye_offset_x_mm);
         self.as_mut().set_eye_offset_y_mm(pose.eye_offset_y_mm);
+    }
+
+    fn apply_selected_panel_angles(mut self: Pin<&mut Self>, tilt_deg: f64, yaw_deg: f64) {
+        let id = self.selected_display_id().to_string();
+        if id.trim().is_empty() {
+            return;
+        }
+        match display_session::set_display_panel_angles(&id, tilt_deg, yaw_deg) {
+            Ok(()) => {
+                self.as_mut().set_selected_tilt_deg(tilt_deg);
+                self.as_mut().set_selected_yaw_deg(yaw_deg);
+                self.as_mut()
+                    .set_status_text("Updated panel tilt/yaw".into());
+            }
+            Err(error) => {
+                self.as_mut()
+                    .set_status_text(format!("Panel angle update failed: {error}").into());
+            }
+        }
     }
 
     fn publish_layout(mut self: Pin<&mut Self>) {

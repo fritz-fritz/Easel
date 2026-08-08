@@ -69,6 +69,8 @@ fn display(id: u128, connector: &str, width: u32, height: u32, x: i32, y: i32) -
         },
         bezel: BezelInsets::uniform(2.0),
         rotation_degrees: 0,
+        tilt_deg: 0.0,
+        yaw_deg: 0.0,
     }
 }
 

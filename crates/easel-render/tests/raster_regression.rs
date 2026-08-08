@@ -49,6 +49,8 @@ fn display(id: u128, width: u32, height: u32) -> Display {
         },
         bezel: BezelInsets::default(),
         rotation_degrees: 0,
+        tilt_deg: 0.0,
+        yaw_deg: 0.0,
     }
 }
 

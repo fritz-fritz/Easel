@@ -50,11 +50,12 @@ pub use plasma::{
 pub use plasma_live::PlasmaLiveBackend;
 pub use plasma_state::{
     PLASMA_WALLPAPER_STATE_DIR, PLASMA_WALLPAPER_STATE_FILE, PLASMA_WALLPAPER_STATE_VERSION,
-    PlasmaLiveClockSnapshot, PlasmaLiveDisplayCrop, PlasmaLiveState, PlasmaSourceUv,
-    PlasmaStateError, PlasmaWallpaperDisplayState, PlasmaWallpaperGeometry, PlasmaWallpaperMode,
-    PlasmaWallpaperState, default_plasma_wallpaper_state_path, live_geometry_fingerprint,
-    plasma_wallpaper_state_dir, publish_plasma_live_state, publish_plasma_wallpaper_state,
-    read_plasma_wallpaper_state, wallpaper_geometry_fingerprint, write_plasma_wallpaper_state,
+    PlasmaLiveClockSnapshot, PlasmaLiveDisplayCrop, PlasmaLiveState, PlasmaPerspectiveMap,
+    PlasmaSourceUv, PlasmaStateError, PlasmaWallpaperDisplayState, PlasmaWallpaperGeometry,
+    PlasmaWallpaperMode, PlasmaWallpaperState, default_plasma_wallpaper_state_path,
+    live_geometry_fingerprint, plasma_wallpaper_state_dir, publish_plasma_live_state,
+    publish_plasma_wallpaper_state, read_plasma_wallpaper_state, wallpaper_geometry_fingerprint,
+    write_plasma_wallpaper_state,
 };
 pub use probe::{
     DynamicStillsHost, LiveBackendProbe, PresentationSupport, WallpaperBackendProbe,
@@ -137,6 +138,47 @@ pub struct SourceUvRect {
     pub height: f64,
 }
 
+/// Projective live sampling parameters (mm + source pixels), ADR 0016.
+///
+/// Mirrors [`easel_render::AngularPerspective`] for Plasma IPC / GPU uniforms.
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub struct PerspectiveSampleMap {
+    /// Eye X in arrangement millimeters.
+    pub eye_x_mm: f64,
+    /// Eye Y in arrangement millimeters.
+    pub eye_y_mm: f64,
+    /// View distance in millimeters.
+    pub distance_mm: f64,
+    /// Content rectangle origin X (mm).
+    pub content_x_mm: f64,
+    /// Content rectangle origin Y (mm).
+    pub content_y_mm: f64,
+    /// Content width (mm).
+    pub content_w_mm: f64,
+    /// Content height (mm).
+    pub content_h_mm: f64,
+    /// Panel tilt (degrees).
+    pub tilt_deg: f64,
+    /// Panel yaw (degrees).
+    pub yaw_deg: f64,
+    /// Mapped image rectangle origin X (mm).
+    pub map_x_mm: f64,
+    /// Mapped image rectangle origin Y (mm).
+    pub map_y_mm: f64,
+    /// Mapped image width (mm).
+    pub map_w_mm: f64,
+    /// Mapped image height (mm).
+    pub map_h_mm: f64,
+    /// Source crop origin X (pixels).
+    pub src_x: f64,
+    /// Source crop origin Y (pixels).
+    pub src_y: f64,
+    /// Source crop width (pixels).
+    pub src_w: f64,
+    /// Source crop height (pixels).
+    pub src_h: f64,
+}
+
 /// One playable source and its mandatory safe static fallback.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveMediaOutput {
@@ -157,6 +199,10 @@ pub struct LiveDisplaySurface {
     pub media: LiveMediaOutput,
     /// UV window into the shared source (from [`easel_render::plan_live_crops`]).
     pub source_uv: SourceUvRect,
+    /// Optional projective sample map when perspective correction is active.
+    pub perspective: Option<PerspectiveSampleMap>,
+    /// Letterbox fill RGB in `0..=1`.
+    pub letterbox_rgb: [f64; 3],
     /// Oriented source width used when planning crops.
     pub source_width: u32,
     /// Oriented source height used when planning crops.

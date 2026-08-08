@@ -32,10 +32,13 @@ When Compose Apply starts a live session, `active.json` uses `mode: "live"` with
 - shared `media_time_ms` / `paused` / `pause_reason` from the desktop
   `PlaybackClock` + policy sensors;
 - per-display `source_uv` crops from `plan_live_crops`;
+- optional per-display `perspective` uniforms (schema v3) when viewer correction
+  is enabled — sampled with `ShaderEffect` + `shaders/perspective.frag.qsb`;
 - still `displays[].image` posters for startup and decoder failure.
 
 The plugin plays muted GIF (`AnimatedImage`) or video (`MediaPlayer` +
-`VideoOutput.sourceRect`) and resyncs to the shared clock.
+`VideoOutput`) and resyncs to the shared clock. Without perspective it uses AA
+UV / `sourceRect`; with perspective it uses the projective shader path (ADR 0016).
 
 ## Dynamic stills
 

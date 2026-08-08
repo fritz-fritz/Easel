@@ -36,6 +36,21 @@ WallpaperItem {
         return src.endsWith(".gif")
     }
 
+    readonly property bool livePerspective: {
+        return root.liveActive && root.liveCrop && root.liveCrop.perspective
+    }
+
+    readonly property var perspectiveMap: {
+        return root.livePerspective ? root.liveCrop.perspective : null
+    }
+
+    readonly property var letterRgb: {
+        const rgb = root.liveCrop && root.liveCrop.letterbox_rgb
+        if (rgb && rgb.length >= 3)
+            return rgb
+        return [24 / 255, 24 / 255, 28 / 255]
+    }
+
     readonly property url imageUrl: {
         if (root.stateImageUrl.length > 0) {
             return root.stateImageUrl
@@ -230,8 +245,9 @@ WallpaperItem {
         // Raise above live layers until GIF Status.Ready / video Playing so a
         // loading AnimatedImage cannot blank the desktop.
         readonly property bool showPosterFallback: !root.liveActive
-                || (root.liveIsGif ? gifPlayer.status !== Image.Ready
-                                   : player.playbackState !== MediaPlayer.PlayingState)
+                || (root.liveIsGif
+                    ? ((root.livePerspective ? gifFull.status : gifPlayer.status) !== Image.Ready)
+                    : player.playbackState !== MediaPlayer.PlayingState)
 
         Image {
             id: still
@@ -244,12 +260,12 @@ WallpaperItem {
             z: parent.showPosterFallback ? 2 : 0
         }
 
-        // GIF live crop using UV window from plan_live_crops.
+        // GIF live crop using UV window from plan_live_crops (AA path).
         Item {
             id: gifCrop
             anchors.fill: parent
             clip: true
-            visible: root.liveActive && root.liveIsGif
+            visible: root.liveActive && root.liveIsGif && !root.livePerspective
             z: 1
 
             readonly property var uv: root.liveCrop ? root.liveCrop.source_uv : null
@@ -267,31 +283,98 @@ WallpaperItem {
                 fillMode: Image.Stretch
                 asynchronous: true
                 cache: false
-                // Keep source set while live so decode can finish under the poster.
-                source: (root.liveActive && root.liveIsGif)
+                source: (root.liveActive && root.liveIsGif && !root.livePerspective)
                         ? root.fileUrlForPath(root.liveDoc.live.source) : ""
-                playing: root.liveActive && root.liveIsGif
+                playing: root.liveActive && root.liveIsGif && !root.livePerspective
                         && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
             }
         }
 
-        // Video live crop; sourceRect is normalized UV (Qt Multimedia).
+        // Full-frame GIF texture for projective sampling.
+        AnimatedImage {
+            id: gifFull
+            visible: false
+            asynchronous: true
+            cache: false
+            fillMode: Image.Stretch
+            source: (root.liveActive && root.liveIsGif && root.livePerspective)
+                    ? root.fileUrlForPath(root.liveDoc.live.source) : ""
+            playing: root.liveActive && root.liveIsGif && root.livePerspective
+                    && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
+            width: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_width || 1) : 1
+            height: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_height || 1) : 1
+        }
+
+        ShaderEffectSource {
+            id: gifPerspectiveSource
+            sourceItem: gifFull
+            live: true
+            hideSource: true
+            visible: false
+        }
+
+        // Video live crop; sourceRect is normalized UV (Qt Multimedia) when AA.
         VideoOutput {
             id: liveVideo
             anchors.fill: parent
             fillMode: VideoOutput.Stretch
-            visible: root.liveActive && !root.liveIsGif
+            visible: root.liveActive && !root.liveIsGif && !root.livePerspective
             sourceRect: root.sourceRectFromUv(root.liveCrop ? root.liveCrop.source_uv : null)
             z: 1
         }
 
+        // Full-frame video texture for projective sampling (no sourceRect crop).
+        VideoOutput {
+            id: liveVideoFull
+            visible: false
+            fillMode: VideoOutput.Stretch
+            width: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_width || 1) : 1
+            height: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_height || 1) : 1
+            layer.enabled: root.liveActive && !root.liveIsGif && root.livePerspective
+            layer.smooth: true
+        }
+
         MediaPlayer {
             id: player
-            videoOutput: liveVideo
+            videoOutput: root.livePerspective && !root.liveIsGif ? liveVideoFull : liveVideo
             audioOutput: AudioOutput {
                 muted: true
                 volume: 0
             }
+        }
+
+        ShaderEffect {
+            id: perspectiveEffect
+            anchors.fill: parent
+            visible: root.livePerspective
+            z: 1
+            property variant source: root.liveIsGif ? gifPerspectiveSource
+                                                    : liveVideoFull.layer
+            property real eyeX: root.perspectiveMap ? root.perspectiveMap.eye_x_mm : 0
+            property real eyeY: root.perspectiveMap ? root.perspectiveMap.eye_y_mm : 0
+            property real distanceMm: root.perspectiveMap ? root.perspectiveMap.distance_mm : 600
+            property real contentX: root.perspectiveMap ? root.perspectiveMap.content_x_mm : 0
+            property real contentY: root.perspectiveMap ? root.perspectiveMap.content_y_mm : 0
+            property real contentW: root.perspectiveMap ? root.perspectiveMap.content_w_mm : 1
+            property real contentH: root.perspectiveMap ? root.perspectiveMap.content_h_mm : 1
+            property real tiltDeg: root.perspectiveMap ? root.perspectiveMap.tilt_deg : 0
+            property real yawDeg: root.perspectiveMap ? root.perspectiveMap.yaw_deg : 0
+            property real mapX: root.perspectiveMap ? root.perspectiveMap.map_x_mm : 0
+            property real mapY: root.perspectiveMap ? root.perspectiveMap.map_y_mm : 0
+            property real mapW: root.perspectiveMap ? root.perspectiveMap.map_w_mm : 1
+            property real mapH: root.perspectiveMap ? root.perspectiveMap.map_h_mm : 1
+            property real srcX: root.perspectiveMap ? root.perspectiveMap.src_x : 0
+            property real srcY: root.perspectiveMap ? root.perspectiveMap.src_y : 0
+            property real srcW: root.perspectiveMap ? root.perspectiveMap.src_w : 1
+            property real srcH: root.perspectiveMap ? root.perspectiveMap.src_h : 1
+            property real sourceW: root.liveDoc && root.liveDoc.live
+                                   ? (root.liveDoc.live.source_width || 1) : 1
+            property real sourceH: root.liveDoc && root.liveDoc.live
+                                   ? (root.liveDoc.live.source_height || 1) : 1
+            property real letterR: root.letterRgb[0]
+            property real letterG: root.letterRgb[1]
+            property real letterB: root.letterRgb[2]
+            fragmentShader: "shaders/perspective.frag.qsb"
         }
 
         Label {

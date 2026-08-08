@@ -392,6 +392,8 @@ mod tests {
                 width: 1.0,
                 height: 1.0,
             },
+            perspective: None,
+            letterbox_rgb: [24.0 / 255.0, 24.0 / 255.0, 28.0 / 255.0],
             source_width: 200,
             source_height: 100,
         }

@@ -375,6 +375,177 @@ ApplicationWindow {
         onAccepted: library.addFolderFromUrl(selectedFolder)
     }
 
+    Dialog {
+        id: perspectiveWizard
+        title: qsTr("Perspective calibration")
+        modal: true
+        anchors.centerIn: parent
+        width: Math.min(520, window.width - 48)
+        standardButtons: Dialog.Close
+
+        property int step: 0
+
+        onOpened: {
+            step = 0
+            controller.reloadViewerPose()
+            if (compose.layout_mode_index !== 0) {
+                compose.layout_mode_index = 0
+                controller.setPhysicalPreviewEnabled(true)
+            }
+        }
+
+        ColumnLayout {
+            anchors.fill: parent
+            spacing: 12
+
+            Label {
+                text: {
+                    if (perspectiveWizard.step === 0)
+                        return qsTr("Step 1 — Enable optional perspective correction. Identity (off) keeps axis-aligned PhysicalSpan crops.")
+                    if (perspectiveWizard.step === 1)
+                        return qsTr("Step 2 — Set viewing distance and eye offsets relative to the arrangement center.")
+                    return qsTr("Step 3 — Optionally tip or yaw the selected display. Angles apply only while perspective is enabled.")
+                }
+                wrapMode: Text.WordWrap
+                Layout.fillWidth: true
+            }
+
+            CheckBox {
+                id: wizardPerspectiveCheck
+                text: qsTr("Perspective correction")
+                checked: controller.perspective_enabled
+                visible: perspectiveWizard.step === 0
+                onToggled: {
+                    controller.applyViewerPose(
+                                checked,
+                                wizardDistanceSpin.value,
+                                wizardEyeXSpin.value,
+                                wizardEyeYSpin.value)
+                    compose.refreshPreview()
+                }
+            }
+
+            GridLayout {
+                columns: 2
+                visible: perspectiveWizard.step === 1
+                Layout.fillWidth: true
+                Label { text: qsTr("View distance mm") }
+                SpinBox {
+                    id: wizardDistanceSpin
+                    from: 200
+                    to: 5000
+                    stepSize: 10
+                    value: Math.round(controller.view_distance_mm)
+                    editable: true
+                    Layout.fillWidth: true
+                    onValueModified: {
+                        controller.applyViewerPose(
+                                    wizardPerspectiveCheck.checked || controller.perspective_enabled,
+                                    value,
+                                    wizardEyeXSpin.value,
+                                    wizardEyeYSpin.value)
+                        compose.refreshPreview()
+                    }
+                }
+                Label { text: qsTr("Eye offset X mm") }
+                SpinBox {
+                    id: wizardEyeXSpin
+                    from: -2000
+                    to: 2000
+                    value: Math.round(controller.eye_offset_x_mm)
+                    editable: true
+                    Layout.fillWidth: true
+                    onValueModified: {
+                        controller.applyViewerPose(
+                                    controller.perspective_enabled,
+                                    wizardDistanceSpin.value,
+                                    value,
+                                    wizardEyeYSpin.value)
+                        compose.refreshPreview()
+                    }
+                }
+                Label { text: qsTr("Eye offset Y mm") }
+                SpinBox {
+                    id: wizardEyeYSpin
+                    from: -2000
+                    to: 2000
+                    value: Math.round(controller.eye_offset_y_mm)
+                    editable: true
+                    Layout.fillWidth: true
+                    onValueModified: {
+                        controller.applyViewerPose(
+                                    controller.perspective_enabled,
+                                    wizardDistanceSpin.value,
+                                    wizardEyeXSpin.value,
+                                    value)
+                        compose.refreshPreview()
+                    }
+                }
+            }
+
+            GridLayout {
+                columns: 2
+                visible: perspectiveWizard.step === 2
+                Layout.fillWidth: true
+                enabled: controller.selected_display_id.length > 0
+                Label { text: qsTr("Tilt °") }
+                SpinBox {
+                    id: wizardTiltSpin
+                    from: -45
+                    to: 45
+                    value: Math.round(controller.selected_tilt_deg)
+                    editable: true
+                    Layout.fillWidth: true
+                    onValueModified: {
+                        controller.applySelectedPanelAngles(value, wizardYawSpin.value)
+                        compose.refreshPreview()
+                    }
+                }
+                Label { text: qsTr("Yaw °") }
+                SpinBox {
+                    id: wizardYawSpin
+                    from: -45
+                    to: 45
+                    value: Math.round(controller.selected_yaw_deg)
+                    editable: true
+                    Layout.fillWidth: true
+                    onValueModified: {
+                        controller.applySelectedPanelAngles(wizardTiltSpin.value, value)
+                        compose.refreshPreview()
+                    }
+                }
+                Label {
+                    Layout.columnSpan: 2
+                    text: controller.selected_display_id.length > 0
+                          ? qsTr("Selected display angles")
+                          : qsTr("Select a display in the preview first")
+                    opacity: 0.7
+                    wrapMode: Text.WordWrap
+                    Layout.fillWidth: true
+                }
+            }
+
+            RowLayout {
+                Layout.fillWidth: true
+                Button {
+                    text: qsTr("Back")
+                    enabled: perspectiveWizard.step > 0
+                    onClicked: perspectiveWizard.step -= 1
+                }
+                Item { Layout.fillWidth: true }
+                Button {
+                    text: perspectiveWizard.step < 2 ? qsTr("Next") : qsTr("Done")
+                    onClicked: {
+                        if (perspectiveWizard.step < 2)
+                            perspectiveWizard.step += 1
+                        else
+                            perspectiveWizard.close()
+                    }
+                }
+            }
+        }
+    }
+
     // Single Item root so full-window smoke grabs include chrome + page content.
     // ApplicationWindow.contentItem cannot grabToImage on some Qt builds.
     Item {
@@ -763,6 +934,42 @@ ApplicationWindow {
                                                 value)
                                     compose.refreshPreview()
                                 }
+                            }
+                            Label { text: qsTr("Tilt °") }
+                            SpinBox {
+                                id: tiltSpin
+                                from: -45
+                                to: 45
+                                value: Math.round(controller.selected_tilt_deg)
+                                editable: true
+                                Layout.fillWidth: true
+                                enabled: perspectiveCheck.checked && compose.layout_mode_index === 0
+                                         && controller.selected_display_id.length > 0
+                                onValueModified: {
+                                    controller.applySelectedPanelAngles(value, yawSpin.value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Yaw °") }
+                            SpinBox {
+                                id: yawSpin
+                                from: -45
+                                to: 45
+                                value: Math.round(controller.selected_yaw_deg)
+                                editable: true
+                                Layout.fillWidth: true
+                                enabled: perspectiveCheck.checked && compose.layout_mode_index === 0
+                                         && controller.selected_display_id.length > 0
+                                onValueModified: {
+                                    controller.applySelectedPanelAngles(tiltSpin.value, value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Button {
+                                text: qsTr("Calibration wizard…")
+                                Layout.columnSpan: 2
+                                enabled: compose.layout_mode_index === 0
+                                onClicked: perspectiveWizard.open()
                             }
                         }
                     }

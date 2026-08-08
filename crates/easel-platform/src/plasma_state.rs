@@ -23,7 +23,7 @@ use crate::{BackendError, DisplayWallpaper, LiveDisplaySurface};
 /// Schema version for [`PlasmaWallpaperState`].
 ///
 /// Version 1 was still-only. Version 2 adds optional [`PlasmaLiveState`].
-pub const PLASMA_WALLPAPER_STATE_VERSION: u32 = 2;
+pub const PLASMA_WALLPAPER_STATE_VERSION: u32 = 3;
 
 /// Oldest schema version this crate still reads.
 pub const PLASMA_WALLPAPER_STATE_MIN_VERSION: u32 = 1;
@@ -99,6 +99,69 @@ pub struct PlasmaSourceUv {
     pub height: f64,
 }
 
+/// Projective sampling uniforms for live GPU/QML (ADR 0016).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlasmaPerspectiveMap {
+    /// Eye X (mm).
+    pub eye_x_mm: f64,
+    /// Eye Y (mm).
+    pub eye_y_mm: f64,
+    /// View distance (mm).
+    pub distance_mm: f64,
+    /// Content origin X (mm).
+    pub content_x_mm: f64,
+    /// Content origin Y (mm).
+    pub content_y_mm: f64,
+    /// Content width (mm).
+    pub content_w_mm: f64,
+    /// Content height (mm).
+    pub content_h_mm: f64,
+    /// Panel tilt (degrees).
+    pub tilt_deg: f64,
+    /// Panel yaw (degrees).
+    pub yaw_deg: f64,
+    /// Map origin X (mm).
+    pub map_x_mm: f64,
+    /// Map origin Y (mm).
+    pub map_y_mm: f64,
+    /// Map width (mm).
+    pub map_w_mm: f64,
+    /// Map height (mm).
+    pub map_h_mm: f64,
+    /// Source crop X (px).
+    pub src_x: f64,
+    /// Source crop Y (px).
+    pub src_y: f64,
+    /// Source crop width (px).
+    pub src_w: f64,
+    /// Source crop height (px).
+    pub src_h: f64,
+}
+
+impl From<crate::PerspectiveSampleMap> for PlasmaPerspectiveMap {
+    fn from(value: crate::PerspectiveSampleMap) -> Self {
+        Self {
+            eye_x_mm: value.eye_x_mm,
+            eye_y_mm: value.eye_y_mm,
+            distance_mm: value.distance_mm,
+            content_x_mm: value.content_x_mm,
+            content_y_mm: value.content_y_mm,
+            content_w_mm: value.content_w_mm,
+            content_h_mm: value.content_h_mm,
+            tilt_deg: value.tilt_deg,
+            yaw_deg: value.yaw_deg,
+            map_x_mm: value.map_x_mm,
+            map_y_mm: value.map_y_mm,
+            map_w_mm: value.map_w_mm,
+            map_h_mm: value.map_h_mm,
+            src_x: value.src_x,
+            src_y: value.src_y,
+            src_w: value.src_w,
+            src_h: value.src_h,
+        }
+    }
+}
+
 /// Per-display live crop published beside still posters.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlasmaLiveDisplayCrop {
@@ -106,8 +169,18 @@ pub struct PlasmaLiveDisplayCrop {
     pub geometry: PlasmaWallpaperGeometry,
     /// UV window into the shared media source.
     pub source_uv: PlasmaSourceUv,
+    /// Optional projective sample map (perspective correction).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perspective: Option<PlasmaPerspectiveMap>,
+    /// Letterbox fill RGB in `0..=1` (Contain / outside map).
+    #[serde(default = "default_letterbox_rgb")]
+    pub letterbox_rgb: [f64; 3],
     /// Poster still for this display (startup / failure fallback).
     pub poster: String,
+}
+
+fn default_letterbox_rgb() -> [f64; 3] {
+    [24.0 / 255.0, 24.0 / 255.0, 28.0 / 255.0]
 }
 
 /// Live session directive consumed by the Plasma plugin (shared clock via IPC).
@@ -219,6 +292,8 @@ impl PlasmaWallpaperState {
                     width: surface.source_uv.width,
                     height: surface.source_uv.height,
                 },
+                perspective: surface.perspective.map(PlasmaPerspectiveMap::from),
+                letterbox_rgb: surface.letterbox_rgb,
                 poster: path_to_image_ref(&surface.media.poster_frame),
             })
             .collect();
@@ -437,6 +512,8 @@ mod tests {
                 width: 0.5,
                 height: 1.0,
             },
+            perspective: None,
+            letterbox_rgb: [24.0 / 255.0, 24.0 / 255.0, 28.0 / 255.0],
             source_width: 3840,
             source_height: 1080,
         }

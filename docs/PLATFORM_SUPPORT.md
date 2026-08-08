@@ -54,12 +54,10 @@ per-display motion crops.
 ## Stage 7 remaining slices
 
 - macOS packaging / distribution polish.
-- Per-display monitor tilt/yaw and a dedicated perspective calibration wizard
-  (Stage 7.5 landed distance-first global viewer pose + Compose Physical controls; ADR 0015).
 - Workspace / activity / lock-screen only where stable public APIs exist.
 - Optional: Windows equal-interval folder `SetSlideshow` for still rotations (not motion crops).
 
 Dynamic stills are feature-complete on every still backend (Stage 7.3 / ADR 0013).
 Motion outside Plasma uses still-backend slideshow Apply (Stage 7.4 / ADR 0014).
-Perspective correction applies to still Apply / posters / slideshow frames; continuous
-Plasma live UV remains axis-aligned until a projective live path lands (ADR 0015).
+Perspective correction (distance, eye offset, panel tilt/yaw) applies to still Apply,
+posters, slideshow frames, and Plasma live via projective UV sampling (ADR 0015 / 0016).
