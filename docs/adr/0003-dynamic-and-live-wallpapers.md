@@ -38,6 +38,10 @@ do not provide video playback.
 - Platform support documentation must distinguish static, dynamic-still, animated-image, and
   video capabilities.
 - Live-media tests include synchronization drift, power use, codec failure, and host recovery.
+- Stage 7.4 (ADR 0014) adds a portable motion path that does **not** require a continuous
+  desktop surface: sample GIF/video into stills and drive timed `WallpaperBackend::apply`
+  (`still-slideshow`) whenever a still backend exists. Continuous `LiveWallpaperBackend`
+  remains the high-fidelity host (Plasma plugin today).
 
 ## References
 

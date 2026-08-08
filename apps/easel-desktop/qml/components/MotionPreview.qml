@@ -7,10 +7,10 @@ import QtQuick.Controls
 import QtMultimedia
 
 // Compose preview for local GIF / video. Still multi-display crop preview remains
-// in MonitorPreview. Apply prefers PlasmaLiveBackend when the Easel plugin is
-// installed; otherwise experimental app-owned desktop surfaces (ADR 0014), with
-// poster-fallback rasters if live start fails. This surface remains a
-// single-display muted preview + diagnostics.
+// in MonitorPreview. Apply prefers continuous Plasma live when the plugin is
+// installed; otherwise still-backend slideshow (ADR 0014), with a single poster
+// if extraction/Apply fails. This surface remains a single-display muted preview
+// + diagnostics.
 Frame {
     id: root
     padding: 12

@@ -1,7 +1,7 @@
 # Platform support matrix
 
 Capability-honest matrix for still apply, dynamic stills, and live hosts. Probes never
-infer support from the OS name alone; see ADR 0003, ADR 0010, and ADR 0011.
+infer support from the OS name alone; see ADR 0003, ADR 0010, ADR 0011, and ADR 0014.
 
 ## Still wallpaper backends
 
@@ -26,20 +26,20 @@ Any selected still backend can receive polled frames. Native dynamic packages
 (`BackendCapabilities::native_dynamic_bundle`) remain Plasma day/night and macOS HEIC
 hosts; dense solar on Plasma uses still-frame IPC (ADR 0006–0008).
 
-## Live wallpaper hosts
+## Motion (GIF / video)
 
-| Session / OS | Backend id | Tier | Notes |
+| Path | Backend id | Tier | Notes |
 | --- | --- | --- | --- |
-| KDE Plasma 6 + Easel plugin | `plasma6-live` | supported | Shared-clock IPC (Stage 6). Preferred when available. |
-| Any session with Easel desktop running | `desktop-surface-live` | experimental | App-owned always-on-bottom windows (ADR 0014); stops when Easel exits; icon stacking DE-dependent. |
-| — (no Easel / live start failure) | — | poster fallback | Still backend Apply of poster frames. |
+| KDE Plasma 6 + Easel plugin | `plasma6-live` | supported | Continuous shared-clock IPC (Stage 6). Preferred when available. |
+| Any session with a still backend | `still-slideshow` | supported (slideshow) | Sample GIF/video into stills; timed `WallpaperBackend::apply` (ADR 0014). Last frame persists after Easel exits. |
+| Extraction / Apply failure | — | poster fallback | Single poster through the still backend. |
 
-Public Windows/macOS wallpaper APIs remain still-image only (ADR 0010). The experimental
-host does not use WorkerW or private AppKit desktop APIs.
+Public Windows/macOS wallpaper APIs remain still-image only (ADR 0010). Motion outside Plasma
+uses those still APIs as a slideshow rather than WorkerW / private AppKit hosts.
 
 ## Stage 7 remaining slices
 
 - macOS packaging / distribution polish.
 - Perspective / viewer correction + calibration UI.
 - Workspace / activity / lock-screen only where stable public APIs exist.
-- Promote `desktop-surface-live` from experimental → supported after delivery gates.
+- Optional: raise slideshow fidelity (more frames / adaptive delay) within backend budgets.

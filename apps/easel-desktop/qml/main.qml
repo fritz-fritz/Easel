@@ -73,12 +73,6 @@ ApplicationWindow {
         id: automation
     }
 
-    // Experimental app-owned live wallpaper windows (ADR 0014). Plasma + plugin
-    // remains the supported host when available.
-    LiveDesktopSurfaces {
-        id: liveDesktopSurfaces
-    }
-
     Timer {
         interval: 1500
         running: pageStack.currentIndex === 2

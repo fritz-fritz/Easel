@@ -143,14 +143,14 @@ Animated/live media on non-Plasma Linux desktops remains Stage 7.
 Exit: published support matrix is backed by automated tests and manual validation evidence.
 
 **Status:** In progress. Stage 7.1 (Linux still breadth), Stage 7.2 (GNOME stills), and
-Stage 7.4 (experimental cross-platform live surfaces) landed:
+Stage 7.4 (cross-platform motion via still-backend slideshow) landed:
 
 - Probe chain `plasma6` → `xfce-xfconf` → `gnome-gsettings` → `x11-feh` (ADR 0011 + 0012).
 - Published matrix in `docs/PLATFORM_SUPPORT.md`.
-- Live: `plasma6-live` (supported) or `desktop-surface-live` (experimental app-owned
-  windows, ADR 0014) so GIF/video Apply works while Easel is running on every OS.
+- Motion: `plasma6-live` when the plugin is installed; otherwise `still-slideshow`
+  (sample GIF/video → timed native still Apply, ADR 0014).
 - Remaining: macOS packaging, perspective calibration UI, workspace/activity/lock-screen
-  where APIs allow, promote desktop-surface live after delivery gates.
+  where APIs allow.
 
 ## Stage 8 — Production hardening
 

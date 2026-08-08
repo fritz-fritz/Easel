@@ -11,7 +11,6 @@ fn main() {
         QmlModule::new("net.fritztech.easel")
             .qml_file("qml/main.qml")
             .qml_files([
-                "qml/components/LiveDesktopSurfaces.qml",
                 "qml/components/MonitorPreview.qml",
                 "qml/components/MotionPreview.qml",
                 "qml/components/PhotoCard.qml",

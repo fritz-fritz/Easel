@@ -10,12 +10,12 @@ decode/fit/raster with physical multi-display composition, Compose previews, Qt 
 enumeration with arrangement persistence, Plasma 6 / XFCE / GNOME / feh / Windows still apply
 backends, local library indexing, Openverse discovery with retained provenance, reusable
 profiles with schedule-driven rotation, time-of-day / solar-position dynamic still sets
-(Apple HEIC interchange), hotplug policy, Plasma live GIF/video via the wallpaper plugin, and
-experimental app-owned desktop-surface live hosts on every OS while Easel is running (ADR 0014;
-poster fallback if live start fails). Use Compose → Open image → Apply (or Save profile for
-automation), or Discover/Library to select an image first. CI captures apply-payload rasters
-plus selective Qt GUI smoke screenshots for review. Perspective correction and macOS packaging
-remain later Stage 7 slices (`docs/PLATFORM_SUPPORT.md`).
+(Apple HEIC interchange), hotplug policy, Plasma continuous live via the wallpaper plugin, and
+cross-platform GIF/video as still-backend slideshows (ADR 0014; poster fallback if extraction
+fails). Use Compose → Open image → Apply (or Save profile for automation), or Discover/Library
+to select an image first. CI captures apply-payload rasters plus selective Qt GUI smoke
+screenshots for review. Perspective correction and macOS packaging remain later Stage 7 slices
+(`docs/PLATFORM_SUPPORT.md`).
 
 ## Product direction
 
@@ -26,8 +26,9 @@ remain later Stage 7 slices (`docs/PLATFORM_SUPPORT.md`).
 - Browse local collections and compliant online catalogs from one visual library.
 - Preserve creator, source, and license attribution throughout discovery and use.
 - Run slideshows based on intervals, wall-clock schedules, events, and rules.
-- Present local animated images and silent video through capability-checked live backends.
-- Fall back to a generated poster frame when live playback is unavailable or fails.
+- Present local animated images and silent video through capability-checked motion paths
+  (continuous Plasma host or still-backend slideshow).
+- Fall back to a generated poster frame when motion presentation is unavailable or fails.
 - Provide a responsive Qt Quick interface on Linux, Windows, and macOS.
 
 Easel is inspired by the capabilities of Superpaper, but it is not a port and does not

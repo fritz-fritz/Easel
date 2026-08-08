@@ -39,12 +39,13 @@ live Apply uses poster fallback. Probe text cites this ADR.
 
 ## Consequences
 
-- Stage 6 exit criteria are met on **Plasma + Easel plugin** as the first supported live
+- Stage 6 exit criteria are met on **Plasma + Easel plugin** as the first continuous live
   backend. Public Win/macOS wallpaper APIs remain still-image only.
-- Stage 7.4 (ADR 0014) adds an **experimental** app-owned desktop-surface live host so
-  GIF/video can play while Easel is running; it does not claim a public OS wallpaper API
-  and does not reverse this ADR’s findings about WorkerW / private AppKit hosts.
-- Revisit a *supported* OS-integrated host only if Microsoft or Apple publish a stable
+- Stage 7.4 (ADR 0014) presents GIF/video on Win/macOS/Linux-non-Plasma as a
+  **still-backend slideshow** (sample frames → native still Apply). That leverages the
+  public still APIs this ADR documents; it does not reverse the findings about WorkerW /
+  private AppKit hosts for continuous under-icon video.
+- Revisit a *continuous* OS-integrated host only if Microsoft or Apple publish a stable
   public live-surface API that can share one media clock across displays.
 
 ## References

@@ -4,7 +4,6 @@
 
 //! Wallpaper backend probing and selection.
 
-use crate::desktop_live::DesktopSurfaceLiveBackend;
 use crate::{BackendError, LiveBackendCapabilities, LiveWallpaperBackend, WallpaperBackend};
 
 #[cfg(target_os = "macos")]
@@ -24,18 +23,18 @@ use crate::xfce::{XfceBackend, xfce_available};
 #[cfg(windows)]
 use crate::windows_desktop::WindowsDesktopBackend;
 
-/// Diagnostic result of probing for a persistent live-wallpaper host.
+/// Diagnostic result of probing for a motion wallpaper path.
 ///
-/// Live capabilities must never be inferred from OS name alone. Plasma + plugin is
-/// the supported host; otherwise ADR 0014 offers experimental app-owned desktop
-/// surfaces that require the Easel desktop process to keep running.
+/// Preference: continuous Plasma plugin host when available; otherwise the
+/// still-backend slideshow path (ADR 0014) which is always available when a
+/// still wallpaper backend exists.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveBackendProbe {
-    /// Whether a live host passed capability gates for this session.
+    /// Whether a motion path is available for this session.
     pub supported: bool,
-    /// Stable backend key when a host was selected.
+    /// Stable backend key when a path was selected.
     pub backend_id: Option<&'static str>,
-    /// Validated live features (all false when unsupported).
+    /// Validated motion features (all false when unsupported).
     pub capabilities: LiveBackendCapabilities,
     /// Human-readable evidence for UI diagnostics and status lines.
     pub reason: String,
@@ -70,10 +69,11 @@ pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendEr
     }
 }
 
-/// Probes whether a live-wallpaper host is available in this session.
+/// Probes whether GIF/video motion can be presented in this session.
 ///
-/// Preference: Plasma + Easel plugin (`plasma6-live`, supported). Otherwise the
-/// experimental app-owned desktop-surface host (`desktop-surface-live`, ADR 0014).
+/// - `plasma6-live` when Plasma + Easel plugin are installed (continuous host).
+/// - `still-slideshow` when any still wallpaper backend exists (ADR 0014).
+/// - unsupported only when no still backend can Apply frames.
 #[must_use]
 pub fn probe_live_wallpaper_backend() -> LiveBackendProbe {
     #[cfg(all(not(windows), not(target_os = "macos")))]
@@ -84,43 +84,50 @@ pub fn probe_live_wallpaper_backend() -> LiveBackendProbe {
                 supported: true,
                 backend_id: Some(backend.id()),
                 capabilities: backend.capabilities(),
-                reason:
-                    "Plasma session with Easel wallpaper plugin; live playback via shared clock IPC"
-                        .into(),
+                reason: "Plasma session with Easel wallpaper plugin; continuous live via shared clock IPC"
+                    .into(),
             };
         }
     }
 
-    desktop_surface_live_probe()
-}
-
-fn desktop_surface_live_probe() -> LiveBackendProbe {
-    let backend = DesktopSurfaceLiveBackend;
-    LiveBackendProbe {
-        supported: true,
-        backend_id: Some(backend.id()),
-        capabilities: backend.capabilities(),
-        reason: "experimental app-owned desktop surfaces (ADR 0014); requires Easel to keep running; icon stacking is DE-dependent".into(),
+    match select_wallpaper_backend() {
+        Ok(backend) => LiveBackendProbe {
+            supported: true,
+            backend_id: Some("still-slideshow"),
+            capabilities: LiveBackendCapabilities {
+                animated_images: true,
+                video: true,
+                per_display_surfaces: backend.capabilities().per_display_images,
+                shared_media_clock: true,
+                hardware_decode: false,
+                pause_when_occluded: false,
+            },
+            reason: format!(
+                "GIF/video as still-backend slideshow via {} (ADR 0014)",
+                backend.id()
+            ),
+        },
+        Err(_) => LiveBackendProbe {
+            supported: false,
+            backend_id: None,
+            capabilities: LiveBackendCapabilities::default(),
+            reason: "no still wallpaper backend available for motion slideshow".into(),
+        },
     }
 }
 
-/// Returns a live backend when the current session has a selected host.
+/// Returns a continuous live backend when Plasma + plugin are selected.
 ///
-/// Prefer [`probe_live_wallpaper_backend`] for diagnostics. Callers should still
-/// seed poster frames through the still backend before `start`.
+/// Still-slideshow motion is started by the desktop Apply path (not this trait),
+/// because it drives [`WallpaperBackend::apply`] rather than a persistent media
+/// surface.
 pub fn select_live_wallpaper_backend() -> Result<Box<dyn LiveWallpaperBackend>, BackendError> {
     let probe = probe_live_wallpaper_backend();
-    if !probe.supported {
-        return Err(BackendError::LiveWallpaperUnsupported);
-    }
-
     match probe.backend_id {
         #[cfg(all(not(windows), not(target_os = "macos")))]
         Some("plasma6-live") => Ok(Box::new(PlasmaLiveBackend)),
-        Some("desktop-surface-live") => Ok(Box::new(DesktopSurfaceLiveBackend)),
-        other => Err(BackendError::Platform(format!(
-            "live probe selected unknown backend {other:?}"
-        ))),
+        Some("still-slideshow") => Err(BackendError::LiveWallpaperUnsupported),
+        _ => Err(BackendError::LiveWallpaperUnsupported),
     }
 }
 
@@ -152,18 +159,29 @@ mod tests {
     }
 
     #[test]
-    fn live_probe_selects_plasma_or_desktop_surface() {
+    fn live_probe_prefers_plasma_or_still_slideshow() {
         let probe = probe_live_wallpaper_backend();
-        assert!(probe.supported);
         assert!(!probe.reason.is_empty());
+        if !probe.supported {
+            assert!(probe.backend_id.is_none());
+            return;
+        }
         assert!(probe.capabilities.animated_images);
         assert!(probe.capabilities.video);
-        assert!(probe.capabilities.shared_media_clock);
-        let id = select_live_wallpaper_backend().expect("live backend").id();
-        assert!(
-            matches!(id, "plasma6-live" | "desktop-surface-live"),
-            "unexpected live backend {id}"
-        );
-        assert_eq!(probe.backend_id, Some(id));
+        match probe.backend_id {
+            Some("plasma6-live") => {
+                assert!(matches!(
+                    select_live_wallpaper_backend().map(|backend| backend.id()),
+                    Ok("plasma6-live")
+                ));
+            }
+            Some("still-slideshow") => {
+                assert!(matches!(
+                    select_live_wallpaper_backend(),
+                    Err(BackendError::LiveWallpaperUnsupported)
+                ));
+            }
+            other => panic!("unexpected live backend {other:?}"),
+        }
     }
 }

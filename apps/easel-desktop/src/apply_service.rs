@@ -56,10 +56,8 @@ pub fn apply_live_poster_fallback(
     )
 }
 
-/// Starts a live wallpaper session when the session has a live host; otherwise
-/// falls back to per-display poster rasters through the still backend.
-///
-/// If live `start` fails (decoder/host), falls back to posters with the error noted.
+/// Starts motion wallpaper: continuous Plasma live when available, otherwise a
+/// still-backend slideshow (ADR 0014). Falls back to a single poster on failure.
 pub fn apply_live(
     source: &Path,
     poster_source: &Path,
@@ -70,13 +68,44 @@ pub fn apply_live(
         return apply_live_poster_fallback(poster_source, profile);
     }
 
-    match start_live_session(source, poster_source, profile, &live.reason) {
-        Ok(message) => Ok(message),
-        Err(error) => {
-            let poster = apply_live_poster_fallback(poster_source, profile)?;
-            Ok(format!("{poster}; live start failed: {error}"))
+    match live.backend_id {
+        Some("plasma6-live") => {
+            match start_live_session(source, poster_source, profile, &live.reason) {
+                Ok(message) => Ok(message),
+                Err(error) => match start_slideshow_motion(source, poster_source, profile) {
+                    Ok(message) => Ok(format!("{message}; plasma live failed: {error}")),
+                    Err(slideshow_error) => {
+                        let poster = apply_live_poster_fallback(poster_source, profile)?;
+                        Ok(format!(
+                            "{poster}; plasma live failed: {error}; slideshow failed: {slideshow_error}"
+                        ))
+                    }
+                },
+            }
         }
+        Some("still-slideshow") => match start_slideshow_motion(source, poster_source, profile) {
+            Ok(message) => Ok(message),
+            Err(error) => {
+                let poster = apply_live_poster_fallback(poster_source, profile)?;
+                Ok(format!("{poster}; slideshow failed: {error}"))
+            }
+        },
+        _ => apply_live_poster_fallback(poster_source, profile),
     }
+}
+
+fn start_slideshow_motion(
+    source: &Path,
+    poster_source: &Path,
+    profile: &Profile,
+) -> Result<String, String> {
+    stop_live_session()?;
+    // Seed the native still backend with the poster, then start timed frame Apply.
+    apply_per_display_rasters(poster_source, profile, RenderPurpose::LivePosterFrame, None)?;
+    let session = crate::slideshow_session::start_slideshow_session(source, profile)?;
+    let backend = select_wallpaper_backend().map_err(|error| error.to_string())?;
+    replace_live_session(session)?;
+    Ok(format!("motion slideshow via {} (ADR 0014)", backend.id()))
 }
 
 fn start_live_session(
