@@ -142,16 +142,20 @@ Animated/live media on non-Plasma Linux desktops remains Stage 7.
 
 Exit: published support matrix is backed by automated tests and manual validation evidence.
 
-**Status:** In progress. Stage 7.1 (Linux still breadth), Stage 7.2 (GNOME stills), and
-Stage 7.3 (dynamic stills feature-complete across still backends) landed:
+**Status:** In progress. Stage 7.1 (Linux still breadth), Stage 7.2 (GNOME stills),
+Stage 7.3 (dynamic stills feature-complete across still backends), and Stage 7.4
+(cross-platform motion via still-backend slideshow) landed:
 
 - Probe chain `plasma6` → `xfce-xfconf` → `gnome-gsettings` → `x11-feh` (ADR 0011 + 0012).
-- Published matrix in `docs/PLATFORM_SUPPORT.md` (still + dynamic + live).
+- Published matrix in `docs/PLATFORM_SUPPORT.md` (still + dynamic + motion).
 - `probe_presentation_support()` reports static / dynamic-still / animated / video per session
   (CLI `status`, Compose media-mode hints). Dynamic stills use native packages where hosted
   (Plasma Appearance, macOS HEIC) and the still-frame poller on every other still backend.
+- Motion: `plasma6-live` when the plugin is installed; otherwise `still-slideshow`
+  (sample GIF/video → native still Apply on a configured wallpaper poll interval,
+  default 2 s — not video FPS; ADR 0014).
 - Remaining: macOS packaging, perspective calibration UI, workspace/activity/lock-screen
-  where APIs allow, non-Plasma live hosts.
+  where APIs allow.
 
 ## Stage 8 — Production hardening
 

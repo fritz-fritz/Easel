@@ -22,6 +22,7 @@ mod library_controller;
 mod library_session;
 mod live_session;
 mod profile_controller;
+mod slideshow_session;
 
 use std::env;
 use std::path::PathBuf;

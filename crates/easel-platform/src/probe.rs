@@ -26,18 +26,18 @@ use crate::xfce::{XfceBackend, xfce_available};
 #[cfg(windows)]
 use crate::windows_desktop::WindowsDesktopBackend;
 
-/// Diagnostic result of probing for a persistent live-wallpaper host.
+/// Diagnostic result of probing for a motion wallpaper path.
 ///
-/// Live capabilities must never be inferred from OS name alone. Until a validated
-/// host exists for the current session, [`Self::supported`] is false and Apply
-/// should use poster-frame fallback through the still [`WallpaperBackend`].
+/// Preference: continuous Plasma plugin host when available; otherwise the
+/// still-backend slideshow path (ADR 0014) which is always available when a
+/// still wallpaper backend exists.
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct LiveBackendProbe {
-    /// Whether a live host passed capability gates for this session.
+    /// Whether a motion path is available for this session.
     pub supported: bool,
-    /// Stable backend key when a host was selected.
+    /// Stable backend key when a path was selected.
     pub backend_id: Option<&'static str>,
-    /// Validated live features (all false when unsupported).
+    /// Validated motion features (all false when unsupported).
     pub capabilities: LiveBackendCapabilities,
     /// Human-readable evidence for UI diagnostics and status lines.
     pub reason: String,
@@ -73,16 +73,16 @@ pub struct WallpaperBackendProbe {
 /// PRODUCT four-mode support report for the active desktop session.
 ///
 /// Static and dynamic stills require a still backend. Animated-image and video require a
-/// validated live host (never inferred from OS name alone).
+/// validated motion path (`plasma6-live` or `still-slideshow`; never inferred from OS name).
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub struct PresentationSupport {
     /// Still apply through the selected wallpaper backend (per-display and/or virtual-desktop).
     pub static_stills: bool,
     /// Dynamic still sets via poller and/or native package host.
     pub dynamic_stills: bool,
-    /// Continuous animated-image playback on a live host.
+    /// Animated-image motion via continuous host or still-backend slideshow.
     pub animated_images: bool,
-    /// Continuous silent video playback on a live host.
+    /// Silent video motion via continuous host or still-backend slideshow.
     pub video: bool,
     /// Selected still backend id when available.
     pub still_backend_id: Option<&'static str>,
@@ -201,97 +201,66 @@ pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendEr
     }
 }
 
-/// Probes whether a persistent live-wallpaper host is available in this session.
+/// Probes whether GIF/video motion can be presented in this session.
 ///
-/// Plasma: supported when the Easel wallpaper plugin package is installed
-/// (`net.fritztech.easel.wallpaper`). Windows/macOS remain unsupported after the
-/// Stage 6 feasibility spikes (public wallpaper APIs are still-image only).
+/// - `plasma6-live` when Plasma + Easel plugin are installed (continuous host).
+/// - `still-slideshow` when any still wallpaper backend exists (ADR 0014).
+/// - unsupported only when no still backend can Apply frames.
 #[must_use]
 pub fn probe_live_wallpaper_backend() -> LiveBackendProbe {
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
-        if plasma_available() {
-            if easel_plasma_plugin_id().is_some() {
-                let backend = PlasmaLiveBackend;
-                return LiveBackendProbe {
-                    supported: true,
-                    backend_id: Some(backend.id()),
-                    capabilities: backend.capabilities(),
-                    reason: "Plasma session with Easel wallpaper plugin; live playback via shared clock IPC"
-                        .into(),
-                };
-            }
+        if plasma_available() && easel_plasma_plugin_id().is_some() {
+            let backend = PlasmaLiveBackend;
             return LiveBackendProbe {
-                supported: false,
-                backend_id: None,
-                capabilities: LiveBackendCapabilities::default(),
-                reason:
-                    "Plasma session detected; install the Easel wallpaper plugin for live playback"
-                        .into(),
+                supported: true,
+                backend_id: Some(backend.id()),
+                capabilities: backend.capabilities(),
+                reason: "Plasma session with Easel wallpaper plugin; continuous live via shared clock IPC"
+                    .into(),
             };
         }
-        LiveBackendProbe {
-            supported: false,
-            backend_id: None,
-            capabilities: LiveBackendCapabilities::default(),
-            reason: "no validated live wallpaper host in this desktop session".into(),
-        }
     }
 
-    #[cfg(windows)]
-    {
-        LiveBackendProbe {
+    match select_wallpaper_backend() {
+        Ok(backend) => LiveBackendProbe {
+            supported: true,
+            backend_id: Some("still-slideshow"),
+            capabilities: LiveBackendCapabilities {
+                animated_images: true,
+                video: true,
+                per_display_surfaces: backend.capabilities().per_display_images,
+                shared_media_clock: true,
+                hardware_decode: false,
+                pause_when_occluded: false,
+            },
+            reason: format!(
+                "GIF/video as still-backend slideshow via {} (ADR 0014)",
+                backend.id()
+            ),
+        },
+        Err(_) => LiveBackendProbe {
             supported: false,
             backend_id: None,
             capabilities: LiveBackendCapabilities::default(),
-            reason: windows_live_spike_reason().into(),
-        }
-    }
-
-    #[cfg(target_os = "macos")]
-    {
-        LiveBackendProbe {
-            supported: false,
-            backend_id: None,
-            capabilities: LiveBackendCapabilities::default(),
-            reason: macos_live_spike_reason().into(),
-        }
+            reason: "no still wallpaper backend available for motion slideshow".into(),
+        },
     }
 }
 
-/// Returns a live backend only when the current session has a validated host.
+/// Returns a continuous live backend when Plasma + plugin are selected.
 ///
-/// Callers must apply the poster frame through [`select_wallpaper_backend`] when
-/// this returns [`BackendError::LiveWallpaperUnsupported`].
+/// Still-slideshow motion is started by the desktop Apply path (not this trait),
+/// because it drives [`WallpaperBackend::apply`] rather than a persistent media
+/// surface.
 pub fn select_live_wallpaper_backend() -> Result<Box<dyn LiveWallpaperBackend>, BackendError> {
     let probe = probe_live_wallpaper_backend();
-    if !probe.supported {
-        return Err(BackendError::LiveWallpaperUnsupported);
+    match probe.backend_id {
+        #[cfg(all(not(windows), not(target_os = "macos")))]
+        Some("plasma6-live") => Ok(Box::new(PlasmaLiveBackend)),
+        Some("still-slideshow") => Err(BackendError::LiveWallpaperUnsupported),
+        _ => Err(BackendError::LiveWallpaperUnsupported),
     }
-
-    #[cfg(all(not(windows), not(target_os = "macos")))]
-    {
-        let _ = probe;
-        Ok(Box::new(PlasmaLiveBackend))
-    }
-
-    #[cfg(any(windows, target_os = "macos"))]
-    {
-        let _ = probe;
-        Err(BackendError::LiveWallpaperUnsupported)
-    }
-}
-
-#[cfg(windows)]
-fn windows_live_spike_reason() -> &'static str {
-    // ADR 0010: IDesktopWallpaper / SystemParametersInfo accept still images only.
-    "Windows live wallpaper unsupported — IDesktopWallpaper has no public video surface (ADR 0010); poster fallback"
-}
-
-#[cfg(target_os = "macos")]
-fn macos_live_spike_reason() -> &'static str {
-    // ADR 0010: NSWorkspace setDesktopImageURL is still-image oriented.
-    "macOS live wallpaper unsupported — setDesktopImageURL is still-image only (ADR 0010); poster fallback"
 }
 
 #[cfg(test)]
@@ -365,25 +334,29 @@ mod tests {
     }
 
     #[test]
-    fn live_probe_is_honest_about_session() {
+    fn live_probe_prefers_plasma_or_still_slideshow() {
         let probe = probe_live_wallpaper_backend();
         assert!(!probe.reason.is_empty());
-        if probe.supported {
-            assert_eq!(probe.backend_id, Some("plasma6-live"));
-            assert!(probe.capabilities.animated_images);
-            assert!(probe.capabilities.video);
-            assert!(probe.capabilities.shared_media_clock);
-            assert!(matches!(
-                select_live_wallpaper_backend().map(|backend| backend.id()),
-                Ok("plasma6-live")
-            ));
-        } else {
+        if !probe.supported {
             assert!(probe.backend_id.is_none());
-            assert!(!probe.capabilities.animated_images);
-            assert!(matches!(
-                select_live_wallpaper_backend(),
-                Err(BackendError::LiveWallpaperUnsupported)
-            ));
+            return;
+        }
+        assert!(probe.capabilities.animated_images);
+        assert!(probe.capabilities.video);
+        match probe.backend_id {
+            Some("plasma6-live") => {
+                assert!(matches!(
+                    select_live_wallpaper_backend().map(|backend| backend.id()),
+                    Ok("plasma6-live")
+                ));
+            }
+            Some("still-slideshow") => {
+                assert!(matches!(
+                    select_live_wallpaper_backend(),
+                    Err(BackendError::LiveWallpaperUnsupported)
+                ));
+            }
+            other => panic!("unexpected live backend {other:?}"),
         }
     }
 }

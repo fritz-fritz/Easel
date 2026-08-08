@@ -241,6 +241,7 @@ mod tests {
             loop_mode: LoopMode::Loop,
             rate: 1.0,
             maximum_frames_per_second: Some(30),
+            still_slideshow_interval_ms: easel_core::DEFAULT_STILL_SLIDESHOW_INTERVAL_MS,
             pause_on_battery: battery,
             pause_for_full_screen_app: full_screen,
         }

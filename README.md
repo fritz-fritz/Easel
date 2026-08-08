@@ -6,17 +6,17 @@ policy-aware catalog of high-quality, reusable images. Its architecture also dis
 scheduled dynamic stills from persistent animated-image and video wallpapers.
 
 This repository contains the Stage 1–5 still-image vertical slice, Stage 6 live media on
-Plasma (Easel wallpaper plugin host), and Stage 7.1–7.3 platform breadth: decode/fit/raster with
+Plasma (Easel wallpaper plugin host), and Stage 7.1–7.4 platform breadth: decode/fit/raster with
 physical multi-display composition, Compose previews, Qt display enumeration with arrangement
 persistence, Plasma 6 / XFCE / GNOME / feh / Windows still apply backends, dynamic stills on
 every still backend (native packages on Plasma Appearance + macOS HEIC; still-frame poller
 elsewhere), local library indexing, Openverse discovery with retained provenance, reusable
 profiles with schedule-driven rotation, time-of-day / solar-position dynamic still sets
-(Apple HEIC interchange) with catch-up and pre-render, hotplug policy, and Plasma live
-GIF/video playback via shared-clock plugin IPC (with poster fallback when no live host is
-validated). Use Compose → Open image → Apply (or Save profile for automation), or
-Discover/Library to select an image first. CI captures apply-payload rasters plus selective Qt
-GUI smoke screenshots (fixture preview and affected workspace pages) for review. Perspective
+(Apple HEIC interchange) with catch-up and pre-render, hotplug policy, Plasma continuous live
+via shared-clock plugin IPC, and cross-platform GIF/video as still-backend slideshows
+(ADR 0014; poster fallback if extraction fails). Use Compose → Open image → Apply (or Save
+profile for automation), or Discover/Library to select an image first. CI captures
+apply-payload rasters plus selective Qt GUI smoke screenshots for review. Perspective
 correction and macOS packaging remain later Stage 7 slices (`docs/PLATFORM_SUPPORT.md`).
 
 ## Product direction
@@ -28,8 +28,9 @@ correction and macOS packaging remain later Stage 7 slices (`docs/PLATFORM_SUPPO
 - Browse local collections and compliant online catalogs from one visual library.
 - Preserve creator, source, and license attribution throughout discovery and use.
 - Run slideshows based on intervals, wall-clock schedules, events, and rules.
-- Present local animated images and silent video through capability-checked live backends.
-- Fall back to a generated poster frame when live playback is unavailable or fails.
+- Present local animated images and silent video through capability-checked motion paths
+  (continuous Plasma host or still-backend slideshow).
+- Fall back to a generated poster frame when motion presentation is unavailable or fails.
 - Provide a responsive Qt Quick interface on Linux, Windows, and macOS.
 
 Easel is inspired by the capabilities of Superpaper, but it is not a port and does not

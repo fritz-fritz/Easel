@@ -84,14 +84,15 @@ Static and dynamic-still profiles use completed images:
 3. apply it through `WallpaperBackend`;
 4. keep the last completed output if rendering or apply fails.
 
-Animated images and video use a persistent runtime:
+Animated images and video use a motion runtime:
 
-1. probe decoder and `LiveWallpaperBackend` capabilities;
+1. probe decoder and motion-path capabilities (`plasma6-live` or `still-slideshow`);
 2. render and apply a safe poster frame;
-3. open one logical media timeline using Qt Multimedia where available;
-4. present synchronized crops on platform-owned desktop surfaces;
-5. pause or release resources in response to power and session state;
-6. restore the poster frame if playback or hosting fails.
+3. either open one logical media timeline on a continuous host (Plasma plugin), or extract
+   bounded frames and Apply them on a shared slideshow clock through the still backend
+   (ADR 0014);
+4. pause or release resources in response to power and session state;
+5. keep or restore the poster / last still frame if playback or hosting fails.
 
 One playback clock must drive all displays in a group. Starting one unrelated player per monitor
 is not acceptable because decode latency creates visible drift at bezels. Source audio is always
@@ -141,13 +142,11 @@ composite), then generic X11 via `feh`. Windows uses the current
 `IDesktopWallpaper` API for stills. macOS uses per-screen AppKit integration for stills.
 See `docs/PLATFORM_SUPPORT.md`.
 
-`LiveWallpaperBackend` owns persistent desktop surfaces. KDE Plasma has the cleanest initial path:
-a dedicated QML wallpaper plugin can draw the desktop background. Qt Multimedia provides decoding
-and `VideoOutput`, but it does not replace the native host integration. The public Windows
-`IDesktopWallpaper` and macOS `NSWorkspace.setDesktopImageURL` contracts set image files, not
-video. Windows and macOS live hosts therefore remain feasibility-gated and must be labeled
-experimental until their lifecycle, desktop-icon ordering, multi-desktop behavior, and OS-update
-stability are validated. No undocumented host technique is represented as a supported API.
+`LiveWallpaperBackend` owns continuous under-icon hosts. KDE Plasma + the Easel wallpaper plugin
+is that path today (shared-clock IPC). When the plugin is unavailable, Stage 7.4 presents
+GIF/video as a **still-backend slideshow** (`still-slideshow`, ADR 0014): sample frames, then
+timed `WallpaperBackend::apply`. Public Windows/macOS wallpaper APIs remain still-image only
+(ADR 0010); WorkerW / private AppKit hosts are not used.
 
 The core does not branch on environment strings. Backend probing and selection belong to the
 platform layer and produce diagnostic evidence via `probe_wallpaper_backend`,

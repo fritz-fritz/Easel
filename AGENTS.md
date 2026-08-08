@@ -90,8 +90,10 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   (`xfce-xfconf`) → GNOME (`gnome-gsettings`, spanned composite) → generic X (`x11-feh`).
   On the XFCE Cloud desktop `select_wallpaper_backend()` should return `xfce-xfconf`
   (GNOME is not selected merely because `gsettings` exists), so Compose **Apply** can
-  push stills without Plasma. Live hosts remain Plasma-only; non-Plasma Apply uses
-  poster frames through the still backend.
+  push stills without Plasma. Motion: prefer Plasma + Easel plugin (`plasma6-live`);
+  otherwise still-backend slideshow (`still-slideshow`, ADR 0014) — sample GIF/video
+  frames and Apply through the still backend on a configured wallpaper poll interval
+  (default 2 s, not video FPS); poster fallback if extraction fails.
 - **Decision: do NOT install KDE Plasma on this Cloud VM.** Prefer the XFCE/generic-X
   still path already probed here; do not add a KDE/Plasma session just to make live apply
   work. CI still validates composition via per-display **apply-payload rasters** (CI does

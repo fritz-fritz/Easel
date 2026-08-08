@@ -11,7 +11,19 @@ use uuid::Uuid;
 use crate::{AssetId, DisplayGroupId, DisplayId, DynamicStillSetId, RotationQueueId, ScheduleId};
 
 /// Current serialized profile schema.
-pub const PROFILE_SCHEMA_VERSION: u16 = 3;
+pub const PROFILE_SCHEMA_VERSION: u16 = 4;
+
+/// Default still-backend Apply poll interval for motion slideshows (ADR 0014).
+pub const DEFAULT_STILL_SLIDESHOW_INTERVAL_MS: u64 = 2_000;
+
+/// Fastest still-backend Apply poll interval Easel will honor.
+///
+/// Wallpaper settings channels (xfconf, gsettings, System Events, COM) are not
+/// video pipelines; sub-500 ms thrashing is unsupported outside a continuous host.
+pub const MIN_STILL_SLIDESHOW_INTERVAL_MS: u64 = 500;
+
+/// Slowest still-backend Apply poll interval accepted in a profile.
+pub const MAX_STILL_SLIDESHOW_INTERVAL_MS: u64 = 60_000;
 
 /// Stable profile identity independent of its display name.
 #[derive(Clone, Copy, Debug, Eq, Hash, PartialEq, Serialize, Deserialize)]
@@ -87,12 +99,23 @@ pub struct PlaybackPolicy {
     pub loop_mode: LoopMode,
     /// Playback speed multiplier.
     pub rate: f64,
-    /// Optional presentation frame-rate ceiling.
+    /// Optional presentation frame-rate ceiling for **continuous** live hosts
+    /// (Plasma plugin / shared [`crate::PlaybackClock`]). Not used to drive
+    /// still-backend slideshow Applies — see [`Self::still_slideshow_interval_ms`].
     pub maximum_frames_per_second: Option<u16>,
+    /// Minimum wall time between still-backend wallpaper Applies when motion is
+    /// presented as a slideshow (ADR 0014). This is a poll interval, not a
+    /// video frame period. Ignored by continuous live hosts.
+    #[serde(default = "default_still_slideshow_interval_ms")]
+    pub still_slideshow_interval_ms: u64,
     /// Pause live playback while the system is using battery power.
     pub pause_on_battery: bool,
     /// Pause live playback while a full-screen application is active.
     pub pause_for_full_screen_app: bool,
+}
+
+const fn default_still_slideshow_interval_ms() -> u64 {
+    DEFAULT_STILL_SLIDESHOW_INTERVAL_MS
 }
 
 impl Default for PlaybackPolicy {
@@ -101,9 +124,40 @@ impl Default for PlaybackPolicy {
             loop_mode: LoopMode::Loop,
             rate: 1.0,
             maximum_frames_per_second: Some(30),
+            still_slideshow_interval_ms: DEFAULT_STILL_SLIDESHOW_INTERVAL_MS,
             pause_on_battery: true,
             pause_for_full_screen_app: true,
         }
+    }
+}
+
+impl PlaybackPolicy {
+    /// Wall milliseconds between still-slideshow Applies after rate scaling and clamps.
+    #[must_use]
+    pub fn effective_still_slideshow_interval_ms(self) -> u64 {
+        let base = self.still_slideshow_interval_ms.clamp(
+            MIN_STILL_SLIDESHOW_INTERVAL_MS,
+            MAX_STILL_SLIDESHOW_INTERVAL_MS,
+        );
+        if !self.rate.is_finite() || self.rate <= 0.0 {
+            return base;
+        }
+        // Interval is capped at 60_000 ms, so f64 mantissa precision is exact here.
+        #[allow(clippy::cast_precision_loss)]
+        let scaled = (base as f64 / self.rate).round();
+        if !scaled.is_finite() || scaled <= 0.0 {
+            return base;
+        }
+        #[allow(
+            clippy::cast_possible_truncation,
+            clippy::cast_precision_loss,
+            clippy::cast_sign_loss
+        )]
+        let scaled_ms = scaled.min(MAX_STILL_SLIDESHOW_INTERVAL_MS as f64) as u64;
+        scaled_ms.clamp(
+            MIN_STILL_SLIDESHOW_INTERVAL_MS,
+            MAX_STILL_SLIDESHOW_INTERVAL_MS,
+        )
     }
 }
 
@@ -189,7 +243,10 @@ impl Profile {
     /// Upgrades older on-disk profiles to the current schema.
     pub fn migrate(mut self) -> Result<Self, ProfileValidationError> {
         match self.schema_version {
-            1 | 2 => {
+            1..=3 => {
+                if self.playback.still_slideshow_interval_ms == 0 {
+                    self.playback.still_slideshow_interval_ms = DEFAULT_STILL_SLIDESHOW_INTERVAL_MS;
+                }
                 self.schema_version = PROFILE_SCHEMA_VERSION;
                 Ok(self)
             }
@@ -217,6 +274,11 @@ impl Profile {
         if self.playback.maximum_frames_per_second == Some(0) {
             return Err(ProfileValidationError::InvalidFrameRateLimit);
         }
+        if !(MIN_STILL_SLIDESHOW_INTERVAL_MS..=MAX_STILL_SLIDESHOW_INTERVAL_MS)
+            .contains(&self.playback.still_slideshow_interval_ms)
+        {
+            return Err(ProfileValidationError::InvalidStillSlideshowInterval);
+        }
         if !(0.0..=1.0).contains(&self.focal_x) || !(0.0..=1.0).contains(&self.focal_y) {
             return Err(ProfileValidationError::InvalidFocalPoint);
         }
@@ -242,6 +304,11 @@ pub enum ProfileValidationError {
     /// A configured frame-rate ceiling cannot be zero.
     #[error("playback frame-rate limit must be greater than zero")]
     InvalidFrameRateLimit,
+    /// Still-slideshow Apply poll interval is out of the supported range.
+    #[error(
+        "still slideshow interval must be between {MIN_STILL_SLIDESHOW_INTERVAL_MS} and {MAX_STILL_SLIDESHOW_INTERVAL_MS} milliseconds"
+    )]
+    InvalidStillSlideshowInterval,
     /// Focal points use normalized zero-to-one coordinates.
     #[error("focal point coordinates must be between zero and one")]
     InvalidFocalPoint,
@@ -273,6 +340,46 @@ mod tests {
         assert_eq!(
             profile.validate(),
             Err(ProfileValidationError::InvalidFrameRateLimit)
+        );
+    }
+
+    #[test]
+    fn still_slideshow_interval_is_clamped_by_effective_helper() {
+        let policy = PlaybackPolicy {
+            still_slideshow_interval_ms: 50,
+            ..PlaybackPolicy::default()
+        };
+        assert_eq!(
+            policy.effective_still_slideshow_interval_ms(),
+            MIN_STILL_SLIDESHOW_INTERVAL_MS
+        );
+        let faster = PlaybackPolicy {
+            still_slideshow_interval_ms: 2_000,
+            rate: 2.0,
+            ..PlaybackPolicy::default()
+        };
+        assert_eq!(faster.effective_still_slideshow_interval_ms(), 1_000);
+    }
+
+    #[test]
+    fn still_slideshow_interval_out_of_range_is_rejected() {
+        let mut profile = Profile::new("Home");
+        profile.playback.still_slideshow_interval_ms = 50;
+        assert_eq!(
+            profile.validate(),
+            Err(ProfileValidationError::InvalidStillSlideshowInterval)
+        );
+    }
+
+    #[test]
+    fn schema_v3_migrates_with_default_slideshow_interval() {
+        let mut profile = Profile::new("Home");
+        profile.schema_version = 3;
+        let migrated = profile.migrate().unwrap();
+        assert_eq!(migrated.schema_version, PROFILE_SCHEMA_VERSION);
+        assert_eq!(
+            migrated.playback.still_slideshow_interval_ms,
+            DEFAULT_STILL_SLIDESHOW_INTERVAL_MS
         );
     }
 }

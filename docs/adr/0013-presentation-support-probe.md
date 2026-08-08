@@ -27,7 +27,9 @@ still/dynamic reporting was implicit and easy to under-document after the Linux 
 
 - Support matrix (`docs/PLATFORM_SUPPORT.md`) lists dynamic stills per backend with apply path.
 - Operators can see poller vs native strategy without reading ADRs.
-- Live remains Plasma-only until a later Stage 7 live-host ADR.
+- Continuous live remains Plasma-plugin-only; Stage 7.4 (ADR 0014) reports animated/video via
+  `still-slideshow` when a still backend exists, so `probe_presentation_support()` can show
+  motion support without a continuous host.
 
 ## References
 
@@ -35,3 +37,4 @@ still/dynamic reporting was implicit and easy to under-document after the Linux 
 - `docs/PLATFORM_SUPPORT.md`
 - `docs/adr/0005-dynamic-stills.md`
 - `docs/adr/0006-apple-heic-dynamic-interchange.md`
+- `docs/adr/0014-motion-still-slideshow.md`

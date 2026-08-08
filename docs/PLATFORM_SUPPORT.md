@@ -1,7 +1,7 @@
 # Platform support matrix
 
 Capability-honest matrix for still apply, dynamic stills, and live hosts. Probes never
-infer support from the OS name alone; see ADR 0003, ADR 0010, ADR 0011, and ADR 0013.
+infer support from the OS name alone; see ADR 0003, ADR 0010, ADR 0011, ADR 0013, and ADR 0014.
 
 ## Still wallpaper backends
 
@@ -37,20 +37,26 @@ Plasma uses still-frame IPC instead (ADR 0006–0008). Session diagnostics come 
 | Windows | `windows-idesktopwallpaper` | yes | no | Still-frame poller (ADR 0006) |
 | macOS | `macos` | yes | yes (Dynamic Desktop HEIC) | Native HEIC host; System Events still poller as fallback |
 
-## Live wallpaper hosts
+## Motion (GIF / video)
 
-| Session / OS | Backend id | Supported | Notes |
+| Path | Backend id | Tier | Notes |
 | --- | --- | --- | --- |
-| KDE Plasma 6 + Easel plugin | `plasma6-live` | yes | Shared-clock IPC (Stage 6). |
-| Other Linux desktops | — | no | Poster fallback via still backend when one exists. |
-| Windows | — | no | ADR 0010. |
-| macOS | — | no | ADR 0010. |
+| KDE Plasma 6 + Easel plugin | `plasma6-live` | supported | Continuous shared-clock IPC (Stage 6). Preferred when available. |
+| Any session with a still backend | `still-slideshow` | supported (slideshow) | Sample GIF/video into stills; timed `WallpaperBackend::apply` paced by `PlaybackPolicy::still_slideshow_interval_ms` (default 2 s, floor 500 ms — not video FPS; ADR 0014). Last frame persists after Easel exits. |
+| Extraction / Apply failure | — | poster fallback | Single poster through the still backend. |
+
+Public Windows/macOS wallpaper APIs remain still-image only (ADR 0010). Motion outside Plasma
+uses those still APIs as a **poll-driven slideshow**, not WorkerW / private AppKit hosts.
+Still backends cannot transition fast enough to simulate video; continuous under-icon playback
+stays Plasma-plugin-only. Windows `SetSlideshow` is a folder playlist API and is not used for
+per-display motion crops.
 
 ## Stage 7 remaining slices
 
 - macOS packaging / distribution polish.
 - Perspective / viewer correction + calibration UI.
 - Workspace / activity / lock-screen only where stable public APIs exist.
-- Non-Plasma live hosts (separate feasibility ADR when candidates exist).
+- Optional: Windows equal-interval folder `SetSlideshow` for still rotations (not motion crops).
 
 Dynamic stills are feature-complete on every still backend (Stage 7.3 / ADR 0013).
+Motion outside Plasma uses still-backend slideshow Apply (Stage 7.4 / ADR 0014).
