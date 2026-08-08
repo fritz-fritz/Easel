@@ -135,9 +135,11 @@ The registry refuses to activate providers that are not allowed. See
 ## Platform backends
 
 Backends report capabilities before mutation. `WallpaperBackend` applies completed still images.
-Candidate Linux adapters include KDE Plasma via D-Bus/Plasma scripting, GNOME-family desktops via
-settings APIs, XFCE via xfconf, and an explicit custom-command adapter. Windows uses the current
+Linux still adapters are capability-probed in order (ADR 0011): KDE Plasma via D-Bus/Plasma
+scripting, XFCE via xfconf, then generic X11 via `feh`. GNOME-family `gsettings` remains a
+later Stage 7 slice until a honest per-monitor contract exists. Windows uses the current
 `IDesktopWallpaper` API for stills. macOS uses per-screen AppKit integration for stills.
+See `docs/PLATFORM_SUPPORT.md`.
 
 `LiveWallpaperBackend` owns persistent desktop surfaces. KDE Plasma has the cleanest initial path:
 a dedicated QML wallpaper plugin can draw the desktop background. Qt Multimedia provides decoding

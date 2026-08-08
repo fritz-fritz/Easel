@@ -7,6 +7,8 @@
 #![cfg_attr(not(windows), forbid(unsafe_code))]
 
 mod appearance;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+mod feh;
 mod live_policy;
 #[cfg(target_os = "macos")]
 mod macos;
@@ -17,6 +19,10 @@ mod plasma_state;
 mod probe;
 #[cfg(windows)]
 mod windows_desktop;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+mod xfce;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+mod xrandr;
 
 use std::path::{Path, PathBuf};
 
@@ -24,6 +30,8 @@ use easel_core::{DisplayId, LogicalRect, PlaybackPolicy};
 use thiserror::Error;
 
 pub use appearance::system_appearance;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+pub use feh::{FehBackend, feh_available};
 pub use live_policy::{
     LivePauseReason, LivePolicySensors, pause_reason_for, probe_live_policy_sensors,
 };
@@ -50,6 +58,8 @@ pub use probe::{
 };
 #[cfg(windows)]
 pub use windows_desktop::WindowsDesktopBackend;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+pub use xfce::{XfceBackend, xfce_available};
 
 /// Features exposed by the selected desktop backend.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]

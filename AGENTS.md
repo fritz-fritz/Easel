@@ -80,15 +80,15 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   splitting (or change the split while it is open), click **Refresh displays** to re-probe.
   The split is a live X-server change and is not persisted across VNC restarts; re-run the
   script (or rely on `start`) after a restart.
-- Actually *setting* the wallpaper on Linux is implemented **only** for KDE Plasma 6
-  (`crates/easel-platform/src/plasma.rs`, via `qdbus`/`org.kde.plasmashell`); there is no
-  XFCE/GNOME/generic-X backend yet. On the XFCE Cloud desktop `select_wallpaper_backend()`
-  returns `NoBackend`, so the Compose **Apply** button cannot push to the compositor here.
-- **Decision: do NOT install KDE Plasma on this Cloud VM.** A generic **X** wallpaper
-  backend is planned and will be the supported path for this environment; until it lands,
-  do not add a KDE/Plasma session just to make live apply work. Validate apply on this VM
-  via the per-display **apply-payload rasters** instead (this is also all CI checks — CI
-  does not set real wallpaper). Reproduce those (three `apply-display-*.png` for the
+- Still wallpaper apply on Linux is capability-probed (ADR 0011): Plasma → XFCE
+  (`xfce-xfconf` / `xfconf-query`) → generic X (`x11-feh`). On the XFCE Cloud desktop
+  `select_wallpaper_backend()` should return `xfce-xfconf`, so Compose **Apply** can push
+  stills without Plasma. Live hosts remain Plasma-only; non-Plasma Apply uses poster
+  frames through the still backend.
+- **Decision: do NOT install KDE Plasma on this Cloud VM.** Prefer the XFCE/generic-X
+  still path already probed here; do not add a KDE/Plasma session just to make live apply
+  work. CI still validates composition via per-display **apply-payload rasters** (CI does
+  not set real wallpaper). Reproduce those (three `apply-display-*.png` for the
   `DP-1/2/3` fixture) with:
 
   ```

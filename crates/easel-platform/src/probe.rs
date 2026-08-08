@@ -10,9 +10,13 @@ use crate::{BackendError, LiveBackendCapabilities, LiveWallpaperBackend, Wallpap
 use crate::macos::MacosBackend;
 
 #[cfg(all(not(windows), not(target_os = "macos")))]
+use crate::feh::{FehBackend, feh_available};
+#[cfg(all(not(windows), not(target_os = "macos")))]
 use crate::plasma::{PlasmaBackend, easel_plasma_plugin_id, plasma_available};
 #[cfg(all(not(windows), not(target_os = "macos")))]
 use crate::plasma_live::PlasmaLiveBackend;
+#[cfg(all(not(windows), not(target_os = "macos")))]
+use crate::xfce::{XfceBackend, xfce_available};
 
 #[cfg(windows)]
 use crate::windows_desktop::WindowsDesktopBackend;
@@ -48,8 +52,14 @@ pub fn select_wallpaper_backend() -> Result<Box<dyn WallpaperBackend>, BackendEr
 
     #[cfg(all(not(windows), not(target_os = "macos")))]
     {
+        // Preference: desktop-native channels that persist settings, then generic X.
+        // GNOME gsettings remains Stage 7.2 (no stable public per-monitor still API).
         if plasma_available() {
             Ok(Box::new(PlasmaBackend))
+        } else if xfce_available() {
+            Ok(Box::new(XfceBackend))
+        } else if feh_available() {
+            Ok(Box::new(FehBackend))
         } else {
             Err(BackendError::NoBackend)
         }
@@ -159,6 +169,14 @@ mod tests {
             Ok(backend) => {
                 assert!(!backend.id().is_empty());
                 assert!(backend.capabilities().per_display_images);
+                #[cfg(all(not(windows), not(target_os = "macos")))]
+                {
+                    assert!(
+                        matches!(backend.id(), "plasma6" | "xfce-xfconf" | "x11-feh"),
+                        "unexpected linux still backend {}",
+                        backend.id()
+                    );
+                }
             }
             Err(BackendError::NoBackend) => {}
             Err(other) => panic!("unexpected probe error: {other}"),
