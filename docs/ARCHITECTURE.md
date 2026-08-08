@@ -68,14 +68,14 @@ not leave a partial wallpaper.
 
 The executor implements orientation normalization, decoding limits, cover/contain scaling,
 focal-point cropping, composition, and optional projective sampling for PhysicalSpan when a
-global arrangement `ViewerPose` is enabled (ADR 0015; distance-first angular FOV; identity when
-disabled). Large work must remain cancelable and run away from the Qt event thread.
+global arrangement `ViewerPose` is enabled (ADR 0015 / 0016; angular FOV with optional
+per-display tilt/yaw; identity when disabled). Large work must remain cancelable and run away
+from the Qt event thread.
 
-For live media, the same plan describes each display's crop and transform. A generated poster
-frame passes through the raster executor (including perspective when enabled). Continuous
-Plasma live UV crops stay axis-aligned for Stage 7.5; the preferred fast path applies those UV
-windows in the live compositor without round-tripping every decoded frame through Rust-owned
-CPU memory.
+For live media, the same plan describes each display's crop and transform—including projective
+maps when perspective is on. A generated poster frame passes through the raster executor. The
+preferred Plasma fast path applies AA UV crops or a GPU ShaderEffect that mirrors the still
+projective map, without round-tripping every decoded frame through Rust-owned CPU memory.
 
 ## Presentation pipelines
 

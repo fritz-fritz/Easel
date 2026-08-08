@@ -33,8 +33,8 @@ pub use asset::{
 };
 pub use collection::{Collection, CollectionError, CollectionId};
 pub use display::{
-    Display, DisplayId, DisplayValidationError, LogicalRect, Millimeters, NativePixelSize,
-    PhysicalPoint, PhysicalSize, ScaleFactor,
+    Display, DisplayId, DisplayValidationError, LogicalRect, MAX_PANEL_ANGLE_DEG, Millimeters,
+    NativePixelSize, PhysicalPoint, PhysicalSize, ScaleFactor,
 };
 pub use display_group::{DisplayGroup, DisplayGroupError, DisplayGroupId};
 pub use dynamic_still::{

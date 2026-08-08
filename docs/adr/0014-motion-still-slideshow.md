@@ -63,6 +63,9 @@ as default backends (ADR 0010). Continuous decode remains Plasma-plugin-only.
 - Last applied frame remains after Easel exits (still backend persistence).
 - Users can trade responsiveness vs DE health via Wallpaper poll; backends may still lag
   behind the requested interval (especially GNOME multi-monitor spanned composites).
+- First-loop projective / perspective re-rasters are expected when viewer pose or panel
+  angles are enabled; the slideshow cache fingerprint includes pose + angles so
+  mid-session calibration invalidates correctly (Stage 7.7).
 - Plasma keeps the high-fidelity continuous path when the plugin is installed.
 - Private APIs are **not** required for the supported slideshow tier; they would only be
   needed for true video-rate under-icon playback, which remains unsupported.

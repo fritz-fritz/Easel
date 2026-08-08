@@ -13,9 +13,18 @@ See [ADR 0008](../../docs/adr/0008-plasma-wallpaper-plugin-host.md).
 # Restart plasmashell or log out/in, then choose Wallpaper type "Easel".
 ```
 
+`install.sh` refuses to install if `contents/ui/shaders/perspective.frag.qsb` is
+missing. Rebuild the pack after editing the fragment source:
+
+```sh
+./tools/dev/compile-plasma-shaders.sh
+```
+
 `PlasmaBackend` detects `net.fritztech.easel.wallpaper` under the usual Plasma
 wallpaper roots and prefers it for still-frame apply. `PlasmaLiveBackend` is
-selected for live media once this package is installed.
+selected for live media once this package is installed. Projective live Apply
+additionally requires the `.qsb` under the installed package; without it the
+desktop falls back to slideshow/poster rasters.
 
 ## Still-frame IPC
 
@@ -32,10 +41,16 @@ When Compose Apply starts a live session, `active.json` uses `mode: "live"` with
 - shared `media_time_ms` / `paused` / `pause_reason` from the desktop
   `PlaybackClock` + policy sensors;
 - per-display `source_uv` crops from `plan_live_crops`;
+- optional per-display `perspective` uniforms (schema v3) when viewer correction
+  is enabled — sampled with `ShaderEffect` + `shaders/perspective.frag.qsb`;
 - still `displays[].image` posters for startup and decoder failure.
 
 The plugin plays muted GIF (`AnimatedImage`) or video (`MediaPlayer` +
-`VideoOutput.sourceRect`) and resyncs to the shared clock.
+`VideoOutput`) and resyncs to the shared clock. Without perspective it uses AA
+UV / `sourceRect`; with perspective it uses the projective shader path
+(`ShaderEffect` + `.qsb`, or `ShaderEffectSource` for GIF). If the shader or
+video layer fails, the plugin keeps the still poster (projective Apply raster)
+instead of AA live UV so crops stay aligned (ADR 0016).
 
 ## Dynamic stills
 
@@ -46,5 +61,6 @@ The plugin plays muted GIF (`AnimatedImage`) or video (`MediaPlayer` +
 
 ## Status
 
-Stage 6 complete for Plasma: still host + live playback IPC. Windows/macOS live
-hosts remain unsupported (ADR 0010).
+Plasma still host + live playback IPC (Stage 6) and projective live UV when
+perspective is enabled (ADR 0016 / plugin 0.3.0). Windows/macOS live hosts remain
+unsupported (ADR 0010).

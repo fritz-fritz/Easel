@@ -36,6 +36,8 @@ fn display(
         physical_origin: origin,
         bezel,
         rotation_degrees,
+        tilt_deg: 0.0,
+        yaw_deg: 0.0,
     }
 }
 

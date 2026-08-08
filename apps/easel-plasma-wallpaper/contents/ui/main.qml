@@ -1,6 +1,7 @@
 import QtQuick
 import QtQuick.Controls
 import QtQuick.Window
+import Qt.labs.folderlistmodel
 import Qt.labs.platform as Platform
 import QtMultimedia
 import org.kde.plasma.plasmoid
@@ -18,6 +19,8 @@ WallpaperItem {
     property var liveDoc: null
     property var liveCrop: null
     property real lastSeekMediaMs: -1
+    // Cleared when ShaderEffect / video layer fails; keep projective poster (not AA).
+    property bool perspectiveShaderOk: true
 
     readonly property bool liveActive: {
         return root.liveDoc
@@ -34,6 +37,32 @@ WallpaperItem {
             return true
         const src = String(root.liveDoc.live.source || "").toLowerCase()
         return src.endsWith(".gif")
+    }
+
+    readonly property bool livePerspectiveRequested: {
+        return root.liveActive && root.liveCrop && root.liveCrop.perspective
+    }
+
+    // Projective path only when the shader/texture path is healthy.
+    readonly property bool livePerspective: {
+        return root.livePerspectiveRequested && root.perspectiveShaderOk
+    }
+
+    // Projective live failed → keep the still poster (projective raster) instead of
+    // AA live UV, so live and poster crops do not diverge (ADR 0016).
+    readonly property bool perspectiveLiveFailed: {
+        return root.livePerspectiveRequested && !root.perspectiveShaderOk
+    }
+
+    readonly property var perspectiveMap: {
+        return root.livePerspective ? root.liveCrop.perspective : null
+    }
+
+    readonly property var letterRgb: {
+        const rgb = root.liveCrop && root.liveCrop.letterbox_rgb
+        if (rgb && rgb.length >= 3)
+            return rgb
+        return [24 / 255, 24 / 255, 28 / 255]
     }
 
     readonly property url imageUrl: {
@@ -74,54 +103,80 @@ WallpaperItem {
         return "file://" + path
     }
 
+    // Soft L1 budget matches crates/easel-platform GEOMETRY_MATCH_EPSILON_PX * 4.
+    readonly property int geometryMatchEpsilonBudget: 8
+
+    function geometryDistance(g, geom) {
+        if (!g)
+            return 1e9
+        return Math.abs((g.x || 0) - geom.x)
+                + Math.abs((g.y || 0) - geom.y)
+                + Math.abs((g.width || 0) - geom.width)
+                + Math.abs((g.height || 0) - geom.height)
+    }
+
+    function pickByGeometry(entries, geom, imageOnly) {
+        if (!entries || !entries.length)
+            return imageOnly ? "" : null
+        let exact = null
+        for (let i = 0; i < entries.length; ++i) {
+            const entry = entries[i]
+            const g = entry.geometry
+            if (!g)
+                continue
+            if (g.x === geom.x && g.y === geom.y
+                    && g.width === geom.width && g.height === geom.height) {
+                exact = entry
+                break
+            }
+        }
+        if (exact)
+            return imageOnly ? (exact.image || "") : exact
+        if (entries.length === 1)
+            return imageOnly ? (entries[0].image || "") : entries[0]
+        let best = null
+        let bestDist = 1e9
+        for (let j = 0; j < entries.length; ++j) {
+            const candidate = entries[j]
+            const dist = root.geometryDistance(candidate.geometry, geom)
+            if (dist <= root.geometryMatchEpsilonBudget && dist < bestDist) {
+                best = candidate
+                bestDist = dist
+            }
+        }
+        if (!best)
+            return imageOnly ? "" : null
+        return imageOnly ? (best.image || "") : best
+    }
+
     function pickImageFromState(payload) {
         try {
             const doc = JSON.parse(payload)
             if (!doc || !doc.displays || !doc.displays.length) {
                 return ""
             }
-            const geom = root.screenGeometry()
-            for (let i = 0; i < doc.displays.length; ++i) {
-                const entry = doc.displays[i]
-                const g = entry.geometry
-                if (!g) {
-                    continue
-                }
-                if (g.x === geom.x && g.y === geom.y
-                        && g.width === geom.width && g.height === geom.height) {
-                    return entry.image || ""
-                }
-            }
-            // Single-display setups: accept the only frame even if geometry drifts.
-            if (doc.displays.length === 1) {
-                return doc.displays[0].image || ""
-            }
+            return root.pickByGeometry(doc.displays, root.screenGeometry(), true)
         } catch (e) {
             return ""
         }
-        return ""
     }
 
     function pickLiveCrop(doc) {
         if (!doc || !doc.live || !doc.live.displays || !doc.live.displays.length) {
             return null
         }
-        const geom = root.screenGeometry()
-        for (let i = 0; i < doc.live.displays.length; ++i) {
-            const entry = doc.live.displays[i]
-            const g = entry.geometry
-            if (!g) {
-                continue
-            }
-            if (g.x === geom.x && g.y === geom.y
-                    && g.width === geom.width && g.height === geom.height) {
-                return entry
-            }
-        }
-        if (doc.live.displays.length === 1) {
-            return doc.live.displays[0]
-        }
-        return null
+        return root.pickByGeometry(doc.live.displays, root.screenGeometry(), false)
+    }
+
+    function stateDirUrl() {
+        const path = root.stateFilePath
+        if (!path || path.length === 0)
+            return ""
+        const normalized = path.indexOf("file:") === 0 ? path.substring(7) : path
+        const slash = normalized.lastIndexOf("/")
+        if (slash <= 0)
+            return ""
+        return "file://" + normalized.substring(0, slash)
     }
 
     function sourceRectFromUv(uv) {
@@ -194,6 +249,8 @@ WallpaperItem {
                 const doc = JSON.parse(payload)
                 root.liveDoc = doc
                 root.liveCrop = root.pickLiveCrop(doc)
+                // Retry projective path whenever IPC changes (shader may recover).
+                root.perspectiveShaderOk = true
                 root.stateImageUrl = root.pickImageFromState(payload)
                 root.applyLivePlayback()
             } catch (e) {
@@ -204,6 +261,18 @@ WallpaperItem {
         }
         request.open("GET", root.fileUrlForPath(path))
         request.send()
+    }
+
+    // Best-effort directory watch for active.json create/replace; poll remains
+    // the reliability path (FolderListModel does not always see in-place writes).
+    FolderListModel {
+        id: stateDirModel
+        folder: root.stateDirUrl()
+        nameFilters: ["active.json"]
+        showDirs: false
+        showDotAndDotDot: false
+        onCountChanged: root.reloadStateFile()
+        onDataChanged: root.reloadStateFile()
     }
 
     Timer {
@@ -226,12 +295,15 @@ WallpaperItem {
         anchors.fill: parent
         color: "#1a1a1a"
 
-        // Still / poster layer (also shown while live decode is not ready).
+        // Still / poster layer (also shown while live decode is not ready, or when
+        // projective live fails so AA UV cannot diverge from projective posters).
         // Raise above live layers until GIF Status.Ready / video Playing so a
         // loading AnimatedImage cannot blank the desktop.
         readonly property bool showPosterFallback: !root.liveActive
-                || (root.liveIsGif ? gifPlayer.status !== Image.Ready
-                                   : player.playbackState !== MediaPlayer.PlayingState)
+                || root.perspectiveLiveFailed
+                || (root.liveIsGif
+                    ? ((root.livePerspective ? gifFull.status : gifPlayer.status) !== Image.Ready)
+                    : player.playbackState !== MediaPlayer.PlayingState)
 
         Image {
             id: still
@@ -244,12 +316,14 @@ WallpaperItem {
             z: parent.showPosterFallback ? 2 : 0
         }
 
-        // GIF live crop using UV window from plan_live_crops.
+        // GIF live crop using UV window from plan_live_crops (AA path).
+        // Only when perspective was not requested — never as a silent downgrade
+        // from a failed projective session.
         Item {
             id: gifCrop
             anchors.fill: parent
             clip: true
-            visible: root.liveActive && root.liveIsGif
+            visible: root.liveActive && root.liveIsGif && !root.livePerspectiveRequested
             z: 1
 
             readonly property var uv: root.liveCrop ? root.liveCrop.source_uv : null
@@ -267,30 +341,118 @@ WallpaperItem {
                 fillMode: Image.Stretch
                 asynchronous: true
                 cache: false
-                // Keep source set while live so decode can finish under the poster.
-                source: (root.liveActive && root.liveIsGif)
+                source: (root.liveActive && root.liveIsGif && !root.livePerspectiveRequested)
                         ? root.fileUrlForPath(root.liveDoc.live.source) : ""
-                playing: root.liveActive && root.liveIsGif
+                playing: root.liveActive && root.liveIsGif && !root.livePerspectiveRequested
                         && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
             }
         }
 
-        // Video live crop; sourceRect is normalized UV (Qt Multimedia).
+        // Full-frame GIF texture for projective sampling.
+        AnimatedImage {
+            id: gifFull
+            visible: false
+            asynchronous: true
+            cache: false
+            fillMode: Image.Stretch
+            source: (root.liveActive && root.liveIsGif && root.livePerspective)
+                    ? root.fileUrlForPath(root.liveDoc.live.source) : ""
+            playing: root.liveActive && root.liveIsGif && root.livePerspective
+                    && root.liveDoc && root.liveDoc.live && !root.liveDoc.live.paused
+            width: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_width || 1) : 1
+            height: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_height || 1) : 1
+        }
+
+        ShaderEffectSource {
+            id: gifPerspectiveSource
+            sourceItem: gifFull
+            live: true
+            hideSource: true
+            visible: false
+        }
+
+        // Video live crop; sourceRect is normalized UV (Qt Multimedia) when AA.
         VideoOutput {
             id: liveVideo
             anchors.fill: parent
             fillMode: VideoOutput.Stretch
-            visible: root.liveActive && !root.liveIsGif
+            visible: root.liveActive && !root.liveIsGif && !root.livePerspectiveRequested
             sourceRect: root.sourceRectFromUv(root.liveCrop ? root.liveCrop.source_uv : null)
             z: 1
         }
 
+        // VideoOutput.layer can be null until the first frame; if it never appears,
+        // drop projective live and keep the still poster (aligned with Apply).
+        Timer {
+            interval: 2000
+            repeat: false
+            running: root.livePerspectiveRequested && !root.liveIsGif && root.perspectiveShaderOk
+            onTriggered: {
+                if (root.livePerspectiveRequested && !root.liveIsGif
+                        && root.perspectiveShaderOk && !liveVideoFull.layer) {
+                    console.warn("Easel perspective video layer unavailable; keeping projective poster")
+                    root.perspectiveShaderOk = false
+                }
+            }
+        }
+
+        // Full-frame video texture for projective sampling (no sourceRect crop).
+        VideoOutput {
+            id: liveVideoFull
+            visible: false
+            fillMode: VideoOutput.Stretch
+            width: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_width || 1) : 1
+            height: root.liveDoc && root.liveDoc.live ? (root.liveDoc.live.source_height || 1) : 1
+            layer.enabled: root.liveActive && !root.liveIsGif && root.livePerspective
+            layer.smooth: true
+        }
+
         MediaPlayer {
             id: player
-            videoOutput: liveVideo
+            videoOutput: root.livePerspective && !root.liveIsGif ? liveVideoFull : liveVideo
             audioOutput: AudioOutput {
                 muted: true
                 volume: 0
+            }
+        }
+
+        ShaderEffect {
+            id: perspectiveEffect
+            anchors.fill: parent
+            visible: root.livePerspective
+            z: 1
+            property variant source: root.liveIsGif ? gifPerspectiveSource
+                                                    : liveVideoFull.layer
+            property real eyeX: root.perspectiveMap ? root.perspectiveMap.eye_x_mm : 0
+            property real eyeY: root.perspectiveMap ? root.perspectiveMap.eye_y_mm : 0
+            property real distanceMm: root.perspectiveMap ? root.perspectiveMap.distance_mm : 600
+            property real contentX: root.perspectiveMap ? root.perspectiveMap.content_x_mm : 0
+            property real contentY: root.perspectiveMap ? root.perspectiveMap.content_y_mm : 0
+            property real contentW: root.perspectiveMap ? root.perspectiveMap.content_w_mm : 1
+            property real contentH: root.perspectiveMap ? root.perspectiveMap.content_h_mm : 1
+            property real tiltDeg: root.perspectiveMap ? root.perspectiveMap.tilt_deg : 0
+            property real yawDeg: root.perspectiveMap ? root.perspectiveMap.yaw_deg : 0
+            property real mapX: root.perspectiveMap ? root.perspectiveMap.map_x_mm : 0
+            property real mapY: root.perspectiveMap ? root.perspectiveMap.map_y_mm : 0
+            property real mapW: root.perspectiveMap ? root.perspectiveMap.map_w_mm : 1
+            property real mapH: root.perspectiveMap ? root.perspectiveMap.map_h_mm : 1
+            property real srcX: root.perspectiveMap ? root.perspectiveMap.src_x : 0
+            property real srcY: root.perspectiveMap ? root.perspectiveMap.src_y : 0
+            property real srcW: root.perspectiveMap ? root.perspectiveMap.src_w : 1
+            property real srcH: root.perspectiveMap ? root.perspectiveMap.src_h : 1
+            property real sourceW: root.liveDoc && root.liveDoc.live
+                                   ? (root.liveDoc.live.source_width || 1) : 1
+            property real sourceH: root.liveDoc && root.liveDoc.live
+                                   ? (root.liveDoc.live.source_height || 1) : 1
+            property real letterR: root.letterRgb[0]
+            property real letterG: root.letterRgb[1]
+            property real letterB: root.letterRgb[2]
+            fragmentShader: Qt.resolvedUrl("shaders/perspective.frag.qsb")
+            onStatusChanged: {
+                if (status === ShaderEffect.Error) {
+                    console.warn("Easel perspective shader failed; keeping projective poster")
+                    root.perspectiveShaderOk = false
+                }
             }
         }
 

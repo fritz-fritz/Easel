@@ -313,7 +313,7 @@ fn arrangement_cache_token(
             for display in displays {
                 let _ = write!(
                     material,
-                    "|{}:{:.3},{:.3}:{:.3}x{:.3}:b{:.2},{:.2},{:.2},{:.2}:r{}:{}x{}",
+                    "|{}:{:.3},{:.3}:{:.3}x{:.3}:b{:.2},{:.2},{:.2},{:.2}:r{}:t{:.2}:y{:.2}:{}x{}",
                     display.id.to_hyphenated_string(),
                     display.physical_origin.x.0,
                     display.physical_origin.y.0,
@@ -324,6 +324,8 @@ fn arrangement_cache_token(
                     display.bezel.right.0,
                     display.bezel.bottom.0,
                     display.rotation_degrees,
+                    display.tilt_deg,
+                    display.yaw_deg,
                     display.native_pixels.width,
                     display.native_pixels.height,
                 );
@@ -499,6 +501,8 @@ mod tests {
             },
             bezel: BezelInsets::default(),
             rotation_degrees: 0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
         };
 
         let job = RasterJob {
@@ -554,6 +558,8 @@ mod tests {
             },
             bezel: BezelInsets::default(),
             rotation_degrees: 0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
         };
         let base = CompositionSettings {
             fit_mode: FitMode::Cover,
@@ -617,6 +623,8 @@ mod tests {
             content_y_mm: 0.0,
             content_w_mm: 100.0,
             content_h_mm: 100.0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
             // Image covers only the middle half of the content height.
             map_x_mm: 0.0,
             map_y_mm: 25.0,

@@ -16,7 +16,7 @@ use crate::fit::plan_fit;
 use crate::perspective::AngularPerspective;
 
 /// Version token included in cache keys when raster semantics change.
-pub const RENDERER_VERSION: &str = "4";
+pub const RENDERER_VERSION: &str = "5";
 
 /// Why a deterministic raster output is being produced.
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
@@ -26,15 +26,15 @@ pub enum RenderPurpose {
     StaticWallpaper,
     /// The safe fallback shown before or instead of live playback.
     ///
-    /// Without perspective, crop/placement matches [`Self::LiveCompositorFrame`].
-    /// With an active viewer pose (ADR 0015), posters use projective stills while
-    /// continuous live UV stays axis-aligned for this stage.
+    /// Safe still fallback before or instead of live playback.
+    ///
+    /// Crop/placement matches [`Self::LiveCompositorFrame`], including projective
+    /// maps when the arrangement viewer pose is active (ADR 0015 / 0016).
     LivePosterFrame,
     /// Canonical live crop/placement purpose for a shared-clock compositor.
     ///
-    /// [`crate::plan_live_crops`] plans with this purpose. Hosts that cannot
-    /// apply native video transforms rasterize these ops instead. Stage 7.5 keeps
-    /// this path axis-aligned even when perspective is enabled on stills.
+    /// [`crate::plan_live_crops`] plans with this purpose. Hosts apply AA UV crops
+    /// or, when present, projective sampling parameters from [`OutputOperation::perspective`].
     LiveCompositorFrame,
 }
 
@@ -353,28 +353,25 @@ impl RenderPlan {
         for display in &self.displays {
             let content = content_rect(display)?;
             let native = display.native_pixels;
-            // Live compositor UV stays AA; stills/posters get projective sampling.
-            let perspective = if self.purpose == RenderPurpose::LiveCompositorFrame {
-                None
-            } else {
-                AngularPerspective::new(
-                    composition.viewer,
-                    eye_x,
-                    eye_y,
-                    content.x.0,
-                    content.y.0,
-                    content.width.0,
-                    content.height.0,
-                    map_x,
-                    map_y,
-                    map_w,
-                    map_h,
-                    src_x,
-                    src_y,
-                    src_w,
-                    src_h,
-                )
-            };
+            let perspective = AngularPerspective::new(
+                composition.viewer,
+                eye_x,
+                eye_y,
+                content.x.0,
+                content.y.0,
+                content.width.0,
+                content.height.0,
+                display.tilt_deg,
+                display.yaw_deg,
+                map_x,
+                map_y,
+                map_w,
+                map_h,
+                src_x,
+                src_y,
+                src_w,
+                src_h,
+            );
 
             if let Some(map) = perspective {
                 let source_crop = map.source_bounds(source_size.width, source_size.height);
@@ -664,6 +661,8 @@ mod tests {
             },
             bezel: BezelInsets::default(),
             rotation_degrees: 0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
         }
     }
 
@@ -853,7 +852,7 @@ mod tests {
     }
 
     #[test]
-    fn live_compositor_purpose_stays_axis_aligned_with_viewer() {
+    fn live_compositor_purpose_matches_poster_with_viewer() {
         let (left, right) = two_physical_row();
         let displays = [left, right];
         let source = NativePixelSize {
@@ -881,8 +880,42 @@ mod tests {
             .expect("poster")
             .operations(source, &composition)
             .expect("poster ops");
-        assert!(live.iter().all(|op| op.perspective.is_none()));
-        assert!(poster.iter().all(|op| op.perspective.is_some()));
-        assert_ne!(live, poster);
+        assert_eq!(live, poster);
+        assert!(live.iter().all(|op| op.perspective.is_some()));
+    }
+
+    #[test]
+    fn panel_yaw_changes_perspective_ops() {
+        let (mut left, right) = two_physical_row();
+        left.yaw_deg = 12.0;
+        let displays = [left, right];
+        let source = NativePixelSize {
+            width: 200,
+            height: 100,
+        };
+        let composition = CompositionSettings {
+            fit_mode: FitMode::Cover,
+            layout_mode: LayoutMode::PhysicalSpan,
+            zoom: 1.0,
+            focal_x: 0.5,
+            focal_y: 0.5,
+            viewer: ViewerPose {
+                enabled: true,
+                view_distance_mm: 600.0,
+                eye_offset_x_mm: 0.0,
+                eye_offset_y_mm: 0.0,
+            },
+        };
+        let yawed = RenderPlan::for_displays(&displays)
+            .expect("plan")
+            .operations(source, &composition)
+            .expect("ops");
+        let mut flat_left = displays[0].clone();
+        flat_left.yaw_deg = 0.0;
+        let flat = RenderPlan::for_displays(&[flat_left, displays[1].clone()])
+            .expect("plan")
+            .operations(source, &composition)
+            .expect("ops");
+        assert_ne!(yawed[0].perspective, flat[0].perspective);
     }
 }

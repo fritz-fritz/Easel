@@ -2,26 +2,27 @@
 // License, v. 2.0. If a copy of the MPL was not distributed with this
 // file, You can obtain one at https://mozilla.org/MPL/2.0/.
 
-//! Angular FOV perspective sampling for coplanar PhysicalSpan (ADR 0015).
+//! Angular FOV perspective sampling for PhysicalSpan (ADR 0015 / 0016).
+//!
+//! Panels may carry small tilt/yaw away from the coplanar wall. The image map
+//! stays on the z=0 span plane (`place_source_on_span`); destination pixels are
+//! lifted onto each panel plane, then projected through the eye with `atan2`.
+//! Identity tilt/yaw recovers the Stage 7.5 coplanar map.
 
 use easel_core::ViewerPose;
 
 use crate::plan::PixelRect;
 
 /// Destination→source angular perspective map for one display output.
-///
-/// Wall millimeters project through `atan2(delta, distance)` into the eye's FOV;
-/// that FOV is mapped onto the axis-aligned source crop from `place_source_on_span`.
-/// As `distance → ∞` the map approaches linear PhysicalSpan sampling.
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct AngularPerspective {
     /// Eye X in arrangement millimeters.
     pub eye_x_mm: f64,
     /// Eye Y in arrangement millimeters.
     pub eye_y_mm: f64,
-    /// Positive view distance in millimeters.
+    /// Positive view distance in millimeters (eye at z = −distance).
     pub distance_mm: f64,
-    /// Display content rectangle in millimeters.
+    /// Display content rectangle in millimeters (unrotated bounds).
     pub content_x_mm: f64,
     /// Display content rectangle in millimeters.
     pub content_y_mm: f64,
@@ -29,7 +30,11 @@ pub struct AngularPerspective {
     pub content_w_mm: f64,
     /// Display content height in millimeters.
     pub content_h_mm: f64,
-    /// Left edge of the mapped span/image rectangle in millimeters.
+    /// Panel tilt about local X (degrees; positive tips top edge toward viewer).
+    pub tilt_deg: f64,
+    /// Panel yaw about local Y (degrees; positive turns right edge toward viewer).
+    pub yaw_deg: f64,
+    /// Left edge of the mapped span/image rectangle in millimeters (z = 0).
     pub map_x_mm: f64,
     /// Top edge of the mapped span/image rectangle in millimeters.
     pub map_y_mm: f64,
@@ -59,6 +64,8 @@ impl AngularPerspective {
         content_y_mm: f64,
         content_w_mm: f64,
         content_h_mm: f64,
+        tilt_deg: f64,
+        yaw_deg: f64,
         map_x_mm: f64,
         map_y_mm: f64,
         map_w_mm: f64,
@@ -71,6 +78,9 @@ impl AngularPerspective {
         if !pose.is_active() || map_w_mm <= 0.0 || map_h_mm <= 0.0 {
             return None;
         }
+        if !tilt_deg.is_finite() || !yaw_deg.is_finite() {
+            return None;
+        }
         Some(Self {
             eye_x_mm,
             eye_y_mm,
@@ -79,6 +89,8 @@ impl AngularPerspective {
             content_y_mm,
             content_w_mm,
             content_h_mm,
+            tilt_deg,
+            yaw_deg,
             map_x_mm,
             map_y_mm,
             map_w_mm,
@@ -92,8 +104,8 @@ impl AngularPerspective {
 
     /// Maps a destination pixel center to continuous source coordinates.
     ///
-    /// Returns [`None`] when the wall point lies outside the mapped image rectangle
-    /// (Contain letterbox), so the raster path can keep the canvas fill color.
+    /// Returns [`None`] when the wall/map sample lies outside the mapped image
+    /// rectangle (Contain letterbox), so the raster path can keep the canvas fill.
     #[must_use]
     pub fn source_xy(
         self,
@@ -104,21 +116,17 @@ impl AngularPerspective {
     ) -> Option<(f64, f64)> {
         let nx = (f64::from(dest_x) + 0.5) / f64::from(dest_w.max(1));
         let ny = (f64::from(dest_y) + 0.5) / f64::from(dest_h.max(1));
-        let wall_x = self.content_x_mm + nx * self.content_w_mm;
-        let wall_y = self.content_y_mm + ny * self.content_h_mm;
-        if !self.wall_in_map(wall_x, wall_y) {
+        let (ax, ay) = self.panel_angles(nx, ny);
+        let (aleft, aright, atop, abottom) = self.map_angle_bounds();
+        let u = normalize_unclamped(ax, aleft, aright);
+        let v = normalize_unclamped(ay, atop, abottom);
+        if !(0.0..=1.0).contains(&u) || !(0.0..=1.0).contains(&v) {
             return None;
         }
-        let ax = angle(wall_x - self.eye_x_mm, self.distance_mm);
-        let ay = angle(wall_y - self.eye_y_mm, self.distance_mm);
-
-        let (aleft, aright, atop, abottom) = self.map_angle_bounds();
-        let u = normalize(ax, aleft, aright);
-        let v = normalize(ay, atop, abottom);
         Some((self.src_x + u * self.src_w, self.src_y + v * self.src_h))
     }
 
-    /// True when a wall-space point falls inside the placed image map rectangle.
+    /// True when a coplanar wall-space point falls inside the mapped image rectangle.
     #[must_use]
     pub fn wall_in_map(self, wall_x: f64, wall_y: f64) -> bool {
         wall_x >= self.map_x_mm
@@ -135,16 +143,9 @@ impl AngularPerspective {
         let mut min_y = f64::INFINITY;
         let mut max_x = f64::NEG_INFINITY;
         let mut max_y = f64::NEG_INFINITY;
+        let (aleft, aright, atop, abottom) = self.map_angle_bounds();
         for (u, v) in corners {
-            // Sample content corners through the angular map (skip letterboxed corners).
-            let wall_x = self.content_x_mm + u * self.content_w_mm;
-            let wall_y = self.content_y_mm + v * self.content_h_mm;
-            if !self.wall_in_map(wall_x, wall_y) {
-                continue;
-            }
-            let ax = angle(wall_x - self.eye_x_mm, self.distance_mm);
-            let ay = angle(wall_y - self.eye_y_mm, self.distance_mm);
-            let (aleft, aright, atop, abottom) = self.map_angle_bounds();
+            let (ax, ay) = self.panel_angles(u, v);
             let su = normalize(ax, aleft, aright);
             let sv = normalize(ay, atop, abottom);
             let sx = self.src_x + su * self.src_w;
@@ -155,7 +156,6 @@ impl AngularPerspective {
             max_y = max_y.max(sy);
         }
         if !min_x.is_finite() {
-            // Entire content is outside the mapped image (full letterbox).
             return PixelRect {
                 x: 0,
                 y: 0,
@@ -180,29 +180,91 @@ impl AngularPerspective {
         }
     }
 
+    /// Serializes map fields for Plasma IPC / GPU uniforms (mm + source pixels).
+    #[must_use]
+    pub fn to_uniform_array(self) -> [f64; 17] {
+        [
+            self.eye_x_mm,
+            self.eye_y_mm,
+            self.distance_mm,
+            self.content_x_mm,
+            self.content_y_mm,
+            self.content_w_mm,
+            self.content_h_mm,
+            self.tilt_deg,
+            self.yaw_deg,
+            self.map_x_mm,
+            self.map_y_mm,
+            self.map_w_mm,
+            self.map_h_mm,
+            self.src_x,
+            self.src_y,
+            self.src_w,
+            self.src_h,
+        ]
+    }
+
+    fn panel_angles(self, u: f64, v: f64) -> (f64, f64) {
+        let (px, py, pz) = self.panel_point(u, v);
+        let dx = px - self.eye_x_mm;
+        let dy = py - self.eye_y_mm;
+        let dz = pz - (-self.distance_mm);
+        (angle(dx, dz), angle(dy, dz))
+    }
+
+    fn panel_point(self, u: f64, v: f64) -> (f64, f64, f64) {
+        let center_x = self.content_x_mm + self.content_w_mm * 0.5;
+        let center_y = self.content_y_mm + self.content_h_mm * 0.5;
+        let local_x = (u - 0.5) * self.content_w_mm;
+        let local_y = (v - 0.5) * self.content_h_mm;
+        let (rx, ry, rz) = rotate_tilt_yaw(local_x, local_y, 0.0, self.tilt_deg, self.yaw_deg);
+        (center_x + rx, center_y + ry, rz)
+    }
+
     fn map_angle_bounds(self) -> (f64, f64, f64, f64) {
-        let xs = [self.map_x_mm, self.map_x_mm + self.map_w_mm];
-        let ys = [self.map_y_mm, self.map_y_mm + self.map_h_mm];
+        let corners = [
+            (self.map_x_mm, self.map_y_mm),
+            (self.map_x_mm + self.map_w_mm, self.map_y_mm),
+            (self.map_x_mm, self.map_y_mm + self.map_h_mm),
+            (self.map_x_mm + self.map_w_mm, self.map_y_mm + self.map_h_mm),
+        ];
         let mut aleft = f64::INFINITY;
         let mut aright = f64::NEG_INFINITY;
         let mut atop = f64::INFINITY;
         let mut abottom = f64::NEG_INFINITY;
-        for x in xs {
-            let a = angle(x - self.eye_x_mm, self.distance_mm);
-            aleft = aleft.min(a);
-            aright = aright.max(a);
-        }
-        for y in ys {
-            let a = angle(y - self.eye_y_mm, self.distance_mm);
-            atop = atop.min(a);
-            abottom = abottom.max(a);
+        for (x, y) in corners {
+            let dx = x - self.eye_x_mm;
+            let dy = y - self.eye_y_mm;
+            let dz = 0.0 - (-self.distance_mm);
+            let ax = angle(dx, dz);
+            let ay = angle(dy, dz);
+            aleft = aleft.min(ax);
+            aright = aright.max(ax);
+            atop = atop.min(ay);
+            abottom = abottom.max(ay);
         }
         (aleft, aright, atop, abottom)
     }
 }
 
-fn angle(delta_mm: f64, distance_mm: f64) -> f64 {
-    delta_mm.atan2(distance_mm.max(f64::EPSILON))
+fn rotate_tilt_yaw(x: f64, y: f64, z: f64, tilt_deg: f64, yaw_deg: f64) -> (f64, f64, f64) {
+    let tilt = tilt_deg.to_radians();
+    let yaw = yaw_deg.to_radians();
+    let (st, ct) = (tilt.sin(), tilt.cos());
+    // Rx(tilt)
+    let y1 = y * ct - z * st;
+    let z1 = y * st + z * ct;
+    let x1 = x;
+    let (sy, cy) = (yaw.sin(), yaw.cos());
+    // Ry(yaw)
+    let x2 = x1 * cy + z1 * sy;
+    let y2 = y1;
+    let z2 = -x1 * sy + z1 * cy;
+    (x2, y2, z2)
+}
+
+fn angle(delta_mm: f64, depth_mm: f64) -> f64 {
+    delta_mm.atan2(depth_mm.max(f64::EPSILON))
 }
 
 fn normalize(value: f64, min: f64, max: f64) -> f64 {
@@ -213,10 +275,27 @@ fn normalize(value: f64, min: f64, max: f64) -> f64 {
     }
 }
 
+fn normalize_unclamped(value: f64, min: f64, max: f64) -> f64 {
+    if (max - min).abs() < f64::EPSILON {
+        0.5
+    } else {
+        (value - min) / (max - min)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
     use easel_core::DEFAULT_VIEW_DISTANCE_MM;
+
+    fn active_pose() -> ViewerPose {
+        ViewerPose {
+            enabled: true,
+            view_distance_mm: DEFAULT_VIEW_DISTANCE_MM,
+            eye_offset_x_mm: 0.0,
+            eye_offset_y_mm: 0.0,
+        }
+    }
 
     #[test]
     fn large_distance_approaches_linear_uv() {
@@ -227,8 +306,8 @@ mod tests {
             eye_offset_y_mm: 0.0,
         };
         let map = AngularPerspective::new(
-            pose, 300.0, 150.0, 0.0, 0.0, 600.0, 300.0, 0.0, 0.0, 600.0, 300.0, 0.0, 0.0, 100.0,
-            50.0,
+            pose, 300.0, 150.0, 0.0, 0.0, 600.0, 300.0, 0.0, 0.0, 0.0, 0.0, 600.0, 300.0, 0.0, 0.0,
+            100.0, 50.0,
         )
         .expect("map");
         let (sx, sy) = map.source_xy(0, 0, 100, 50).expect("inside map");
@@ -236,24 +315,181 @@ mod tests {
         assert!((0.0..2.0).contains(&sy), "sy={sy}");
         let (sx2, _) = map.source_xy(99, 0, 100, 50).expect("inside map");
         assert!(sx2 > 90.0, "sx2={sx2}");
-        let _ = DEFAULT_VIEW_DISTANCE_MM;
     }
 
     #[test]
     fn wall_outside_map_returns_none() {
-        let pose = ViewerPose {
-            enabled: true,
-            view_distance_mm: DEFAULT_VIEW_DISTANCE_MM,
-            eye_offset_x_mm: 0.0,
-            eye_offset_y_mm: 0.0,
-        };
-        // Content spans 0..600; mapped image is only the centered half-width strip.
         let map = AngularPerspective::new(
-            pose, 300.0, 150.0, 0.0, 0.0, 600.0, 300.0, 150.0, 0.0, 300.0, 300.0, 0.0, 0.0, 100.0,
+            active_pose(),
+            300.0,
+            150.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            150.0,
+            0.0,
+            300.0,
+            300.0,
+            0.0,
+            0.0,
+            100.0,
             50.0,
         )
         .expect("map");
         assert!(map.source_xy(0, 25, 100, 50).is_none());
         assert!(map.source_xy(50, 25, 100, 50).is_some());
+    }
+
+    #[test]
+    fn zero_angles_match_coplanar_sampling() {
+        let with_angles = AngularPerspective::new(
+            active_pose(),
+            300.0,
+            150.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+        )
+        .expect("map");
+        let (sx, sy) = with_angles.source_xy(25, 10, 100, 50).expect("sample");
+        // Coplanar wall point at the same UV must agree with the 3D path at 0 angles.
+        let wall_x = 0.0 + (25.0 + 0.5) / 100.0 * 600.0;
+        let wall_y = 0.0 + (10.0 + 0.5) / 50.0 * 300.0;
+        let ax = angle(wall_x - 300.0, 600.0);
+        let ay = angle(wall_y - 150.0, 600.0);
+        let (aleft, aright, atop, abottom) = with_angles.map_angle_bounds();
+        let u = normalize(ax, aleft, aright);
+        let v = normalize(ay, atop, abottom);
+        let expect_x = u * 100.0;
+        let expect_y = v * 50.0;
+        assert!((sx - expect_x).abs() < 1e-6, "sx={sx} expect={expect_x}");
+        assert!((sy - expect_y).abs() < 1e-6, "sy={sy} expect={expect_y}");
+    }
+
+    #[test]
+    fn nonzero_yaw_changes_sample() {
+        let flat = AngularPerspective::new(
+            active_pose(),
+            300.0,
+            150.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+        )
+        .expect("flat");
+        let yawed = AngularPerspective::new(
+            active_pose(),
+            300.0,
+            150.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            15.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+        )
+        .expect("yawed");
+        let a = flat.source_xy(10, 20, 100, 50).expect("flat sample");
+        let b = yawed.source_xy(10, 20, 100, 50).expect("yawed sample");
+        assert_ne!(a, b);
+    }
+
+    /// Field order of [`AngularPerspective::to_uniform_array`] must match the
+    /// GLSL `ubuf` layout in `apps/easel-plasma-wallpaper/.../perspective.frag`
+    /// (`eyeX`…`srcH`). GPU ShaderEffect pixel parity remains Plasma-host-only.
+    #[test]
+    fn uniform_array_matches_glsl_field_order_and_pinned_samples() {
+        let map = AngularPerspective::new(
+            active_pose(),
+            300.0,
+            150.0,
+            10.0,
+            -5.0,
+            600.0,
+            300.0,
+            8.0,
+            12.0,
+            0.0,
+            0.0,
+            600.0,
+            300.0,
+            0.0,
+            0.0,
+            100.0,
+            50.0,
+        )
+        .expect("map");
+        let uniforms = map.to_uniform_array();
+        let expected = [
+            map.eye_x_mm,
+            map.eye_y_mm,
+            map.distance_mm,
+            map.content_x_mm,
+            map.content_y_mm,
+            map.content_w_mm,
+            map.content_h_mm,
+            map.tilt_deg,
+            map.yaw_deg,
+            map.map_x_mm,
+            map.map_y_mm,
+            map.map_w_mm,
+            map.map_h_mm,
+            map.src_x,
+            map.src_y,
+            map.src_w,
+            map.src_h,
+        ];
+        for (index, (got, want)) in uniforms.iter().zip(expected).enumerate() {
+            assert!(
+                (got - want).abs() < f64::EPSILON,
+                "uniform[{index}] got {got} want {want}"
+            );
+        }
+        // Pinned CPU samples (nx, ny) → (sx, sy); bump only with intentional math changes.
+        let samples = [
+            ((50_u32, 25_u32), (52.340_836_519_899, 24.654_746_022_674)),
+            ((10, 10), (13.506_438_546_651, 10.505_066_333_772)),
+            ((90, 40), (95.188_309_475_704, 40.686_369_969_728)),
+        ];
+        for ((nx, ny), (expect_x, expect_y)) in samples {
+            let (sx, sy) = map.source_xy(nx, ny, 100, 50).expect("inside");
+            assert!(
+                (sx - expect_x).abs() < 1e-9 && (sy - expect_y).abs() < 1e-9,
+                "sample ({nx},{ny}): got ({sx},{sy}) expect ({expect_x},{expect_y})"
+            );
+        }
     }
 }

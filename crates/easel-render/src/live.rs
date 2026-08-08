@@ -6,11 +6,12 @@
 //!
 //! [`plan_live_crops`] is the canonical live crop/placement path. It plans with
 //! [`RenderPurpose::LiveCompositorFrame`]. Still poster rasters use
-//! [`RenderPurpose::LivePosterFrame`] but must share the same
-//! [`RenderPlan::operations`] math so poster fallback and live playback stay aligned.
+//! [`RenderPurpose::LivePosterFrame`] and share the same
+//! [`RenderPlan::operations`] math (including projective maps when enabled).
 
 use easel_core::{Display, DisplayId, LogicalRect, NativePixelSize};
 
+use crate::perspective::AngularPerspective;
 use crate::plan::{
     CompositionSettings, LetterboxColor, PixelRect, RenderPlan, RenderPlanError, RenderPurpose,
 };
@@ -41,10 +42,12 @@ pub struct LiveDisplayCrop {
     pub source_crop: PixelRect,
     /// Placement of the resampled crop on the output canvas.
     pub destination_rect: PixelRect,
-    /// Normalized UV window matching [`Self::source_crop`].
+    /// Normalized UV window matching [`Self::source_crop`] (AA fallback / bounds).
     pub source_uv: NormalizedRect,
     /// Fill behind uncovered canvas pixels (Contain / letterbox).
     pub letterbox_color: LetterboxColor,
+    /// Projective sample map when arrangement viewer pose is active (ADR 0016).
+    pub perspective: Option<AngularPerspective>,
 }
 
 /// Plans per-display live crops for one source size and composition.
@@ -75,6 +78,7 @@ pub fn plan_live_crops(
             destination_rect: operation.destination_rect,
             source_uv: normalized_source_uv(operation.source_crop, source_size),
             letterbox_color: operation.letterbox_color,
+            perspective: operation.perspective,
         })
         .collect())
 }
@@ -124,6 +128,8 @@ mod tests {
             },
             bezel: BezelInsets::default(),
             rotation_degrees: 0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
         }
     }
 

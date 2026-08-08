@@ -6,9 +6,10 @@
 //! (ADR 0008).
 //!
 //! Desktop automation writes this file after rendering per-display stills or
-//! starting a live session. The Plasma plugin watches it and updates still
-//! `Image` sources or live `MediaPlayer` / `AnimatedImage` crops without
-//! requiring `PlasmaShell.evaluateScript` on every tick.
+//! starting a live session. The Plasma plugin polls it (with an optional
+//! directory watcher) and updates still `Image` sources or live `MediaPlayer` /
+//! `AnimatedImage` crops without requiring `PlasmaShell.evaluateScript` on every
+//! tick.
 
 use std::fs;
 use std::path::{Path, PathBuf};
@@ -23,7 +24,7 @@ use crate::{BackendError, DisplayWallpaper, LiveDisplaySurface};
 /// Schema version for [`PlasmaWallpaperState`].
 ///
 /// Version 1 was still-only. Version 2 adds optional [`PlasmaLiveState`].
-pub const PLASMA_WALLPAPER_STATE_VERSION: u32 = 2;
+pub const PLASMA_WALLPAPER_STATE_VERSION: u32 = 3;
 
 /// Oldest schema version this crate still reads.
 pub const PLASMA_WALLPAPER_STATE_MIN_VERSION: u32 = 1;
@@ -78,12 +79,61 @@ impl From<LogicalRect> for PlasmaWallpaperGeometry {
     }
 }
 
+/// Max L1 distance (px) for soft geometry match when exact equality fails.
+///
+/// Covers ±1–2 px virtual-desktop / fractional-scale drift without stealing a
+/// different monitor's crop on typical multi-display layouts.
+pub const GEOMETRY_MATCH_EPSILON_PX: i32 = 2;
+
 impl PlasmaWallpaperGeometry {
-    /// Returns whether this geometry matches a Plasma screen rectangle.
+    /// Returns whether this geometry matches a Plasma screen rectangle exactly.
     #[must_use]
     pub const fn matches(self, x: i32, y: i32, width: u32, height: u32) -> bool {
         self.x == x && self.y == y && self.width == width && self.height == height
     }
+
+    /// L1 distance in origin + size versus a Plasma screen rectangle.
+    #[must_use]
+    pub fn distance_l1(self, x: i32, y: i32, width: u32, height: u32) -> i64 {
+        i64::from(self.x.abs_diff(x))
+            + i64::from(self.y.abs_diff(y))
+            + i64::from(self.width.abs_diff(width))
+            + i64::from(self.height.abs_diff(height))
+    }
+
+    /// True when [`Self::distance_l1`] is within [`GEOMETRY_MATCH_EPSILON_PX`] per axis budget.
+    #[must_use]
+    pub fn matches_soft(self, x: i32, y: i32, width: u32, height: u32) -> bool {
+        self.distance_l1(x, y, width, height) <= i64::from(GEOMETRY_MATCH_EPSILON_PX) * 4
+    }
+}
+
+fn pick_geometry_index(
+    geometries: impl IntoIterator<Item = PlasmaWallpaperGeometry>,
+    x: i32,
+    y: i32,
+    width: u32,
+    height: u32,
+) -> Option<usize> {
+    let geometries: Vec<_> = geometries.into_iter().collect();
+    if geometries.is_empty() {
+        return None;
+    }
+    if let Some(index) = geometries
+        .iter()
+        .position(|geometry| geometry.matches(x, y, width, height))
+    {
+        return Some(index);
+    }
+    if geometries.len() == 1 {
+        return Some(0);
+    }
+    geometries
+        .iter()
+        .enumerate()
+        .filter(|(_, geometry)| geometry.matches_soft(x, y, width, height))
+        .min_by_key(|(_, geometry)| geometry.distance_l1(x, y, width, height))
+        .map(|(index, _)| index)
 }
 
 /// Normalized source UV window (`0..=1`) for live crops.
@@ -99,6 +149,69 @@ pub struct PlasmaSourceUv {
     pub height: f64,
 }
 
+/// Projective sampling uniforms for live GPU/QML (ADR 0016).
+#[derive(Clone, Copy, Debug, PartialEq, Serialize, Deserialize)]
+pub struct PlasmaPerspectiveMap {
+    /// Eye X (mm).
+    pub eye_x_mm: f64,
+    /// Eye Y (mm).
+    pub eye_y_mm: f64,
+    /// View distance (mm).
+    pub distance_mm: f64,
+    /// Content origin X (mm).
+    pub content_x_mm: f64,
+    /// Content origin Y (mm).
+    pub content_y_mm: f64,
+    /// Content width (mm).
+    pub content_w_mm: f64,
+    /// Content height (mm).
+    pub content_h_mm: f64,
+    /// Panel tilt (degrees).
+    pub tilt_deg: f64,
+    /// Panel yaw (degrees).
+    pub yaw_deg: f64,
+    /// Map origin X (mm).
+    pub map_x_mm: f64,
+    /// Map origin Y (mm).
+    pub map_y_mm: f64,
+    /// Map width (mm).
+    pub map_w_mm: f64,
+    /// Map height (mm).
+    pub map_h_mm: f64,
+    /// Source crop X (px).
+    pub src_x: f64,
+    /// Source crop Y (px).
+    pub src_y: f64,
+    /// Source crop width (px).
+    pub src_w: f64,
+    /// Source crop height (px).
+    pub src_h: f64,
+}
+
+impl From<crate::PerspectiveSampleMap> for PlasmaPerspectiveMap {
+    fn from(value: crate::PerspectiveSampleMap) -> Self {
+        Self {
+            eye_x_mm: value.eye_x_mm,
+            eye_y_mm: value.eye_y_mm,
+            distance_mm: value.distance_mm,
+            content_x_mm: value.content_x_mm,
+            content_y_mm: value.content_y_mm,
+            content_w_mm: value.content_w_mm,
+            content_h_mm: value.content_h_mm,
+            tilt_deg: value.tilt_deg,
+            yaw_deg: value.yaw_deg,
+            map_x_mm: value.map_x_mm,
+            map_y_mm: value.map_y_mm,
+            map_w_mm: value.map_w_mm,
+            map_h_mm: value.map_h_mm,
+            src_x: value.src_x,
+            src_y: value.src_y,
+            src_w: value.src_w,
+            src_h: value.src_h,
+        }
+    }
+}
+
 /// Per-display live crop published beside still posters.
 #[derive(Clone, Debug, PartialEq, Serialize, Deserialize)]
 pub struct PlasmaLiveDisplayCrop {
@@ -106,8 +219,18 @@ pub struct PlasmaLiveDisplayCrop {
     pub geometry: PlasmaWallpaperGeometry,
     /// UV window into the shared media source.
     pub source_uv: PlasmaSourceUv,
+    /// Optional projective sample map (perspective correction).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub perspective: Option<PlasmaPerspectiveMap>,
+    /// Letterbox fill RGB in `0..=1` (Contain / outside map).
+    #[serde(default = "default_letterbox_rgb")]
+    pub letterbox_rgb: [f64; 3],
     /// Poster still for this display (startup / failure fallback).
     pub poster: String,
+}
+
+fn default_letterbox_rgb() -> [f64; 3] {
+    [24.0 / 255.0, 24.0 / 255.0, 28.0 / 255.0]
 }
 
 /// Live session directive consumed by the Plasma plugin (shared clock via IPC).
@@ -219,6 +342,8 @@ impl PlasmaWallpaperState {
                     width: surface.source_uv.width,
                     height: surface.source_uv.height,
                 },
+                perspective: surface.perspective.map(PlasmaPerspectiveMap::from),
+                letterbox_rgb: surface.letterbox_rgb,
                 poster: path_to_image_ref(&surface.media.poster_frame),
             })
             .collect();
@@ -253,15 +378,25 @@ impl PlasmaWallpaperState {
     }
 
     /// Finds the still image for a Plasma screen geometry, if present.
+    ///
+    /// Match order: exact → single-display fallback → nearest within soft epsilon.
     #[must_use]
     pub fn image_for_geometry(&self, x: i32, y: i32, width: u32, height: u32) -> Option<&str> {
+        let index = pick_geometry_index(
+            self.displays.iter().map(|display| display.geometry),
+            x,
+            y,
+            width,
+            height,
+        )?;
         self.displays
-            .iter()
-            .find(|display| display.geometry.matches(x, y, width, height))
+            .get(index)
             .map(|display| display.image.as_str())
     }
 
     /// Finds the live crop for a Plasma screen geometry, if present.
+    ///
+    /// Match order: exact → single-display fallback → nearest within soft epsilon.
     #[must_use]
     pub fn live_crop_for_geometry(
         &self,
@@ -270,11 +405,15 @@ impl PlasmaWallpaperState {
         width: u32,
         height: u32,
     ) -> Option<&PlasmaLiveDisplayCrop> {
-        self.live
-            .as_ref()?
-            .displays
-            .iter()
-            .find(|display| display.geometry.matches(x, y, width, height))
+        let live = self.live.as_ref()?;
+        let index = pick_geometry_index(
+            live.displays.iter().map(|display| display.geometry),
+            x,
+            y,
+            width,
+            height,
+        )?;
+        live.displays.get(index)
     }
 }
 
@@ -437,6 +576,8 @@ mod tests {
                 width: 0.5,
                 height: 1.0,
             },
+            perspective: None,
+            letterbox_rgb: [24.0 / 255.0, 24.0 / 255.0, 28.0 / 255.0],
             source_width: 3840,
             source_height: 1080,
         }
@@ -478,7 +619,11 @@ mod tests {
             loaded.image_for_geometry(2560, 0, 1920, 1080),
             Some(expected_image.as_str())
         );
-        assert!(loaded.image_for_geometry(0, 0, 800, 600).is_none());
+        // Single-display documents accept geometry drift (align with QML picker).
+        assert_eq!(
+            loaded.image_for_geometry(0, 0, 800, 600),
+            Some(expected_image.as_str())
+        );
         let _ = fs::remove_dir_all(root);
     }
 
@@ -572,6 +717,69 @@ mod tests {
             dir.ends_with("/easel/plasma-wallpaper")
                 || dir.ends_with("/easel/data/plasma-wallpaper"),
             "unexpected plasma state dir {dir}"
+        );
+    }
+
+    #[test]
+    fn soft_geometry_match_accepts_small_drift() {
+        let state = PlasmaWallpaperState {
+            version: PLASMA_WALLPAPER_STATE_VERSION,
+            updated_at: 1,
+            mode: PlasmaWallpaperMode::Still,
+            displays: vec![
+                PlasmaWallpaperDisplayState {
+                    geometry: PlasmaWallpaperGeometry {
+                        x: 0,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                    },
+                    image: "file:///a.png".into(),
+                },
+                PlasmaWallpaperDisplayState {
+                    geometry: PlasmaWallpaperGeometry {
+                        x: 1920,
+                        y: 0,
+                        width: 1920,
+                        height: 1080,
+                    },
+                    image: "file:///b.png".into(),
+                },
+            ],
+            live: None,
+        };
+        assert_eq!(
+            state.image_for_geometry(0, 0, 1920, 1080),
+            Some("file:///a.png")
+        );
+        assert_eq!(
+            state.image_for_geometry(1, 0, 1920, 1080),
+            Some("file:///a.png")
+        );
+        assert_eq!(
+            state.image_for_geometry(1921, 1, 1920, 1080),
+            Some("file:///b.png")
+        );
+        assert!(state.image_for_geometry(800, 400, 1920, 1080).is_none());
+
+        let single = PlasmaWallpaperState {
+            version: PLASMA_WALLPAPER_STATE_VERSION,
+            updated_at: 1,
+            mode: PlasmaWallpaperMode::Still,
+            displays: vec![PlasmaWallpaperDisplayState {
+                geometry: PlasmaWallpaperGeometry {
+                    x: 100,
+                    y: 200,
+                    width: 1280,
+                    height: 720,
+                },
+                image: "file:///only.png".into(),
+            }],
+            live: None,
+        };
+        assert_eq!(
+            single.image_for_geometry(0, 0, 800, 600),
+            Some("file:///only.png")
         );
     }
 

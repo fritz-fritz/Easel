@@ -14,7 +14,7 @@ use crate::{
 };
 
 /// Current serialized arrangement schema.
-pub const ARRANGEMENT_SCHEMA_VERSION: u16 = 2;
+pub const ARRANGEMENT_SCHEMA_VERSION: u16 = 3;
 
 /// Default viewer distance when perspective correction is enabled (millimeters).
 pub const DEFAULT_VIEW_DISTANCE_MM: f64 = 600.0;
@@ -115,6 +115,24 @@ impl DisplayArrangement {
         match self.schema_version {
             1 => {
                 self.viewer = ViewerPose::default();
+                for display in &mut self.displays {
+                    display.tilt_deg = 0.0;
+                    display.yaw_deg = 0.0;
+                }
+                self.schema_version = ARRANGEMENT_SCHEMA_VERSION;
+                self.validate()?;
+                Ok(self)
+            }
+            2 => {
+                // Panel tilt/yaw default via serde; bump schema for ADR 0016.
+                for display in &mut self.displays {
+                    if !display.tilt_deg.is_finite() {
+                        display.tilt_deg = 0.0;
+                    }
+                    if !display.yaw_deg.is_finite() {
+                        display.yaw_deg = 0.0;
+                    }
+                }
                 self.schema_version = ARRANGEMENT_SCHEMA_VERSION;
                 self.validate()?;
                 Ok(self)
@@ -222,6 +240,22 @@ impl DisplayArrangement {
         display.validate()?;
         Ok(())
     }
+
+    /// Sets panel tilt/yaw for perspective correction (ADR 0016).
+    pub fn set_panel_angles(
+        &mut self,
+        id: DisplayId,
+        tilt_deg: f64,
+        yaw_deg: f64,
+    ) -> Result<(), ArrangementError> {
+        let display = self
+            .display_mut(id)
+            .ok_or(ArrangementError::UnknownDisplay(id))?;
+        display.tilt_deg = tilt_deg;
+        display.yaw_deg = yaw_deg;
+        display.validate()?;
+        Ok(())
+    }
 }
 
 /// Probe observation used to rematch a physical output across sessions.
@@ -288,6 +322,8 @@ impl ObservedDisplay {
             physical_origin: self.physical_origin,
             bezel: BezelInsets::default(),
             rotation_degrees: self.rotation_degrees,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
         }
     }
 
@@ -298,6 +334,8 @@ impl ObservedDisplay {
         display.physical_origin = previous.physical_origin;
         display.bezel = previous.bezel;
         display.rotation_degrees = previous.rotation_degrees;
+        display.tilt_deg = previous.tilt_deg;
+        display.yaw_deg = previous.yaw_deg;
         if previous.physical_size_source == PhysicalSizeSource::UserOverride {
             display.physical_size = previous.physical_size;
             display.physical_size_source = PhysicalSizeSource::UserOverride;
@@ -458,6 +496,8 @@ mod tests {
             },
             bezel: BezelInsets::default(),
             rotation_degrees: 0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
         }
     }
 
@@ -615,6 +655,31 @@ mod tests {
         assert!(matched.viewer.enabled);
         assert!((matched.viewer.view_distance_mm - 800.0).abs() < f64::EPSILON);
         assert!((matched.viewer.eye_offset_x_mm - 40.0).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn rematch_preserves_panel_angles() {
+        let mut previous =
+            DisplayArrangement::from_displays(vec![sample_display(1, "DP-1", "SN-1", 1920)])
+                .expect("valid");
+        previous
+            .set_panel_angles(previous.displays[0].id, 8.0, -5.0)
+            .expect("angles");
+        let observed = observation_from(&previous.displays[0]);
+        let matched = match_displays(&previous, vec![observed]);
+        assert!((matched.displays[0].tilt_deg - 8.0).abs() < f64::EPSILON);
+        assert!((matched.displays[0].yaw_deg - (-5.0)).abs() < f64::EPSILON);
+    }
+
+    #[test]
+    fn schema_v2_migrates_to_v3() {
+        let mut arrangement =
+            DisplayArrangement::from_displays(vec![sample_display(1, "DP-1", "SN-1", 1920)])
+                .expect("valid");
+        arrangement.schema_version = 2;
+        let migrated = arrangement.migrate().expect("migrate");
+        assert_eq!(migrated.schema_version, ARRANGEMENT_SCHEMA_VERSION);
+        assert!((migrated.displays[0].tilt_deg).abs() < f64::EPSILON);
     }
 
     #[test]

@@ -182,6 +182,8 @@ mod tests {
                 y: Millimeters(0.0),
             },
             rotation_degrees: 0,
+            tilt_deg: 0.0,
+            yaw_deg: 0.0,
             bezel: BezelInsets::default(),
         }
     }

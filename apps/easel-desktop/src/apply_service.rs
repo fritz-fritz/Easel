@@ -15,9 +15,9 @@ use easel_library::{
     animated_image_extension, poster_path_for_asset, still_image_extension, video_extension,
 };
 use easel_platform::{
-    DisplayWallpaper, LiveDisplaySurface, LiveMediaOutput, LiveWallpaperOutput, SourceUvRect,
-    WallpaperOutput, probe_live_wallpaper_backend, select_live_wallpaper_backend,
-    select_wallpaper_backend,
+    DisplayWallpaper, LiveDisplaySurface, LiveMediaOutput, LiveWallpaperOutput,
+    PerspectiveSampleMap, SourceUvRect, WallpaperOutput, probe_live_wallpaper_backend,
+    select_live_wallpaper_backend, select_wallpaper_backend,
 };
 use easel_render::{
     CompositionSettings, RENDERER_VERSION, RasterJob, RenderPurpose, RenderRequest, plan_live_crops,
@@ -147,6 +147,30 @@ fn start_live_session(
                 width: crop.source_uv.width,
                 height: crop.source_uv.height,
             },
+            perspective: crop.perspective.map(|map| PerspectiveSampleMap {
+                eye_x_mm: map.eye_x_mm,
+                eye_y_mm: map.eye_y_mm,
+                distance_mm: map.distance_mm,
+                content_x_mm: map.content_x_mm,
+                content_y_mm: map.content_y_mm,
+                content_w_mm: map.content_w_mm,
+                content_h_mm: map.content_h_mm,
+                tilt_deg: map.tilt_deg,
+                yaw_deg: map.yaw_deg,
+                map_x_mm: map.map_x_mm,
+                map_y_mm: map.map_y_mm,
+                map_w_mm: map.map_w_mm,
+                map_h_mm: map.map_h_mm,
+                src_x: map.src_x,
+                src_y: map.src_y,
+                src_w: map.src_w,
+                src_h: map.src_h,
+            }),
+            letterbox_rgb: [
+                f64::from(crop.letterbox_color.r) / 255.0,
+                f64::from(crop.letterbox_color.g) / 255.0,
+                f64::from(crop.letterbox_color.b) / 255.0,
+            ],
             source_width: source_size.width,
             source_height: source_size.height,
         });

@@ -312,6 +312,18 @@ pub fn set_display_bezel(id: &str, bezel_mm: f64) -> Result<(), String> {
     Ok(())
 }
 
+/// Sets panel tilt/yaw for a display and persists the arrangement.
+pub fn set_display_panel_angles(id: &str, tilt_deg: f64, yaw_deg: f64) -> Result<(), String> {
+    let display_id = parse_display_id(id)?;
+    let mut guard = session().lock().expect("display session lock");
+    guard
+        .arrangement
+        .set_panel_angles(display_id, tilt_deg, yaw_deg)
+        .map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement)?;
+    Ok(())
+}
+
 fn parse_display_id(id: &str) -> Result<DisplayId, String> {
     DisplayId::parse(id).map_err(|error| error.to_string())
 }

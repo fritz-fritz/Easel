@@ -18,7 +18,9 @@ use std::time::{Duration, Instant};
 use easel_core::{PlaybackClock, PlaybackPolicy};
 
 use crate::live_policy::{LivePolicySensors, pause_reason_for, probe_live_policy_sensors};
-use crate::plasma::{easel_plasma_plugin_id, ensure_easel_plugin_bound};
+use crate::plasma::{
+    easel_plasma_plugin_id, easel_plasma_supports_perspective_live, ensure_easel_plugin_bound,
+};
 use crate::plasma_state::{
     PlasmaLiveClockSnapshot, PlasmaWallpaperState, publish_plasma_live_state,
 };
@@ -64,6 +66,15 @@ impl LiveWallpaperBackend for PlasmaLiveBackend {
         if surfaces.is_empty() {
             return Err(BackendError::Platform(
                 "live wallpaper requires at least one display surface".into(),
+            ));
+        }
+        let needs_perspective = surfaces.iter().any(|surface| surface.perspective.is_some());
+        if needs_perspective && !easel_plasma_supports_perspective_live() {
+            return Err(BackendError::Platform(
+                "installed Easel Plasma wallpaper plugin lacks projective live support \
+                 (need plugin ≥0.3.0 with perspective.frag.qsb); reinstall via \
+                 apps/easel-plasma-wallpaper/install.sh (poster/slideshow fallback)"
+                    .into(),
             ));
         }
         for surface in surfaces {
@@ -392,6 +403,8 @@ mod tests {
                 width: 1.0,
                 height: 1.0,
             },
+            perspective: None,
+            letterbox_rgb: [24.0 / 255.0, 24.0 / 255.0, 28.0 / 255.0],
             source_width: 200,
             source_height: 100,
         }
