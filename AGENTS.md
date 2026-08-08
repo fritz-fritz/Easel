@@ -71,24 +71,30 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
 - The live app enumerates `Qt.application.screens` (XRandR-backed), so the number of
   displays it reports equals the number of RandR monitors on `DISPLAY=:1`. The VNC
   framebuffer is a single output (`VNC-0`), i.e. **one** display by default.
-- To exercise multi-display handling like CI's `DP-1`/`DP-2`/`DP-3` fixture, run
-  `tools/dev/three-displays.sh` — it uses `xrandr --setmonitor` to split the framebuffer
-  into three staggered logical monitors (`DP-1`/`DP-2`/`DP-3`, CI-matching physical mm).
-  `tools/dev/three-displays.sh reset` restores the single monitor. The script is
-  idempotent and defensive, and is wired into `.cursor/environment.json` `start`, so fresh
-  Cloud VMs come up with three monitors already defined. If you launch the app *before*
-  splitting (or change the split while it is open), click **Refresh displays** to re-probe.
-  The split is a live X-server change and is not persisted across VNC restarts; re-run the
-  script (or rely on `start`) after a restart.
-- Actually *setting* the wallpaper on Linux is implemented **only** for KDE Plasma 6
-  (`crates/easel-platform/src/plasma.rs`, via `qdbus`/`org.kde.plasmashell`); there is no
-  XFCE/GNOME/generic-X backend yet. On the XFCE Cloud desktop `select_wallpaper_backend()`
-  returns `NoBackend`, so the Compose **Apply** button cannot push to the compositor here.
-- **Decision: do NOT install KDE Plasma on this Cloud VM.** A generic **X** wallpaper
-  backend is planned and will be the supported path for this environment; until it lands,
-  do not add a KDE/Plasma session just to make live apply work. Validate apply on this VM
-  via the per-display **apply-payload rasters** instead (this is also all CI checks — CI
-  does not set real wallpaper). Reproduce those (three `apply-display-*.png` for the
+- Cloud `start` runs `tools/dev/three-displays.sh reset` so the interactive XFCE/VNC
+  desktop stays a single full 1920×1200 monitor (usable for GUI work and recordings).
+  Do **not** leave the three-monitor split enabled by default.
+- To exercise multi-display handling like CI's `DP-1`/`DP-2`/`DP-3` fixture, **opt in**
+  with `tools/dev/three-displays.sh`. It:
+  1. Switches the VNC-0 mode to **9200×2360** — the bounding box of the three monitors —
+     so the VNC view *is* the virtual desktop containing them (zoom/pan in noVNC as needed).
+  2. Defines three **staggered, full-resolution** logical monitors on that output:
+     `DP-1` left 4K **3840×2160**, `DP-2` center UWQHD **3440×1440**, `DP-3` right 1080p
+     **1920×1080** (with realistic physical mm).
+  3. Binds every monitor to `VNC-0` (never RandR `none`), otherwise XFCE will not paint
+     those wallpaper regions.
+  After enabling (or disabling) the split, click **Refresh displays** in Easel.
+  `tools/dev/three-displays.sh reset` restores 1920×1200. The split is not persisted
+  across VNC restarts.
+- Still wallpaper apply on Linux is capability-probed (ADR 0011): Plasma → XFCE
+  (`xfce-xfconf` / `xfconf-query`) → generic X (`x11-feh`). On the XFCE Cloud desktop
+  `select_wallpaper_backend()` should return `xfce-xfconf`, so Compose **Apply** can push
+  stills without Plasma. Live hosts remain Plasma-only; non-Plasma Apply uses poster
+  frames through the still backend.
+- **Decision: do NOT install KDE Plasma on this Cloud VM.** Prefer the XFCE/generic-X
+  still path already probed here; do not add a KDE/Plasma session just to make live apply
+  work. CI still validates composition via per-display **apply-payload rasters** (CI does
+  not set real wallpaper). Reproduce those (three `apply-display-*.png` for the
   `DP-1/2/3` fixture) with:
 
   ```

@@ -1,6 +1,6 @@
 {
   "install": "cargo fetch",
-  "start": "bash tools/dev/three-displays.sh",
+  "start": "bash tools/dev/three-displays.sh reset",
   "repositoryDependencies": [
     "github.com/fritz-fritz/easel-ci-visual",
     "github.com/fritz-fritz/easel-deps"
