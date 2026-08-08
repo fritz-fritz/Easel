@@ -9,6 +9,8 @@ use std::pin::Pin;
 use cxx_qt::CxxQtType;
 use cxx_qt_lib::{QString, QStringList};
 
+use easel_core::ViewerPose;
+
 use crate::display_session::{self, ScreenProbe};
 
 #[cxx_qt::bridge]
@@ -37,6 +39,10 @@ mod qobject {
         #[qproperty(f64, selected_width_mm)]
         #[qproperty(f64, selected_height_mm)]
         #[qproperty(f64, selected_bezel_mm)]
+        #[qproperty(bool, perspective_enabled)]
+        #[qproperty(f64, view_distance_mm)]
+        #[qproperty(f64, eye_offset_x_mm)]
+        #[qproperty(f64, eye_offset_y_mm)]
         type AppController = super::AppControllerRust;
 
         #[qinvokable]
@@ -96,6 +102,20 @@ mod qobject {
         #[qinvokable]
         #[rust_name = "apply_selected_bezel"]
         fn applySelectedBezel(self: Pin<&mut Self>, bezel_mm: f64);
+
+        #[qinvokable]
+        #[rust_name = "apply_viewer_pose"]
+        fn applyViewerPose(
+            self: Pin<&mut Self>,
+            enabled: bool,
+            view_distance_mm: f64,
+            eye_offset_x_mm: f64,
+            eye_offset_y_mm: f64,
+        );
+
+        #[qinvokable]
+        #[rust_name = "reload_viewer_pose"]
+        fn reloadViewerPose(self: Pin<&mut Self>);
     }
 }
 
@@ -115,6 +135,10 @@ pub struct AppControllerRust {
     selected_width_mm: f64,
     selected_height_mm: f64,
     selected_bezel_mm: f64,
+    perspective_enabled: bool,
+    view_distance_mm: f64,
+    eye_offset_x_mm: f64,
+    eye_offset_y_mm: f64,
     pending_probes: Vec<ScreenProbe>,
 }
 
@@ -130,6 +154,7 @@ impl Default for AppControllerRust {
             .map(|paths| paths.image_path.to_string_lossy().into_owned())
             .unwrap_or_default();
         let smoke_views = smoke.map(|paths| paths.views.join(",")).unwrap_or_default();
+        let pose = display_session::viewer_pose();
         Self {
             status_text: "Ready".into(),
             display_count: count,
@@ -145,6 +170,10 @@ impl Default for AppControllerRust {
             selected_width_mm: 0.0,
             selected_height_mm: 0.0,
             selected_bezel_mm: 0.0,
+            perspective_enabled: pose.enabled,
+            view_distance_mm: pose.view_distance_mm,
+            eye_offset_x_mm: pose.eye_offset_x_mm,
+            eye_offset_y_mm: pose.eye_offset_y_mm,
             pending_probes: Vec::new(),
         }
     }
@@ -317,6 +346,44 @@ impl qobject::AppController {
                     .set_status_text(format!("Bezel update failed: {error}").into());
             }
         }
+    }
+
+    fn apply_viewer_pose(
+        mut self: Pin<&mut Self>,
+        enabled: bool,
+        view_distance_mm: f64,
+        eye_offset_x_mm: f64,
+        eye_offset_y_mm: f64,
+    ) {
+        let viewer = ViewerPose {
+            enabled,
+            view_distance_mm,
+            eye_offset_x_mm,
+            eye_offset_y_mm,
+        };
+        match display_session::set_viewer_pose(viewer) {
+            Ok(()) => {
+                self.as_mut().set_perspective_enabled(enabled);
+                self.as_mut().set_view_distance_mm(view_distance_mm);
+                self.as_mut().set_eye_offset_x_mm(eye_offset_x_mm);
+                self.as_mut().set_eye_offset_y_mm(eye_offset_y_mm);
+                self.as_mut()
+                    .set_status_text("Updated perspective viewer pose".into());
+            }
+            Err(error) => {
+                self.as_mut()
+                    .set_status_text(format!("Perspective update failed: {error}").into());
+                self.reload_viewer_pose();
+            }
+        }
+    }
+
+    fn reload_viewer_pose(mut self: Pin<&mut Self>) {
+        let pose = display_session::viewer_pose();
+        self.as_mut().set_perspective_enabled(pose.enabled);
+        self.as_mut().set_view_distance_mm(pose.view_distance_mm);
+        self.as_mut().set_eye_offset_x_mm(pose.eye_offset_x_mm);
+        self.as_mut().set_eye_offset_y_mm(pose.eye_offset_y_mm);
     }
 
     fn publish_layout(mut self: Pin<&mut Self>) {

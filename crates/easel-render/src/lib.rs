@@ -10,6 +10,7 @@ mod decode;
 mod fit;
 mod frames;
 mod live;
+mod perspective;
 mod plan;
 mod poster;
 mod raster;
@@ -21,6 +22,7 @@ pub use frames::{
     MotionFrame, extract_gif_frames,
 };
 pub use live::{LiveDisplayCrop, NormalizedRect, plan_live_crops};
+pub use perspective::AngularPerspective;
 pub use plan::{
     CompositionSettings, LetterboxColor, OutputOperation, OutputPlan, PixelRect, RENDERER_VERSION,
     RenderPlan, RenderPlanError, RenderPurpose, RenderRequest,

@@ -88,6 +88,10 @@ pub fn render_operation(
     source: &RgbaImage,
     operation: &OutputOperation,
 ) -> Result<RgbaImage, RasterError> {
+    if let Some(map) = operation.perspective {
+        return render_perspective(source, operation, map);
+    }
+
     let mut canvas = RgbaImage::from_pixel(
         operation.canvas_size.width,
         operation.canvas_size.height,
@@ -127,6 +131,68 @@ pub fn render_operation(
 
     image::imageops::overlay(&mut canvas, &resized, i64::from(dest.x), i64::from(dest.y));
     Ok(canvas)
+}
+
+fn render_perspective(
+    source: &RgbaImage,
+    operation: &OutputOperation,
+    map: crate::perspective::AngularPerspective,
+) -> Result<RgbaImage, RasterError> {
+    let width = operation.canvas_size.width;
+    let height = operation.canvas_size.height;
+    let mut canvas = RgbaImage::from_pixel(
+        width,
+        height,
+        Rgba([
+            operation.letterbox_color.r,
+            operation.letterbox_color.g,
+            operation.letterbox_color.b,
+            operation.letterbox_color.a,
+        ]),
+    );
+    let src_w = source.width();
+    let src_h = source.height();
+    if src_w == 0 || src_h == 0 || width == 0 || height == 0 {
+        return Err(RasterError::EmptyCrop);
+    }
+
+    for y in 0..height {
+        for x in 0..width {
+            let (sx, sy) = map.source_xy(x, y, width, height);
+            canvas.put_pixel(x, y, sample_bilinear(source, sx, sy));
+        }
+    }
+    Ok(canvas)
+}
+
+fn sample_bilinear(source: &RgbaImage, x: f64, y: f64) -> Rgba<u8> {
+    let max_x = f64::from(source.width().saturating_sub(1));
+    let max_y = f64::from(source.height().saturating_sub(1));
+    let x = x.clamp(0.0, max_x);
+    let y = y.clamp(0.0, max_y);
+    let x0 = x.floor();
+    let y0 = y.floor();
+    let x1 = (x0 + 1.0).min(max_x);
+    let y1 = (y0 + 1.0).min(max_y);
+    let tx = x - x0;
+    let ty = y - y0;
+    #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+    let (ix0, iy0, ix1, iy1) = (x0 as u32, y0 as u32, x1 as u32, y1 as u32);
+    let p00 = source.get_pixel(ix0, iy0).0.map(f64::from);
+    let p10 = source.get_pixel(ix1, iy0).0.map(f64::from);
+    let p01 = source.get_pixel(ix0, iy1).0.map(f64::from);
+    let p11 = source.get_pixel(ix1, iy1).0.map(f64::from);
+    let mut out = [0u8; 4];
+    for i in 0..4 {
+        let top = p00[i] * (1.0 - tx) + p10[i] * tx;
+        let bottom = p01[i] * (1.0 - tx) + p11[i] * tx;
+        let value = top * (1.0 - ty) + bottom * ty;
+        #[allow(clippy::cast_possible_truncation, clippy::cast_sign_loss)]
+        {
+            out[i] = value.round().clamp(0.0, 255.0) as u8;
+        }
+    }
+    Rgba(out)
 }
 
 /// Writes PNG bytes through a temporary sibling path, then replaces the destination.
@@ -215,6 +281,14 @@ fn arrangement_cache_token(
     use std::fmt::Write as _;
     let mut material = String::new();
     let _ = write!(material, "{:?}", composition.layout_mode);
+    let _ = write!(
+        material,
+        "|viewer:{}:{:.3}:{:.3}:{:.3}",
+        composition.viewer.enabled,
+        composition.viewer.view_distance_mm,
+        composition.viewer.eye_offset_x_mm,
+        composition.viewer.eye_offset_y_mm,
+    );
     match composition.layout_mode {
         LayoutMode::Digital => {
             for display in displays {
@@ -310,7 +384,7 @@ mod tests {
     use crate::plan::{LetterboxColor, PixelRect};
     use easel_core::{
         BezelInsets, Display, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters,
-        NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, ScaleFactor,
+        NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, ScaleFactor, ViewerPose,
     };
     use image::{Rgb, RgbImage};
 
@@ -345,6 +419,7 @@ mod tests {
                 height: 4,
             }),
             letterbox_color: LetterboxColor::default(),
+            perspective: None,
         };
         let canvas = render_operation(&source, &operation).expect("render");
         assert_eq!(*canvas.get_pixel(0, 0), Rgba([0, 0, 0, 255]));
@@ -428,6 +503,7 @@ mod tests {
                     zoom: 1.0,
                     focal_x: 0.5,
                     focal_y: 0.5,
+                    viewer: ViewerPose::default(),
                 },
                 purpose: crate::plan::RenderPurpose::StaticWallpaper,
             },

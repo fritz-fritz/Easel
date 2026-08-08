@@ -13,7 +13,7 @@ use std::sync::{Mutex, OnceLock};
 
 use easel_core::{
     BezelInsets, Display, DisplayArrangement, DisplayEvidence, DisplayId, LogicalRect, Millimeters,
-    NativePixelSize, ObservedDisplay, PhysicalPoint, PhysicalSize, ScaleFactor,
+    NativePixelSize, ObservedDisplay, PhysicalPoint, PhysicalSize, ScaleFactor, ViewerPose,
     approximate_physical_origin, content_bounds, match_displays, panel_rect,
 };
 
@@ -468,8 +468,27 @@ fn load_arrangement(path: &Path) -> Result<DisplayArrangement, String> {
     let text = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let arrangement: DisplayArrangement =
         toml::from_str(&text).map_err(|error| error.to_string())?;
-    arrangement.validate().map_err(|error| error.to_string())?;
-    Ok(arrangement)
+    arrangement.migrate().map_err(|error| error.to_string())
+}
+
+/// Returns the persisted global viewer pose.
+pub fn viewer_pose() -> ViewerPose {
+    session()
+        .lock()
+        .map(|guard| guard.arrangement.viewer)
+        .unwrap_or_default()
+}
+
+/// Updates and persists the global viewer pose (ADR 0015).
+pub fn set_viewer_pose(viewer: ViewerPose) -> Result<(), String> {
+    let mut guard = session()
+        .lock()
+        .map_err(|_| "display session lock poisoned".to_owned())?;
+    guard
+        .arrangement
+        .set_viewer(viewer)
+        .map_err(|error| error.to_string())?;
+    save_arrangement(&guard.arrangement)
 }
 
 fn save_arrangement(arrangement: &DisplayArrangement) -> Result<(), String> {

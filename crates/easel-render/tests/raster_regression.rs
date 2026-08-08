@@ -9,7 +9,7 @@ use std::path::PathBuf;
 
 use easel_core::{
     BezelInsets, Display, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters,
-    NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, ScaleFactor,
+    NativePixelSize, PhysicalPoint, PhysicalSize, PhysicalSizeSource, ScaleFactor, ViewerPose,
     different_physical_same_resolution,
 };
 use easel_render::{
@@ -73,6 +73,7 @@ fn committed_fixture_covers_with_focal_bias() {
                 zoom: 1.0,
                 focal_x: 0.0,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -88,6 +89,7 @@ fn committed_fixture_covers_with_focal_bias() {
                 zoom: 1.0,
                 focal_x: 1.0,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -127,6 +129,7 @@ fn contain_letterboxes_landscape_source() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -180,6 +183,7 @@ fn multi_display_job_writes_atomic_outputs() {
                 zoom: 1.25,
                 focal_x: 0.3,
                 focal_y: 0.7,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -224,6 +228,7 @@ fn physical_span_larger_panel_samples_more_source() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
         )
         .expect("ops");
@@ -251,6 +256,7 @@ fn physical_span_larger_panel_samples_more_source() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -278,6 +284,7 @@ fn arrangement_change_produces_distinct_cache_names() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -297,6 +304,7 @@ fn arrangement_change_produces_distinct_cache_names() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -329,6 +337,7 @@ fn digital_cache_ignores_physical_origin_changes() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },
@@ -349,6 +358,7 @@ fn digital_cache_ignores_physical_origin_changes() {
                 zoom: 1.0,
                 focal_x: 0.5,
                 focal_y: 0.5,
+                viewer: ViewerPose::default(),
             },
             purpose: RenderPurpose::StaticWallpaper,
         },

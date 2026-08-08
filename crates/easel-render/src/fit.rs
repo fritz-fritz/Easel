@@ -150,7 +150,7 @@ fn focal_crop(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use easel_core::FitMode;
+    use easel_core::{FitMode, ViewerPose};
 
     fn size(width: u32, height: u32) -> NativePixelSize {
         NativePixelSize { width, height }
@@ -163,6 +163,7 @@ mod tests {
             zoom,
             focal_x,
             focal_y,
+            viewer: ViewerPose::default(),
         }
     }
 

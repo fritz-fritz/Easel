@@ -693,6 +693,77 @@ ApplicationWindow {
                                     controller.setPhysicalPreviewEnabled(currentIndex === 0)
                                 }
                             }
+
+                            CheckBox {
+                                id: perspectiveCheck
+                                text: qsTr("Perspective correction")
+                                checked: controller.perspective_enabled
+                                Layout.columnSpan: 2
+                                enabled: compose.layout_mode_index === 0
+                                onToggled: {
+                                    controller.applyViewerPose(
+                                                checked,
+                                                viewDistanceSpin.value,
+                                                eyeOffsetXSpin.value,
+                                                eyeOffsetYSpin.value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("View distance mm") }
+                            SpinBox {
+                                id: viewDistanceSpin
+                                from: 200
+                                to: 5000
+                                stepSize: 10
+                                value: Math.round(controller.view_distance_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                enabled: perspectiveCheck.checked && compose.layout_mode_index === 0
+                                onValueModified: {
+                                    controller.applyViewerPose(
+                                                perspectiveCheck.checked,
+                                                value,
+                                                eyeOffsetXSpin.value,
+                                                eyeOffsetYSpin.value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Eye offset X mm") }
+                            SpinBox {
+                                id: eyeOffsetXSpin
+                                from: -2000
+                                to: 2000
+                                value: Math.round(controller.eye_offset_x_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                enabled: perspectiveCheck.checked && compose.layout_mode_index === 0
+                                onValueModified: {
+                                    controller.applyViewerPose(
+                                                perspectiveCheck.checked,
+                                                viewDistanceSpin.value,
+                                                value,
+                                                eyeOffsetYSpin.value)
+                                    compose.refreshPreview()
+                                }
+                            }
+                            Label { text: qsTr("Eye offset Y mm") }
+                            SpinBox {
+                                id: eyeOffsetYSpin
+                                from: -2000
+                                to: 2000
+                                value: Math.round(controller.eye_offset_y_mm)
+                                editable: true
+                                Layout.fillWidth: true
+                                enabled: perspectiveCheck.checked && compose.layout_mode_index === 0
+                                onValueModified: {
+                                    controller.applyViewerPose(
+                                                perspectiveCheck.checked,
+                                                viewDistanceSpin.value,
+                                                eyeOffsetXSpin.value,
+                                                value)
+                                    compose.refreshPreview()
+                                }
+                            }
                         }
                     }
 

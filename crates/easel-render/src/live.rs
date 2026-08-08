@@ -95,7 +95,7 @@ mod tests {
     use super::*;
     use easel_core::{
         BezelInsets, DisplayId, FitMode, LayoutMode, LogicalRect, Millimeters, PhysicalPoint,
-        PhysicalSize, PhysicalSizeSource, ScaleFactor, two_equal_row,
+        PhysicalSize, PhysicalSizeSource, ScaleFactor, ViewerPose, two_equal_row,
     };
 
     fn sample_display(width: u32, height: u32) -> Display {
@@ -140,6 +140,7 @@ mod tests {
             zoom: 1.0,
             focal_x: 0.5,
             focal_y: 0.5,
+            viewer: ViewerPose::default(),
         };
 
         let compositor_ops = RenderPlan::for_purpose(&displays, RenderPurpose::LiveCompositorFrame)
@@ -150,7 +151,7 @@ mod tests {
             .expect("poster plan")
             .operations(source, &composition)
             .expect("poster ops");
-        // Poster fallback and live playback must stay on one crop/placement math.
+        // Without an active viewer pose, poster fallback and live UV stay aligned.
         assert_eq!(compositor_ops, poster_ops);
 
         let crops = plan_live_crops(source, &displays, &composition).expect("crops");
@@ -178,6 +179,7 @@ mod tests {
             zoom: 1.0,
             focal_x: 0.5,
             focal_y: 0.5,
+            viewer: ViewerPose::default(),
         };
         let crops = plan_live_crops(source, &displays, &composition).expect("crops");
         assert_eq!(crops.len(), 2);
