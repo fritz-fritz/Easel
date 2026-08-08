@@ -5,18 +5,22 @@
 #
 # This mirrors CI's three-monitor intent: CI validates multi-display rendering
 # against the `DP-1`/`DP-2`/`DP-3` fixture in `apps/easel-desktop/src/fixtures.rs`
-# (staggered landscape monitors with distinct physical sizes). Here we recreate
-# that layout on the *live* X server so the running GUI reports three displays.
+# (distinct physical sizes). Here we recreate that *identity* on the live X
+# server so the running GUI reports three displays.
 #
-# Pixel resolutions are scaled down to fit the 1920x1200 VNC framebuffer, but the
-# connector names and physical millimeter sizes match the CI fixture so the
-# physical-continuity math exercises the same shape of input.
+# Layout notes (Cloud VNC is one 1920x1200 framebuffer / output `VNC-0`):
+# - All three monitors are bound to the live output (not `none`). Monitors with
+#   an empty output list are invisible to XFCE wallpaper painting, so Apply
+#   appeared to succeed (xfconf wrote) while only one strip ever updated.
+# - Pixel boxes are full-bleed vertical strips filling the framebuffer so every
+#   VNC pixel belongs to a monitor (usable for demos/recordings). Connector
+#   names and physical millimeter sizes still match the CI fixture; pixel
+#   heights are stretched to 1200 so the staggered CI aspect ratios are not
+#   preserved on this surface.
 #
-# WARNING: This is an *opt-in* multi-display test layout. It does not enlarge the
-# VNC framebuffer; it subdivides it. The staggered monitors leave large black
-# regions in the VNC view and shrink the usable XFCE panel/desktop. Cloud `start`
-# therefore runs `reset` so interactive work defaults to one full 1920x1200 monitor.
-# Enable the split only while exercising Easel multi-display behavior, then reset.
+# WARNING: Opt-in only. Cloud `start` runs `reset` so interactive work defaults
+# to one full 1920x1200 monitor. Enable the split while exercising Easel
+# multi-display behavior, then reset.
 #
 # Usage:
 #   tools/dev/three-displays.sh          # define the 3 monitors on $DISPLAY (default :1)
@@ -90,14 +94,22 @@ if [ "${1:-}" = "reset" ]; then
   exit 0
 fi
 
-# Three staggered landscape monitors. Geometry is "Wpx/Wmm x Hpx/Hmm + Xpx + Ypx".
-# Names + millimeter sizes match the CI fixture (fixtures.rs). Total width 1920px.
-#   DP-1: medium, left,   raised baseline
-#   DP-2: largest, center, top
-#   DP-3: smallest, right, raised baseline
-xrandr --setmonitor DP-1 640/600x360/340+0+180    "$OUTPUT" >/dev/null 2>&1 || true
-xrandr --setmonitor DP-2 768/700x432/400+640+0    none      >/dev/null 2>&1 || true
-xrandr --setmonitor DP-3 512/530x288/300+1408+180 none      >/dev/null 2>&1 || true
+# Three full-bleed vertical strips on the live output.
+# Geometry is "Wpx/Wmm x Hpx/Hmm + Xpx + Ypx".
+# Names + millimeter sizes match the CI fixture (fixtures.rs). Total 1920x1200.
+#   DP-1: medium width, left
+#   DP-2: largest width, center
+#   DP-3: smallest width, right
+xrandr --setmonitor DP-1 640/600x1200/340+0+0     "$OUTPUT" >/dev/null 2>&1 || true
+xrandr --setmonitor DP-2 768/700x1200/400+640+0   "$OUTPUT" >/dev/null 2>&1 || true
+xrandr --setmonitor DP-3 512/530x1200/300+1408+0  "$OUTPUT" >/dev/null 2>&1 || true
+
+# xfdesktop caches monitor lists; nudge so per-monitor backdrops refresh.
+if pgrep -x xfdesktop >/dev/null 2>&1; then
+  pkill -x xfdesktop >/dev/null 2>&1 || true
+  sleep 1
+  nohup xfdesktop >/dev/null 2>&1 &
+fi
 
 log "configured 3 monitors on DISPLAY=$DISPLAY (output '$OUTPUT'):"
 xrandr --listmonitors 2>/dev/null || true

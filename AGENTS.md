@@ -73,15 +73,16 @@ repos are not auto-cloned into `/workspace`; clone on demand (e.g.
   framebuffer is a single output (`VNC-0`), i.e. **one** display by default.
 - Cloud `start` runs `tools/dev/three-displays.sh reset` so the interactive XFCE/VNC
   desktop stays a single full-framebuffer monitor (usable for GUI work and recordings).
-  Do **not** leave the three-monitor split enabled by default: it carves the 1920×1200
-  VNC surface into small staggered regions and leaves most of the viewport black.
+  Do **not** leave the three-monitor split enabled by default.
 - To exercise multi-display handling like CI's `DP-1`/`DP-2`/`DP-3` fixture, **opt in**
-  with `tools/dev/three-displays.sh` — it uses `xrandr --setmonitor` to split the
-  framebuffer into three staggered logical monitors (`DP-1`/`DP-2`/`DP-3`, CI-matching
-  physical mm). `tools/dev/three-displays.sh reset` restores the single monitor. The
-  script is idempotent and defensive. If you launch the app *before* splitting (or
-  change the split while it is open), click **Refresh displays** to re-probe. The split
-  is a live X-server change and is not persisted across VNC restarts.
+  with `tools/dev/three-displays.sh`. It defines three full-bleed vertical strips on the
+  live VNC output (`VNC-0`) — connector names and physical mm match the CI fixture;
+  pixel heights fill 1920×1200 so every VNC pixel belongs to a monitor (needed for XFCE
+  wallpaper painting and demos). Monitors must not use RandR output `none` or XFCE will
+  not paint those regions. `tools/dev/three-displays.sh reset` restores the single
+  monitor. If you launch the app *before* splitting (or change the split while it is
+  open), click **Refresh displays** to re-probe. The split is a live X-server change and
+  is not persisted across VNC restarts.
 - Still wallpaper apply on Linux is capability-probed (ADR 0011): Plasma → XFCE
   (`xfce-xfconf` / `xfconf-query`) → generic X (`x11-feh`). On the XFCE Cloud desktop
   `select_wallpaper_backend()` should return `xfce-xfconf`, so Compose **Apply** can push

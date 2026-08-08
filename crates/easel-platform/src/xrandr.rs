@@ -84,14 +84,23 @@ pub fn list_monitors() -> Result<Vec<XrandrMonitor>, BackendError> {
     Ok(monitors)
 }
 
-/// Exact logical-rect equality used to match Easel crops to platform outputs.
+/// Near-exact logical-rect equality used to match Easel crops to platform outputs.
+///
+/// Allows a 1px slop on each edge: Qt screen probes occasionally disagree with
+/// `xrandr --listmonitors` by a single pixel on this VNC host (for example
+/// `640x1201` vs `640x1200`), which would otherwise fail the whole Apply.
 #[must_use]
 pub fn rects_match(left: LogicalRect, right: LogicalRect) -> bool {
-    left.x == right.x
-        && left.y == right.y
-        && left.width == right.width
-        && left.height == right.height
+    const TOLERANCE: i32 = 1;
+    i32::abs(left.x - right.x) <= TOLERANCE
+        && i32::abs(left.y - right.y) <= TOLERANCE
+        && i32::abs(i32::try_from(left.width).unwrap_or(i32::MAX) - i32::try_from(right.width).unwrap_or(i32::MAX))
+            <= TOLERANCE
+        && i32::abs(
+            i32::try_from(left.height).unwrap_or(i32::MAX) - i32::try_from(right.height).unwrap_or(i32::MAX),
+        ) <= TOLERANCE
 }
+
 
 /// Plans `(monitor_name, path)` assignments by matching wallpaper geometry to XRandR.
 pub fn plan_monitor_assignments(
@@ -241,6 +250,30 @@ Monitors: 3
                 height: 1200
             }
         );
+    }
+
+    #[test]
+    fn rects_match_allows_one_pixel_slop() {
+        let monitor = LogicalRect {
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 1200,
+        };
+        let qt_probe = LogicalRect {
+            x: 0,
+            y: 0,
+            width: 640,
+            height: 1201,
+        };
+        assert!(rects_match(monitor, qt_probe));
+        let elsewhere = LogicalRect {
+            x: 640,
+            y: 0,
+            width: 640,
+            height: 1200,
+        };
+        assert!(!rects_match(monitor, elsewhere));
     }
 
     #[test]
