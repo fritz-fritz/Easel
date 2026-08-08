@@ -8,11 +8,12 @@
 //! controls; hosts map sensor snapshots through [`pause_reason_for`] before
 //! mutating the shared clock.
 
+#[cfg(any(target_os = "linux", test))]
 use std::fs;
-use std::process::Command;
-
 #[cfg(test)]
 use std::path::Path;
+#[cfg(any(target_os = "linux", target_os = "macos"))]
+use std::process::Command;
 
 use easel_core::PlaybackPolicy;
 
@@ -183,7 +184,7 @@ fn windows_on_battery() -> bool {
 
     let mut status = SYSTEM_POWER_STATUS::default();
     // SAFETY: SYSTEM_POWER_STATUS is a plain POD out-parameter for GetSystemPowerStatus.
-    let ok = unsafe { GetSystemPowerStatus(&mut status) };
+    let ok = unsafe { GetSystemPowerStatus(&raw mut status) };
     if ok.is_err() {
         return false;
     }
