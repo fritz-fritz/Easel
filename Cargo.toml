@@ -34,7 +34,7 @@ async-trait = "0.1"
 clap = { version = "4.5", features = ["derive"] }
 cxx = "1.0.176"
 cxx-qt = "0.9.1"
-cxx-qt-build = "0.9.1"
+cxx-qt-build = "0.10.0"
 cxx-qt-lib = "0.9.1"
 image = { version = "=0.25.10", default-features = false, features = [
     "bmp",
